@@ -27,12 +27,15 @@ import {
   audienceHumanLabel,
   buildJourneySteps,
   calculateProfileRichness,
+  clearGroupParticularity,
   createEmptyQuestionnaire,
   difficultyLabel,
   getStepCopy,
+  listGroupParticularities,
   memorySuggestions,
   newId,
   richnessClientMessage,
+  truncateTagList,
   validateStep,
   type AudienceType,
   type QuestionnaireParticipant,
@@ -566,9 +569,10 @@ function PersonalityStep({
       {q.audience === "DUO" && (
         <>
           <label className="flex flex-col gap-1 text-sm">
-            Comment décririez-vous leur duo ? *
+            <span className="sr-only">{copy.title}</span>
             <textarea
               className="min-h-20 rounded-lg border border-input bg-background p-3"
+              placeholder="Quelques mots sur votre relation, votre complicité…"
               value={q.personality.duoDescription ?? ""}
               onChange={(e) =>
                 setQ((prev) => ({
@@ -654,26 +658,177 @@ function PersonalityStep({
               })}
             </div>
           </div>
-          {q.participants.map((p, i) => (
-            <label key={p.id} className="flex flex-col gap-1 text-sm">
-              Petite caractéristique pour {p.firstName || `personne ${i + 1}`} (facultatif)
-              <input
-                className="h-10 rounded-lg border border-input bg-background px-3"
-                placeholder="ex. toujours en retard"
-                value={p.personalTrait ?? ""}
-                onChange={(e) =>
-                  setQ((prev) => ({
-                    ...prev,
-                    participants: prev.participants.map((x, idx) =>
-                      idx === i ? { ...x, personalTrait: e.target.value } : x,
-                    ),
-                  }))
-                }
-              />
-            </label>
-          ))}
+          <GroupParticularitiesStep q={q} setQ={setQ} />
         </>
       )}
+    </div>
+  )
+}
+
+function GroupParticularitiesStep({
+  q,
+  setQ,
+}: {
+  q: QuestionnaireV1
+  setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
+}) {
+  const [drafts, setDrafts] = useState<{ id: string; participantId: string; text: string }[]>([])
+  const filled = listGroupParticularities(q.participants)
+  const takenIds = new Set(filled.map((f) => f.participantId))
+
+  function patchParticipantTrait(participantId: string, text: string, clearFrom?: string) {
+    setQ((prev) => ({
+      ...prev,
+      participants: prev.participants.map((p) => {
+        if (clearFrom && p.id === clearFrom && clearFrom !== participantId) {
+          return { ...p, personalTrait: undefined }
+        }
+        if (p.id === participantId) {
+          const trimmed = text.trim()
+          return { ...p, personalTrait: trimmed ? trimmed : undefined }
+        }
+        return p
+      }),
+    }))
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-3">
+      <div>
+        <h3 className="font-medium">Quelques particularités sur les membres du groupe</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Facultatif — ajoutez seulement les petites choses qui peuvent rendre le cahier plus
+          personnel.
+        </p>
+      </div>
+
+      {filled.map((row) => (
+        <div
+          key={row.participantId}
+          className="flex flex-col gap-2 rounded-xl border border-border p-3 sm:flex-row sm:items-end"
+        >
+          <label className="flex flex-1 flex-col gap-1 text-sm">
+            Personne
+            <select
+              className="h-10 rounded-lg border border-input bg-background px-2"
+              value={row.participantId}
+              onChange={(e) => {
+                const nextId = e.target.value
+                patchParticipantTrait(nextId, row.text, row.participantId)
+              }}
+            >
+              {q.participants.map((p) => (
+                <option
+                  key={p.id}
+                  value={p.id}
+                  disabled={takenIds.has(p.id) && p.id !== row.participantId}
+                >
+                  {p.firstName || "Sans prénom"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-[2] flex-col gap-1 text-sm">
+            Particularité
+            <input
+              className="h-10 rounded-lg border border-input bg-background px-3"
+              placeholder='Ex. Il est toujours en retard'
+              value={row.text}
+              onChange={(e) => patchParticipantTrait(row.participantId, e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="self-start text-sm text-destructive sm:self-end sm:pb-2"
+            onClick={() =>
+              setQ((prev) => ({
+                ...prev,
+                participants: clearGroupParticularity(prev.participants, row.participantId),
+              }))
+            }
+          >
+            Supprimer
+          </button>
+        </div>
+      ))}
+
+      {drafts.map((draft) => {
+        const available = q.participants.filter(
+          (p) => !takenIds.has(p.id) || p.id === draft.participantId,
+        )
+        return (
+          <div
+            key={draft.id}
+            className="flex flex-col gap-2 rounded-xl border border-dashed border-border p-3 sm:flex-row sm:items-end"
+          >
+            <label className="flex flex-1 flex-col gap-1 text-sm">
+              Personne
+              <select
+                className="h-10 rounded-lg border border-input bg-background px-2"
+                value={draft.participantId}
+                onChange={(e) => {
+                  const participantId = e.target.value
+                  setDrafts((prev) =>
+                    prev.map((d) => (d.id === draft.id ? { ...d, participantId } : d)),
+                  )
+                  if (participantId && draft.text.trim()) {
+                    patchParticipantTrait(participantId, draft.text)
+                    setDrafts((prev) => prev.filter((d) => d.id !== draft.id))
+                  }
+                }}
+              >
+                <option value="">Choisir…</option>
+                {available.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.firstName || "Sans prénom"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-[2] flex-col gap-1 text-sm">
+              Particularité
+              <input
+                className="h-10 rounded-lg border border-input bg-background px-3"
+                placeholder='Ex. Il est toujours en retard'
+                value={draft.text}
+                onChange={(e) => {
+                  const text = e.target.value
+                  setDrafts((prev) =>
+                    prev.map((d) => (d.id === draft.id ? { ...d, text } : d)),
+                  )
+                  if (draft.participantId) {
+                    if (text.trim()) {
+                      patchParticipantTrait(draft.participantId, text)
+                      setDrafts((prev) => prev.filter((d) => d.id !== draft.id))
+                    }
+                  }
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="self-start text-sm text-destructive sm:self-end sm:pb-2"
+              onClick={() => setDrafts((prev) => prev.filter((d) => d.id !== draft.id))}
+            >
+              Supprimer
+            </button>
+          </div>
+        )
+      })}
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={
+          filled.length + drafts.length >= q.participants.length || q.participants.length === 0
+        }
+        onClick={() =>
+          setDrafts((prev) => [...prev, { id: newId("gp"), participantId: "", text: "" }])
+        }
+      >
+        <Plus className="size-4" /> Ajouter une particularité
+      </Button>
     </div>
   )
 }
@@ -913,33 +1068,39 @@ function MemoriesStep({
             <summary className="cursor-pointer text-muted-foreground">
               Titre ou lieu (facultatif)
             </summary>
-            <div className="mt-2 flex flex-col gap-2">
-              <input
-                className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-                placeholder="Petit titre"
-                value={m.title ?? ""}
-                onChange={(e) =>
-                  setQ((prev) => ({
-                    ...prev,
-                    memories: prev.memories.map((x, idx) =>
-                      idx === i ? { ...x, title: e.target.value } : x,
-                    ),
-                  }))
-                }
-              />
-              <input
-                className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-                placeholder="Lieu"
-                value={m.place ?? ""}
-                onChange={(e) =>
-                  setQ((prev) => ({
-                    ...prev,
-                    memories: prev.memories.map((x, idx) =>
-                      idx === i ? { ...x, place: e.target.value } : x,
-                    ),
-                  }))
-                }
-              />
+            <div className="mt-3 flex flex-col gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-foreground">Titre (facultatif)</span>
+                <input
+                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                  placeholder="Ex. Notre premier voyage"
+                  value={m.title ?? ""}
+                  onChange={(e) =>
+                    setQ((prev) => ({
+                      ...prev,
+                      memories: prev.memories.map((x, idx) =>
+                        idx === i ? { ...x, title: e.target.value } : x,
+                      ),
+                    }))
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-foreground">Lieu (facultatif)</span>
+                <input
+                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                  placeholder="Ex. Lisbonne, Portugal"
+                  value={m.place ?? ""}
+                  onChange={(e) =>
+                    setQ((prev) => ({
+                      ...prev,
+                      memories: prev.memories.map((x, idx) =>
+                        idx === i ? { ...x, place: e.target.value } : x,
+                      ),
+                    }))
+                  }
+                />
+              </label>
             </div>
           </details>
           <button
@@ -1123,32 +1284,73 @@ function PhotosStep({
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+  const [uploadErrors, setUploadErrors] = useState<string[]>([])
+  const [brokenPreviewIds, setBrokenPreviewIds] = useState<string[]>([])
   const showWho = q.audience === "DUO" || q.audience === "GROUP"
 
+  function pushUploadError(message: string) {
+    setUploadErrors((prev) => [...prev, message])
+  }
+
+  function addPhotoWithPreview(file: File, previewDataUrl: string) {
+    setQ((prev) => {
+      if (prev.photos.length >= MAX_PHOTOS) return prev
+      return {
+        ...prev,
+        photos: [
+          ...prev.photos,
+          {
+            id: newId("ph"),
+            previewDataUrl,
+            fileName: file.name,
+            useAuthorized: false,
+          },
+        ],
+      }
+    })
+  }
+
   function readFiles(fileList: FileList | File[]) {
-    const files = Array.from(fileList).filter((f) => f.type.startsWith("image/"))
+    setUploadErrors([])
+    const all = Array.from(fileList)
+    const images = all.filter((f) => f.type.startsWith("image/"))
+    const rejected = all.length - images.length
+    if (rejected > 0) {
+      pushUploadError(
+        rejected === 1
+          ? "Un fichier n'est pas une image et a été ignoré."
+          : `${rejected} fichiers ne sont pas des images et ont été ignorés.`,
+      )
+    }
+
     const remaining = MAX_PHOTOS - q.photos.length
-    if (remaining <= 0 || files.length === 0) return
-    const toAdd = files.slice(0, remaining)
+    if (remaining <= 0 || images.length === 0) return
+    if (images.length > remaining) {
+      pushUploadError(`Maximum ${MAX_PHOTOS} photos : seules les ${remaining} premières ont été prises en compte.`)
+    }
+    const toAdd = images.slice(0, remaining)
 
     toAdd.forEach((file) => {
       const reader = new FileReader()
       reader.onload = () => {
-        setQ((prev) => {
-          if (prev.photos.length >= MAX_PHOTOS) return prev
-          return {
-            ...prev,
-            photos: [
-              ...prev.photos,
-              {
-                id: newId("ph"),
-                previewDataUrl: String(reader.result),
-                fileName: file.name,
-                useAuthorized: false,
-              },
-            ],
-          }
-        })
+        const result = reader.result
+        if (typeof result !== "string" || !result.startsWith("data:image/")) {
+          pushUploadError(
+            `Impossible de créer l'aperçu de « ${file.name} ». Essayez un JPG ou PNG.`,
+          )
+          return
+        }
+        const probe = new window.Image()
+        probe.onload = () => addPhotoWithPreview(file, result)
+        probe.onerror = () => {
+          pushUploadError(
+            `Impossible d'afficher « ${file.name} ». Le fichier semble corrompu ou dans un format non supporté.`,
+          )
+        }
+        probe.src = result
+      }
+      reader.onerror = () => {
+        pushUploadError(`Impossible de lire « ${file.name} ».`)
       }
       reader.readAsDataURL(file)
     })
@@ -1160,6 +1362,14 @@ function PhotosStep({
       <p className="text-sm text-muted-foreground">
         {q.photos.length} / {MAX_PHOTOS} photos
       </p>
+
+      {uploadErrors.length > 0 && (
+        <ul className="list-disc space-y-1 rounded-lg border border-destructive/40 bg-destructive/10 p-3 pl-6 text-sm text-destructive">
+          {uploadErrors.map((e, i) => (
+            <li key={`${e}-${i}`}>{e}</li>
+          ))}
+        </ul>
+      )}
 
       {q.photos.length < MAX_PHOTOS && (
         <div
@@ -1200,110 +1410,132 @@ function PhotosStep({
         </div>
       )}
 
-      {q.photos.map((photo, i) => (
-        <div key={photo.id} className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row">
-          {photo.previewDataUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={photo.previewDataUrl}
-              alt=""
-              className="h-28 w-28 shrink-0 rounded-lg object-cover"
-            />
-          ) : null}
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            {showWho && (
-              <div>
-                <FieldLabel>Qui apparaît sur cette photo ?</FieldLabel>
-                <div className="flex flex-wrap gap-2">
-                  {q.participants.map((p) => {
-                    const active = photo.participantIds?.includes(p.id) ?? false
-                    return (
-                      <Chip
-                        key={p.id}
-                        active={active}
-                        onClick={() =>
-                          setQ((prev) => ({
-                            ...prev,
-                            photos: prev.photos.map((x, idx) => {
-                              if (idx !== i) return x
-                              const ids = x.participantIds ?? []
-                              return {
-                                ...x,
-                                participantIds: active
-                                  ? ids.filter((id) => id !== p.id)
-                                  : [...ids, p.id],
-                              }
-                            }),
-                          }))
-                        }
-                      >
-                        {p.firstName || "?"}
-                      </Chip>
-                    )
-                  })}
-                </div>
+      {q.photos.map((photo, i) => {
+        const previewBroken = brokenPreviewIds.includes(photo.id) || !photo.previewDataUrl
+        const hasPreview = Boolean(photo.previewDataUrl) && !brokenPreviewIds.includes(photo.id)
+        return (
+          <div
+            key={photo.id}
+            className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row"
+          >
+            {hasPreview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={photo.previewDataUrl}
+                alt={photo.fileName ? `Aperçu de ${photo.fileName}` : "Aperçu photo"}
+                className="h-28 w-28 shrink-0 rounded-lg object-cover"
+                onError={() =>
+                  setBrokenPreviewIds((prev) =>
+                    prev.includes(photo.id) ? prev : [...prev, photo.id],
+                  )
+                }
+              />
+            ) : (
+              <div className="flex h-28 w-28 shrink-0 flex-col items-center justify-center rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-center text-xs text-destructive">
+                Aperçu indisponible
               </div>
             )}
-            <input
-              className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-              placeholder="Une petite légende ?"
-              value={photo.caption ?? ""}
-              onChange={(e) =>
-                setQ((prev) => ({
-                  ...prev,
-                  photos: prev.photos.map((x, idx) =>
-                    idx === i ? { ...x, caption: e.target.value } : x,
-                  ),
-                }))
-              }
-            />
-            <input
-              className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-              placeholder="Une anecdote liée à cette photo ?"
-              value={photo.anecdote ?? ""}
-              onChange={(e) =>
-                setQ((prev) => ({
-                  ...prev,
-                  photos: prev.photos.map((x, idx) =>
-                    idx === i ? { ...x, anecdote: e.target.value } : x,
-                  ),
-                }))
-              }
-            />
-            <label className="flex items-start gap-2 text-sm">
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              {previewBroken && (
+                <p className="text-sm text-destructive">
+                  Impossible d&apos;afficher cette photo. Supprimez-la et réessayez avec un autre
+                  fichier (JPG ou PNG).
+                </p>
+              )}
+              {showWho && (
+                <div>
+                  <FieldLabel>Qui apparaît sur cette photo ?</FieldLabel>
+                  <div className="flex flex-wrap gap-2">
+                    {q.participants.map((p) => {
+                      const active = photo.participantIds?.includes(p.id) ?? false
+                      return (
+                        <Chip
+                          key={p.id}
+                          active={active}
+                          onClick={() =>
+                            setQ((prev) => ({
+                              ...prev,
+                              photos: prev.photos.map((x, idx) => {
+                                if (idx !== i) return x
+                                const ids = x.participantIds ?? []
+                                return {
+                                  ...x,
+                                  participantIds: active
+                                    ? ids.filter((id) => id !== p.id)
+                                    : [...ids, p.id],
+                                }
+                              }),
+                            }))
+                          }
+                        >
+                          {p.firstName || "?"}
+                        </Chip>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               <input
-                type="checkbox"
-                className="mt-1"
-                checked={photo.useAuthorized}
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                placeholder="Une petite légende ?"
+                value={photo.caption ?? ""}
                 onChange={(e) =>
                   setQ((prev) => ({
                     ...prev,
                     photos: prev.photos.map((x, idx) =>
-                      idx === i ? { ...x, useAuthorized: e.target.checked } : x,
+                      idx === i ? { ...x, caption: e.target.value } : x,
                     ),
                   }))
                 }
               />
-              <span>
-                J&apos;autorise l&apos;utilisation de cette photo dans le cahier. Elle restera privée et
-                ne sera utilisée que pour ce projet. *
-              </span>
-            </label>
-            <button
-              type="button"
-              className="self-start text-sm text-destructive"
-              onClick={() =>
-                setQ((prev) => ({
-                  ...prev,
-                  photos: prev.photos.filter((_, idx) => idx !== i),
-                }))
-              }
-            >
-              Supprimer
-            </button>
+              <input
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                placeholder="Une anecdote liée à cette photo ?"
+                value={photo.anecdote ?? ""}
+                onChange={(e) =>
+                  setQ((prev) => ({
+                    ...prev,
+                    photos: prev.photos.map((x, idx) =>
+                      idx === i ? { ...x, anecdote: e.target.value } : x,
+                    ),
+                  }))
+                }
+              />
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={photo.useAuthorized}
+                  onChange={(e) =>
+                    setQ((prev) => ({
+                      ...prev,
+                      photos: prev.photos.map((x, idx) =>
+                        idx === i ? { ...x, useAuthorized: e.target.checked } : x,
+                      ),
+                    }))
+                  }
+                />
+                <span>
+                  J&apos;autorise l&apos;utilisation de cette photo dans le cahier. Elle restera privée
+                  et ne sera utilisée que pour ce projet. *
+                </span>
+              </label>
+              <button
+                type="button"
+                className="self-start text-sm text-destructive"
+                onClick={() =>
+                  setQ((prev) => ({
+                    ...prev,
+                    photos: prev.photos.filter((_, idx) => idx !== i),
+                  }))
+                }
+              >
+                Supprimer
+              </button>
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -1590,6 +1822,28 @@ function RecapBlock({
   )
 }
 
+function RecapTagList({ items }: { items: string[] }) {
+  if (!items.length) return <span>—</span>
+  const { visible, overflow } = truncateTagList(items, 6)
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {visible.map((label) => (
+        <span
+          key={label}
+          className="rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium text-foreground"
+        >
+          {label}
+        </span>
+      ))}
+      {overflow > 0 ? (
+        <span className="rounded-full border border-dashed border-border bg-muted/50 px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+          + {overflow} autres
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 function RecapStep({
   q,
   copy,
@@ -1655,12 +1909,12 @@ function RecapStep({
       </RecapBlock>
 
       <RecapBlock title={q.audience === "ME" ? "Vos univers" : "Univers"} onEdit={() => onEdit("interests")}>
-        {universeNames.length ? universeNames.join(" · ") : "—"}
+        <RecapTagList items={universeNames} />
       </RecapBlock>
 
       <RecapBlock title={q.audience === "ME" ? "Vos jeux" : "Jeux"} onEdit={() => onEdit("games")}>
-        <p>{gameLabels.length ? gameLabels.join(" · ") : "—"}</p>
-        <p className="mt-1">Niveau : {difficultyLabel(q.gamePreferences.difficulty)}</p>
+        <RecapTagList items={gameLabels} />
+        <p className="mt-2">Niveau : {difficultyLabel(q.gamePreferences.difficulty)}</p>
       </RecapBlock>
 
       <RecapBlock

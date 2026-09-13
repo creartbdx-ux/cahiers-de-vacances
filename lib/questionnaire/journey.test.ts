@@ -5,14 +5,19 @@ import {
   DUO_DYNAMICS_OPTIONS,
   GROUP_TRAIT_OPTIONS,
   createEmptyQuestionnaire,
+  newId,
 } from "./types"
 import {
   AUDIENCE_OPTIONS,
   FORBIDDEN_SOLO_TRAITS,
   buildJourneySteps,
+  clearGroupParticularity,
   getStepCopy,
+  listGroupParticularities,
   memorySuggestions,
   richnessClientMessage,
+  setGroupParticularity,
+  truncateTagList,
 } from "./journey"
 
 test("parcours ME sans étape private jokes, avec color+style séparés", () => {
@@ -61,34 +66,98 @@ test("OTHER_PERSON copy : formulations à la 3e personne", () => {
   assert.match(getStepCopy("finale", q).subtitle ?? "", /mot personnel|précision/i)
 })
 
-test("DUO affiche dynamique et wording participant vs non", () => {
-  const qIn = createEmptyQuestionnaire()
-  qIn.audience = "DUO"
-  qIn.creatorIsParticipant = true
-  assert.match(getStepCopy("interests", qIn).title, /vous aimez ensemble/i)
-  assert.match(getStepCopy("memories", qIn).title, /vos souvenirs à deux/i)
-  assert.ok(!/cadeau/i.test(getStepCopy("finale", qIn).title))
+test("DUO participant : wording vous / vos", () => {
+  const q = createEmptyQuestionnaire()
+  q.audience = "DUO"
+  q.creatorIsParticipant = true
 
-  const qOut = { ...qIn, creatorIsParticipant: false }
-  assert.match(getStepCopy("interests", qOut).title, /ils aiment ensemble/i)
-  assert.match(getStepCopy("memories", qOut).title, /leurs souvenirs à deux/i)
-  assert.match(getStepCopy("finale", qOut).title, /cadeau/i)
-
+  assert.match(getStepCopy("participants", q).title, /vous deux/i)
+  assert.match(getStepCopy("participants", q).subtitle ?? "", /votre duo/i)
+  assert.match(getStepCopy("personality", q).title, /votre duo/i)
+  assert.match(getStepCopy("interests", q).title, /vous aimez ensemble/i)
+  assert.match(getStepCopy("memories", q).title, /vos souvenirs à deux/i)
+  assert.ok(!/cadeau/i.test(getStepCopy("finale", q).title))
   assert.ok(DUO_DYNAMICS_OPTIONS.includes("opposés mais complémentaires"))
+})
+
+test("DUO non participant : wording elles / leurs", () => {
+  const q = createEmptyQuestionnaire()
+  q.audience = "DUO"
+  q.creatorIsParticipant = false
+
+  assert.match(getStepCopy("participants", q).title, /ces deux personnes/i)
+  assert.match(getStepCopy("participants", q).subtitle ?? "", /leur duo/i)
+  assert.match(getStepCopy("personality", q).title, /leur duo/i)
+  assert.match(getStepCopy("interests", q).title, /elles aiment ensemble/i)
+  assert.match(getStepCopy("memories", q).title, /leurs souvenirs à deux/i)
+  assert.match(getStepCopy("finale", q).title, /cadeau/i)
   assert.ok(memorySuggestions("DUO").some((s) => /rencontre/i.test(s)))
 })
 
-test("GROUP copy dédiée + private jokes", () => {
+test("GROUP participant : wording votre / vos", () => {
   const q = createEmptyQuestionnaire()
   q.audience = "GROUP"
   q.creatorIsParticipant = true
-  assert.match(getStepCopy("participants", q).title, /votre groupe/i)
-  assert.match(getStepCopy("personality", q).title, /bande/i)
-  assert.match(getStepCopy("insideJokes", q).title, /private jokes/i)
 
+  assert.match(getStepCopy("participants", q).title, /votre groupe/i)
+  assert.match(getStepCopy("personality", q).title, /votre bande/i)
+  assert.match(getStepCopy("interests", q).title, /vous aimez faire ensemble/i)
+  assert.match(getStepCopy("memories", q).title, /souvenirs de votre bande/i)
+  assert.match(getStepCopy("insideJokes", q).title, /^Vos private jokes$/)
+})
+
+test("GROUP non participant : wording ils / leurs", () => {
+  const q = createEmptyQuestionnaire()
+  q.audience = "GROUP"
   q.creatorIsParticipant = false
-  assert.match(getStepCopy("participants", q).title, /^Présentez le groupe$/)
+
+  assert.match(getStepCopy("participants", q).title, /Présentez-nous ce groupe/)
+  assert.match(getStepCopy("personality", q).title, /cette bande/i)
+  assert.match(getStepCopy("interests", q).title, /ils aiment faire ensemble/i)
   assert.match(getStepCopy("memories", q).title, /souvenirs du groupe/i)
+  assert.match(getStepCopy("insideJokes", q).title, /^Leurs private jokes$/)
+
+  const blob = buildJourneySteps("GROUP", false)
+    .map((s) => {
+      const c = getStepCopy(s, q)
+      return `${c.title} ${c.subtitle ?? ""}`
+    })
+    .join(" | ")
+    .toLowerCase()
+  assert.ok(!/\bvotre bande\b|\bvos private jokes\b|\bvous aimez faire ensemble\b/.test(blob))
+})
+
+test("GROUP particularités : aucune auto, ajout et suppression", () => {
+  const a = newId("p")
+  const b = newId("p")
+  const participants = [
+    { id: a, firstName: "Thomas", ageBracket: "26-35" as const, personalTrait: undefined as string | undefined },
+    { id: b, firstName: "Léa", ageBracket: "26-35" as const, personalTrait: undefined as string | undefined },
+  ]
+
+  assert.deepEqual(listGroupParticularities(participants), [])
+
+  const withOne = setGroupParticularity(participants, a, "Il est toujours en retard")
+  assert.equal(listGroupParticularities(withOne).length, 1)
+  assert.equal(listGroupParticularities(withOne)[0].text, "Il est toujours en retard")
+  assert.equal(listGroupParticularities(withOne)[0].participantId, a)
+
+  const cleared = clearGroupParticularity(withOne, a)
+  assert.deepEqual(listGroupParticularities(cleared), [])
+  assert.equal(cleared.find((p) => p.id === a)?.personalTrait, undefined)
+
+  const emptyOk = setGroupParticularity(participants, a, "   ")
+  assert.deepEqual(listGroupParticularities(emptyOk), [])
+})
+
+test("récap truncateTagList : listes courtes et longues", () => {
+  const short = truncateTagList(["A", "B", "C"], 6)
+  assert.deepEqual(short.visible, ["A", "B", "C"])
+  assert.equal(short.overflow, 0)
+
+  const long = truncateTagList(["1", "2", "3", "4", "5", "6", "7", "8"], 6)
+  assert.deepEqual(long.visible, ["1", "2", "3", "4", "5", "6"])
+  assert.equal(long.overflow, 2)
 })
 
 test("traits individuels ME/OTHER excluent traits relationnels", () => {

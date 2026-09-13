@@ -85,15 +85,15 @@ export function getStepCopy(step: StepId, q: QuestionnaireV1): StepCopy {
       if (audience === "DUO") {
         return {
           navLabel: "Le duo",
-          title: "Présentez les deux personnes",
+          title: participant ? "Parlez-nous de vous deux" : "Présentez-nous ces deux personnes",
           subtitle: participant
-            ? "Présentez-vous tous les deux."
-            : "Présentez les deux personnes concernées.",
+            ? "Quelques informations pour personnaliser le cahier autour de votre duo."
+            : "Quelques informations pour personnaliser le cahier autour de leur duo.",
         }
       }
       return {
         navLabel: "Le groupe",
-        title: participant ? "Présentez votre groupe" : "Présentez le groupe",
+        title: participant ? "Présentez votre groupe" : "Présentez-nous ce groupe",
         subtitle: "Prénoms obligatoires — le reste reste léger.",
       }
     case "personality":
@@ -106,13 +106,17 @@ export function getStepCopy(step: StepId, q: QuestionnaireV1): StepCopy {
       if (audience === "DUO") {
         return {
           navLabel: "Personnalité",
-          title: "Leur personnalité",
+          title: participant
+            ? "Comment décririez-vous votre duo ?"
+            : "Comment décririez-vous leur duo ?",
           subtitle: "Traits individuels et dynamique du duo.",
         }
       }
       return {
         navLabel: "Personnalité",
-        title: participant ? "Comment décririez-vous la bande ?" : "Comment décririez-vous le groupe ?",
+        title: participant
+          ? "Comment décririez-vous votre bande ?"
+          : "Comment décririez-vous cette bande ?",
       }
     case "interests":
       if (audience === "ME") {
@@ -132,7 +136,7 @@ export function getStepCopy(step: StepId, q: QuestionnaireV1): StepCopy {
       if (audience === "DUO") {
         return {
           navLabel: "Goûts",
-          title: participant ? "Ce que vous aimez ensemble" : "Ce qu'ils aiment ensemble",
+          title: participant ? "Ce que vous aimez ensemble" : "Ce qu'elles aiment ensemble",
           subtitle: participant
             ? "Sélectionnez au moins 3 choses qui vous ressemblent à deux."
             : "Sélectionnez au moins 3 choses qui les rassemblent.",
@@ -140,7 +144,9 @@ export function getStepCopy(step: StepId, q: QuestionnaireV1): StepCopy {
       }
       return {
         navLabel: "Goûts",
-        title: participant ? "Ce que votre groupe aime" : "Ce que le groupe aime",
+        title: participant
+          ? "Ce que vous aimez faire ensemble"
+          : "Ce qu'ils aiment faire ensemble",
         subtitle: "Sélectionnez au moins 3 choses qui correspondent au groupe.",
       }
     case "personalFacts":
@@ -202,9 +208,16 @@ export function getStepCopy(step: StepId, q: QuestionnaireV1): StepCopy {
         subtitle: "Souvenir culte, soirée, voyage, tradition…",
       }
     case "insideJokes":
+      if (audience === "GROUP") {
+        return {
+          navLabel: "Private jokes",
+          title: participant ? "Vos private jokes" : "Leurs private jokes",
+          subtitle: "Expressions, références communes, blagues internes… (facultatif)",
+        }
+      }
       return {
         navLabel: "Private jokes",
-        title: audience === "GROUP" ? "Vos private jokes" : "Private jokes & habitudes",
+        title: "Private jokes & habitudes",
         subtitle: "Expressions, références communes, blagues internes… (facultatif)",
       }
     case "games":
@@ -405,4 +418,46 @@ export function richnessClientMessage(
     return "Vous nous avez donné beaucoup de matière : votre cahier pourra être particulièrement personnalisé."
   }
   return "Nous avons déjà suffisamment d'informations pour créer un cahier vraiment personnel."
+}
+
+/** Recap tags: show up to `max` items, then "+ X autres". */
+export function truncateTagList(
+  items: string[],
+  max = 6,
+): { visible: string[]; overflow: number } {
+  if (items.length <= max) return { visible: items, overflow: 0 }
+  return { visible: items.slice(0, max), overflow: items.length - max }
+}
+
+/** Existing non-empty group member particularities (personalTrait). */
+export function listGroupParticularities(
+  participants: { id: string; firstName: string; personalTrait?: string }[],
+): { participantId: string; firstName: string; text: string }[] {
+  return participants
+    .filter((p) => Boolean(p.personalTrait?.trim()))
+    .map((p) => ({
+      participantId: p.id,
+      firstName: p.firstName,
+      text: p.personalTrait!.trim(),
+    }))
+}
+
+export function setGroupParticularity<T extends { id: string; personalTrait?: string }>(
+  participants: T[],
+  participantId: string,
+  text: string,
+): T[] {
+  const trimmed = text.trim()
+  return participants.map((p) =>
+    p.id === participantId
+      ? { ...p, personalTrait: trimmed ? trimmed : undefined }
+      : p,
+  )
+}
+
+export function clearGroupParticularity<T extends { id: string; personalTrait?: string }>(
+  participants: T[],
+  participantId: string,
+): T[] {
+  return setGroupParticularity(participants, participantId, "")
 }
