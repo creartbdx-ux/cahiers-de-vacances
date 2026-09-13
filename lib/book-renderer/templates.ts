@@ -8,7 +8,7 @@
  */
 import type { GameEngineId } from "@/lib/game-engines/types"
 
-export type BookTemplateId = "CROSSWORD_01"
+export type BookTemplateId = "CROSSWORD_01" | "WORDSEARCH_01"
 
 export interface BookTemplateDef {
   id: BookTemplateId
@@ -24,6 +24,7 @@ export interface BookTemplateDef {
 
 export const BOOK_TEMPLATES: BookTemplateDef[] = [
   { id: "CROSSWORD_01", name: "Mots croisés · 01", structureKey: "CROSSWORD_01", engineId: "CROSSWORD" },
+  { id: "WORDSEARCH_01", name: "Mots mêlés · 01", structureKey: "WORDSEARCH_01", engineId: "WORDSEARCH" },
 ]
 
 /** Resolve a template id to its technical engine, or null if unknown. */
@@ -49,6 +50,13 @@ export interface CrosswordSample {
   vertical: CrosswordSampleClue[]
 }
 
+export interface WordsearchSample {
+  gameLabel: string
+  title: string
+  instruction: string
+  words: string[]
+}
+
 export const CROSSWORD_01_SAMPLE: CrosswordSample = {
   gameLabel: "Jeu · Mots croisés",
   title: "Les cimes en toutes lettres",
@@ -66,4 +74,12 @@ export const CROSSWORD_01_SAMPLE: CrosswordSample = {
     { number: 3, clue: "Sport de glisse de la saison froide." },
     { number: 4, clue: "Vallée étroite et profondément encaissée." },
   ],
+}
+
+export const WORDSEARCH_01_SAMPLE: WordsearchSample = {
+  gameLabel: "Jeu · Mots mêlés",
+  title: "Les cimes se cachent",
+  instruction:
+    "Retrouve les mots dans la grille. Ils se lisent de gauche à droite, de haut en bas, ou en diagonale — jamais à l'envers.",
+  words: ["Montagne", "Chalet", "Sommet", "Sentier", "Glacier", "Neige", "Aigle", "Vallée"],
 }

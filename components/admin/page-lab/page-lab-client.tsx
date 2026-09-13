@@ -10,15 +10,30 @@ import {
   CrosswordTemplate,
   type RenderableAsset,
 } from "@/components/book-renderer/templates/crossword-template"
+import { WordsearchTemplate } from "@/components/book-renderer/templates/wordsearch-template"
 import { getStyleTokens } from "@/lib/book-renderer/styles"
-import { BOOK_TEMPLATES, CROSSWORD_01_SAMPLE, resolveTemplateEngine } from "@/lib/book-renderer/templates"
+import {
+  BOOK_TEMPLATES,
+  CROSSWORD_01_SAMPLE,
+  WORDSEARCH_01_SAMPLE,
+  resolveTemplateEngine,
+} from "@/lib/book-renderer/templates"
 import { generateGame } from "@/lib/game-engines/registry"
 import type { WithEngineMeta } from "@/lib/game-engines/types"
-import type { CrosswordEntry, CrosswordResult } from "@/lib/game-engines/crossword/types"
+import type { CrosswordEntry, CrosswordResult, CrosswordSuccess } from "@/lib/game-engines/crossword/types"
+import type { WordSearchEntry, WordSearchResult, WordSearchSuccess } from "@/lib/game-engines/wordsearch/types"
 import type { Palette, Style, Universe } from "@/lib/supabase/types"
 
 /** The lab result carries the engine identity stamped by the registry. */
-type LabResult = WithEngineMeta<CrosswordResult>
+type LabResult = WithEngineMeta<CrosswordResult> | WithEngineMeta<WordSearchResult>
+
+function isCrosswordLab(result: LabResult): result is WithEngineMeta<CrosswordResult> {
+  return result.engineId === "CROSSWORD"
+}
+
+function isWordsearchLab(result: LabResult): result is WithEngineMeta<WordSearchResult> {
+  return result.engineId === "WORDSEARCH"
+}
 
 /** Quick-compare palette buttons -> palette ids seeded in Supabase. */
 const QUICK_PALETTES: { label: string; id: string }[] = [
@@ -51,6 +66,21 @@ const DEMO_ENTRIES: CrosswordEntry[] = [
   { answer: "RANDONNEE", clue: "Longue marche sur les sentiers." },
 ]
 
+const DEMO_WORDS: WordSearchEntry[] = [
+  { word: "Montagne" },
+  { word: "Chalet" },
+  { word: "Sommet" },
+  { word: "Sentier" },
+  { word: "Glacier" },
+  { word: "Neige" },
+  { word: "Aigle" },
+  { word: "Vallée" },
+  { word: "Refuge" },
+  { word: "Torrent" },
+  { word: "Marmotte" },
+  { word: "Randonnée" },
+]
+
 export function PageLabClient({
   styles,
   universes,
@@ -74,9 +104,12 @@ export function PageLabClient({
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
 
-  // Crossword lab state (local only, never persisted).
+  // Lab state (local only, never persisted).
   const [entries, setEntries] = useState<CrosswordEntry[]>(DEMO_ENTRIES)
+  const [words, setWords] = useState<WordSearchEntry[]>(DEMO_WORDS)
   const [seed, setSeed] = useState("montagne-01")
+  const [gridWidth, setGridWidth] = useState(12)
+  const [gridHeight, setGridHeight] = useState(12)
   const [result, setResult] = useState<LabResult | null>(null)
   const [mode, setMode] = useState<"game" | "solution">("game")
 
@@ -85,6 +118,7 @@ export function PageLabClient({
   // engine reuse this template.
   const engineId = resolveTemplateEngine(templateId)
   const isCrossword = engineId === "CROSSWORD"
+  const isWordsearch = engineId === "WORDSEARCH"
 
   const palette = useMemo(
     () => palettes.find((p) => p.id === paletteId) ?? palettes[0],
@@ -104,11 +138,30 @@ export function PageLabClient({
   }, [assets, universeId, styleId])
 
   function handleGenerate() {
-    if (engineId !== "CROSSWORD") return
-    setResult(generateGame("CROSSWORD", { entries, seed }))
+    if (engineId === "CROSSWORD") {
+      setResult(generateGame("CROSSWORD", { entries, seed }))
+      return
+    }
+    if (engineId === "WORDSEARCH") {
+      const eligibleCount = words.filter((w) => w.word.trim().length > 0).length
+      setResult(
+        generateGame("WORDSEARCH", {
+          entries: words,
+          seed,
+          width: gridWidth,
+          height: gridHeight,
+          minWords: Math.min(8, Math.max(1, eligibleCount)),
+          targetWords: 12,
+          maxWords: 15,
+        }),
+      )
+    }
   }
 
-  const successResult = result?.success ? result : null
+  const crosswordSuccess: CrosswordSuccess | null =
+    result && isCrosswordLab(result) && result.success ? result : null
+  const wordsearchSuccess: WordSearchSuccess | null =
+    result && isWordsearchLab(result) && result.success ? result : null
 
   if (!palette) {
     return <p className="text-muted-foreground">Aucune palette active disponible.</p>
@@ -118,7 +171,14 @@ export function PageLabClient({
     <div className="flex flex-col gap-6">
       {/* Selectors */}
       <div className="grid gap-4 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 lg:grid-cols-4">
-        <LabSelect label="Template" value={templateId} onChange={(v) => setTemplateId(v as typeof templateId)}>
+        <LabSelect
+          label="Template"
+          value={templateId}
+          onChange={(v) => {
+            setTemplateId(v as typeof templateId)
+            setResult(null)
+          }}
+        >
           {BOOK_TEMPLATES.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
@@ -205,7 +265,24 @@ export function PageLabClient({
           seed={seed}
           setSeed={setSeed}
           onGenerate={handleGenerate}
-          result={result}
+          result={result && isCrosswordLab(result) ? result : null}
+          mode={mode}
+          setMode={setMode}
+        />
+      )}
+
+      {isWordsearch && (
+        <WordsearchPanel
+          words={words}
+          setWords={setWords}
+          seed={seed}
+          setSeed={setSeed}
+          width={gridWidth}
+          setWidth={setGridWidth}
+          height={gridHeight}
+          setHeight={setGridHeight}
+          onGenerate={handleGenerate}
+          result={result && isWordsearchLab(result) ? result : null}
           mode={mode}
           setMode={setMode}
         />
@@ -226,14 +303,25 @@ export function PageLabClient({
       <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-8">
         <PagePreview>
           <BookPage palette={palette} showSafeArea={showSafeArea}>
-            <CrosswordTemplate
-              sample={CROSSWORD_01_SAMPLE}
-              style={styleTokens}
-              palette={palette}
-              assets={selectedAssets}
-              crossword={successResult}
-              mode={mode}
-            />
+            {isWordsearch ? (
+              <WordsearchTemplate
+                sample={WORDSEARCH_01_SAMPLE}
+                style={styleTokens}
+                palette={palette}
+                assets={selectedAssets}
+                wordsearch={wordsearchSuccess}
+                mode={mode}
+              />
+            ) : (
+              <CrosswordTemplate
+                sample={CROSSWORD_01_SAMPLE}
+                style={styleTokens}
+                palette={palette}
+                assets={selectedAssets}
+                crossword={crosswordSuccess}
+                mode={mode}
+              />
+            )}
           </BookPage>
         </PagePreview>
       </div>
@@ -256,7 +344,7 @@ function CrosswordPanel({
   seed: string
   setSeed: (v: string) => void
   onGenerate: () => void
-  result: LabResult | null
+  result: WithEngineMeta<CrosswordResult> | null
   mode: "game" | "solution"
   setMode: (m: "game" | "solution") => void
 }) {
@@ -380,6 +468,161 @@ function CrosswordPanel({
   )
 }
 
+function WordsearchPanel({
+  words,
+  setWords,
+  seed,
+  setSeed,
+  width,
+  setWidth,
+  height,
+  setHeight,
+  onGenerate,
+  result,
+  mode,
+  setMode,
+}: {
+  words: WordSearchEntry[]
+  setWords: (updater: (prev: WordSearchEntry[]) => WordSearchEntry[]) => void
+  seed: string
+  setSeed: (v: string) => void
+  width: number
+  setWidth: (v: number) => void
+  height: number
+  setHeight: (v: number) => void
+  onGenerate: () => void
+  result: WithEngineMeta<WordSearchResult> | null
+  mode: "game" | "solution"
+  setMode: (m: "game" | "solution") => void
+}) {
+  function updateWord(index: number, word: string) {
+    setWords((prev) => prev.map((e, i) => (i === index ? { word } : e)))
+  }
+  function addWord() {
+    setWords((prev) => [...prev, { word: "" }])
+  }
+  function removeWord(index: number) {
+    setWords((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Test · Mots mêlés</h2>
+          <p className="text-sm text-muted-foreground">
+            Liste de mots locale. Rien n&apos;est enregistré : le moteur génère la grille localement.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-lg border border-border">
+            <button
+              type="button"
+              onClick={() => setMode("game")}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium transition-colors",
+                mode === "game" ? "bg-primary text-primary-foreground" : "bg-background text-foreground hover:bg-muted",
+              )}
+            >
+              Jeu
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("solution")}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium transition-colors",
+                mode === "solution"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-background text-foreground hover:bg-muted",
+              )}
+            >
+              Correction
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {words.map((entry, i) => (
+          <div key={i} className="flex gap-2">
+            <input
+              value={entry.word}
+              onChange={(e) => updateWord(i, e.target.value)}
+              placeholder="MONTAGNE"
+              className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <button
+              type="button"
+              onClick={() => removeWord(i)}
+              aria-label={`Supprimer le mot ${i + 1}`}
+              className="inline-flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" variant="outline" size="sm" onClick={addWord}>
+          <Plus className="size-4" />
+          Ajouter
+        </Button>
+        <label className="flex items-center gap-2">
+          <span className="text-sm font-medium text-foreground">Largeur</span>
+          <input
+            type="number"
+            min={6}
+            max={18}
+            value={width}
+            onChange={(e) => setWidth(Number(e.target.value) || 12)}
+            className="h-9 w-16 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-sm font-medium text-foreground">Hauteur</span>
+          <input
+            type="number"
+            min={6}
+            max={18}
+            value={height}
+            onChange={(e) => setHeight(Number(e.target.value) || 12)}
+            className="h-9 w-16 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-sm font-medium text-foreground">Seed</span>
+          <input
+            value={seed}
+            onChange={(e) => setSeed(e.target.value)}
+            className="h-9 w-40 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <Button type="button" size="sm" onClick={onGenerate}>
+          <Wand2 className="size-4" />
+          Générer
+        </Button>
+        <span className="text-sm text-muted-foreground">{words.length} mot(s)</span>
+      </div>
+
+      {result && !result.success && (
+        <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-medium">Génération impossible ({result.reason})</p>
+            <p className="opacity-90">{result.message}</p>
+            {result.unusedEntries.length > 0 && (
+              <p className="mt-1 opacity-90">
+                Non utilisés : {result.unusedEntries.map((e) => e.word).join(", ")}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function LabSelect({
   label,
   value,
@@ -442,9 +685,11 @@ function DebugPanel({
         <DebugRow label="universe_id" value={universeId} />
       </dl>
 
-      {/* Crossword engine debug */}
+      {/* Engine debug */}
       <div className="mt-4 border-t border-border pt-4">
-        <p className="mb-2 font-sans text-sm font-medium text-muted-foreground">Moteur mots croisés</p>
+        <p className="mb-2 font-sans text-sm font-medium text-muted-foreground">
+          {result?.engineId === "WORDSEARCH" ? "Moteur mots mêlés" : "Moteur mots croisés"}
+        </p>
         {!result ? (
           <p className="text-muted-foreground">— aucune génération lancée</p>
         ) : (
@@ -453,9 +698,6 @@ function DebugPanel({
             <DebugRow label="engine_version" value={fmt(result.engineVersion)} />
             <DebugRow label="success" value={String(result.success)} />
             <DebugRow label="seed" value={result.stats.seed ?? "—"} />
-            <DebugRow label="received" value={fmt(result.stats.received)} />
-            <DebugRow label="placed" value={fmt(result.stats.placed)} />
-            <DebugRow label="unused" value={fmt(result.stats.unused)} />
             <DebugRow
               label="dimensions"
               value={
@@ -464,16 +706,42 @@ function DebugPanel({
                   : "—"
               }
             />
-            <DebugRow label="crossings" value={fmt(result.stats.crossings)} />
+            <DebugRow label="reçus" value={fmt(result.stats.received)} />
+            <DebugRow label="placés" value={fmt(result.stats.placed)} />
+            <DebugRow label="non placés" value={fmt(result.stats.unused)} />
+            <DebugRow label="croisements" value={fmt(result.stats.crossings)} />
+            {isWordsearchLab(result) && result.success && (
+              <DebugRow
+                label="orientations"
+                value={Object.entries(result.stats.orientationCounts)
+                  .map(([k, v]) => `${k}:${v}`)
+                  .join(" ")}
+              />
+            )}
             <DebugRow label="score" value={fmt(result.stats.score)} />
             <DebugRow label="candidates_tried" value={fmt(result.stats.candidatesTried)} />
-            <DebugRow label="validation" value={result.success ? "OK" : (result.reason ?? "—")} />
+            <DebugRow
+              label="validation"
+              value={
+                result.success
+                  ? isWordsearchLab(result)
+                    ? result.validation.ok
+                      ? "OK"
+                      : result.validation.errors.join(" ")
+                    : "OK"
+                  : (result.reason ?? "—")
+              }
+            />
           </dl>
         )}
         {result && result.unusedEntries.length > 0 && (
           <div className="mt-2">
             <p className="font-sans text-muted-foreground">mots non placés</p>
-            <p className="mt-1">{result.unusedEntries.map((e) => e.answer).join(", ")}</p>
+            <p className="mt-1">
+              {result.unusedEntries
+                .map((e) => ("answer" in e ? e.answer : e.word))
+                .join(", ")}
+            </p>
           </div>
         )}
       </div>

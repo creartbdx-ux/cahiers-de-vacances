@@ -105,6 +105,19 @@ export interface WordSearchFailure {
 
 export type WordSearchResult = WordSearchSuccess | WordSearchFailure
 
+/** Internal candidate produced by the generator, consumed by the validator. */
+export interface WordSearchCandidate {
+  grid: (string | null)[][]
+  filled: string[][]
+  placements: Placement[]
+  unused: NormalizedWord[]
+  width: number
+  height: number
+  crossings: number
+  orientationCounts: Record<WordSearchDirection, number>
+  score: number
+}
+
 export interface GenerateWordSearchOptions {
   entries: WordSearchEntry[]
   /** Same entries + same seed + same options => exactly the same grid. */

@@ -6,6 +6,8 @@
  */
 import { generateCrossword } from "./crossword"
 import type { CrosswordResult, GenerateCrosswordOptions } from "./crossword/types"
+import { generateWordSearch } from "./wordsearch"
+import type { GenerateWordSearchOptions, WordSearchResult } from "./wordsearch/types"
 import {
   UnknownGameEngineError,
   type GameEngineDescriptor,
@@ -16,6 +18,7 @@ import {
 /** Ties each engine id to its own Input and Result types for full type-safety. */
 export interface GameEngineMap {
   CROSSWORD: { input: GenerateCrosswordOptions; result: CrosswordResult }
+  WORDSEARCH: { input: GenerateWordSearchOptions; result: WordSearchResult }
 }
 
 export const CROSSWORD_ENGINE: GameEngineDescriptor<GenerateCrosswordOptions, CrosswordResult> = {
@@ -24,9 +27,16 @@ export const CROSSWORD_ENGINE: GameEngineDescriptor<GenerateCrosswordOptions, Cr
   generate: generateCrossword,
 }
 
+export const WORDSEARCH_ENGINE: GameEngineDescriptor<GenerateWordSearchOptions, WordSearchResult> = {
+  id: "WORDSEARCH",
+  version: 1,
+  generate: generateWordSearch,
+}
+
 /** The registry. Adding an engine = add one entry here (and to GameEngineMap). */
 const ENGINES: { [K in GameEngineId]: GameEngineDescriptor<GameEngineMap[K]["input"], GameEngineMap[K]["result"]> } = {
   CROSSWORD: CROSSWORD_ENGINE,
+  WORDSEARCH: WORDSEARCH_ENGINE,
 }
 
 /** Every registered engine id, e.g. for iteration in admin tooling. */
@@ -42,14 +52,14 @@ export function resolveEngineId(technicalEngine: string | null | undefined): Gam
   return isGameEngineId(technicalEngine) ? technicalEngine : null
 }
 
+type AnyRegisteredEngine = (typeof ENGINES)[GameEngineId]
+
 /** Look up an engine descriptor, or null when the id is unknown. */
 export function getEngine<K extends GameEngineId>(id: K): (typeof ENGINES)[K]
-export function getEngine(id: string | null | undefined): GameEngineDescriptor<unknown, GameEngineResultLike> | null
-export function getEngine(id: string | null | undefined) {
+export function getEngine(id: string | null | undefined): AnyRegisteredEngine | null
+export function getEngine(id: string | null | undefined): AnyRegisteredEngine | null {
   return isGameEngineId(id) ? ENGINES[id] : null
 }
-
-type GameEngineResultLike = GameEngineMap[GameEngineId]["result"]
 
 /**
  * Resolve + run an engine in one call, stamping the result with engineId and
