@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button"
 import { StylePreview } from "@/components/questionnaire/style-preview"
 import { cn } from "@/lib/utils"
 import {
+  claimLocalDraftAction,
+  saveQuestionnaireDraftAction,
   submitQuestionnaireAction,
   uploadQuestionnairePhotoAction,
 } from "@/app/(public)/questionnaire/actions"
@@ -54,30 +56,111 @@ export function QuestionnaireWizard({
   palettes,
   styles,
   isAuthenticated,
+  initialQuestionnaire = null,
+  projectStatus = null,
+  claimLocalDraft = false,
+  readOnly = false,
 }: {
   universes: Universe[]
   palettes: Palette[]
   styles: Style[]
   isAuthenticated: boolean
+  /** Prefill from Supabase project (continues draft). */
+  initialQuestionnaire?: QuestionnaireV1 | null
+  projectStatus?: string | null
+  /** After login: push localStorage draft into Supabase. */
+  claimLocalDraft?: boolean
+  readOnly?: boolean
 }) {
-  const [q, setQ] = useState<QuestionnaireV1>(() => createEmptyQuestionnaire())
+  const [q, setQ] = useState<QuestionnaireV1>(() => initialQuestionnaire ?? createEmptyQuestionnaire())
   const [hydrated, setHydrated] = useState(false)
   const [stepIndex, setStepIndex] = useState(0)
   const [errors, setErrors] = useState<string[]>([])
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitOk, setSubmitOk] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSavedJson = useRef<string>("")
+  const completed = projectStatus === "QUESTIONNAIRE_COMPLETED" || readOnly
 
   useEffect(() => {
-    const draft = loadQuestionnaireDraft()
-    if (draft) setQ(draft)
-    setHydrated(true)
-  }, [])
+    let cancelled = false
+    async function hydrate() {
+      if (initialQuestionnaire) {
+        if (!cancelled) {
+          setQ(initialQuestionnaire)
+          saveQuestionnaireDraft(initialQuestionnaire)
+          setHydrated(true)
+        }
+        return
+      }
+
+      const local = loadQuestionnaireDraft()
+
+      if (claimLocalDraft && isAuthenticated && local) {
+        const claimed = await claimLocalDraftAction(local)
+        if (!cancelled && claimed.ok) {
+          setQ(claimed.questionnaire)
+          saveQuestionnaireDraft(claimed.questionnaire)
+          setSaveState("saved")
+          setSaveMessage("Brouillon rattaché à votre compte.")
+          setHydrated(true)
+          return
+        }
+      }
+
+      if (!cancelled) {
+        if (local) setQ(local)
+        setHydrated(true)
+      }
+    }
+    void hydrate()
+    return () => {
+      cancelled = true
+    }
+  }, [initialQuestionnaire, claimLocalDraft, isAuthenticated])
 
   useEffect(() => {
-    if (!hydrated) return
+    if (!hydrated || completed) return
     saveQuestionnaireDraft(q)
-  }, [q, hydrated])
+  }, [q, hydrated, completed])
+
+  // Debounced Supabase autosave when authenticated
+  useEffect(() => {
+    if (!hydrated || !isAuthenticated || completed) return
+    const json = JSON.stringify({
+      ...q,
+      photos: q.photos.map(({ previewDataUrl: _, ...rest }) => rest),
+    })
+    if (json === lastSavedJson.current) return
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      void (async () => {
+        setSaveState("saving")
+        setSaveMessage(null)
+        const result = await saveQuestionnaireDraftAction(q)
+        if (!result.ok) {
+          if (result.code === "AUTH_REQUIRED") {
+            setSaveState("idle")
+            return
+          }
+          setSaveState("error")
+          setSaveMessage(result.error)
+          return
+        }
+        lastSavedJson.current = json
+        if (!q.draftProjectId || q.draftProjectId !== result.projectId) {
+          setQ((prev) => ({ ...prev, draftProjectId: result.projectId }))
+        }
+        setSaveState("saved")
+      })()
+    }, 1600)
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+    }
+  }, [q, hydrated, isAuthenticated, completed])
 
   const steps = useMemo(
     () => buildJourneySteps(q.audience, q.creatorIsParticipant),
@@ -94,9 +177,35 @@ export function QuestionnaireWizard({
   }, [steps.length, stepIndex])
 
   function update(patch: Partial<QuestionnaireV1>) {
+    if (completed) return
     setQ((prev) => applyAudienceDefaults({ ...prev, ...patch }))
     setErrors([])
     setSubmitError(null)
+  }
+
+  function saveDraftNow() {
+    if (!isAuthenticated) {
+      const next = encodeURIComponent("/questionnaire?claim=1")
+      window.location.href = `/auth/login?next=${next}`
+      return
+    }
+    startTransition(async () => {
+      setSaveState("saving")
+      const result = await saveQuestionnaireDraftAction(q)
+      if (!result.ok) {
+        setSaveState("error")
+        setSaveMessage(result.error)
+        return
+      }
+      setQ((prev) => ({ ...prev, draftProjectId: result.projectId }))
+      lastSavedJson.current = JSON.stringify({
+        ...q,
+        draftProjectId: result.projectId,
+        photos: q.photos.map(({ previewDataUrl: _, ...rest }) => rest),
+      })
+      setSaveState("saved")
+      setSaveMessage("Brouillon enregistré.")
+    })
   }
 
   function goToStep(id: StepId) {
@@ -186,7 +295,8 @@ export function QuestionnaireWizard({
       }
 
       clearQuestionnaireDraft()
-      setSubmitOk("Votre questionnaire est enregistré. Vous pourrez bientôt créer votre cahier.")
+      setQ((prev) => ({ ...prev, draftProjectId: result.projectId }))
+      setSubmitOk("Questionnaire terminé et enregistré. Retrouvez-le dans Mes cahiers.")
     })
   }
 
@@ -197,16 +307,29 @@ export function QuestionnaireWizard({
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <div>
-        <div className="mb-2 flex items-center justify-between text-sm text-muted-foreground">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
           <span>
             Étape {safeIndex + 1} / {steps.length} — {copy.navLabel}
           </span>
-          <span>{Math.round(progress)} %</span>
+          <span className="flex items-center gap-3">
+            {saveState === "saving" && <span>Enregistrement…</span>}
+            {saveState === "saved" && <span className="text-foreground">Enregistré</span>}
+            {saveState === "error" && (
+              <span className="text-destructive">{saveMessage ?? "Erreur d'enregistrement"}</span>
+            )}
+            <span>{Math.round(progress)} %</span>
+          </span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-muted">
           <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
         </div>
       </div>
+
+      {completed && (
+        <p className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">
+          Ce questionnaire est terminé. Vous pouvez le consulter, mais plus le modifier.
+        </p>
+      )}
 
       <div className="rounded-2xl border border-border bg-card p-5 sm:p-8">
         {step === "audience" && (
@@ -267,13 +390,39 @@ export function QuestionnaireWizard({
           <ChevronLeft className="size-4" />
           Précédent
         </Button>
-        {step !== "recap" ? (
-          <Button type="button" onClick={goNext}>
-            Suivant
-            <ChevronRight className="size-4" />
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {!completed && (
+            <Button type="button" variant="outline" onClick={saveDraftNow} disabled={pending}>
+              Enregistrer mon brouillon
+            </Button>
+          )}
+          {step !== "recap" && !completed ? (
+            <Button type="button" onClick={goNext}>
+              Suivant
+              <ChevronRight className="size-4" />
+            </Button>
+          ) : null}
+        </div>
       </div>
+      {!isAuthenticated && !completed && (
+        <p className="text-center text-sm text-muted-foreground">
+          <Link
+            href={`/auth/login?next=${encodeURIComponent("/questionnaire?claim=1")}`}
+            className="underline"
+          >
+            Se connecter
+          </Link>
+          {" · "}
+          <Link
+            href={`/auth/sign-up?next=${encodeURIComponent("/questionnaire?claim=1")}`}
+            className="underline"
+          >
+            Créer un compte
+          </Link>
+          {" — "}
+          votre brouillon local est conservé.
+        </p>
+      )}
     </div>
   )
 }
@@ -1957,7 +2106,10 @@ function RecapStep({
       {!isAuthenticated && (
         <p className="text-sm text-muted-foreground">
           Pour créer votre cahier,{" "}
-          <Link href="/auth/login?next=/questionnaire" className="underline">
+          <Link
+            href={`/auth/login?next=${encodeURIComponent("/questionnaire?claim=1")}`}
+            className="underline"
+          >
             connectez-vous ou créez un compte
           </Link>
           . Votre brouillon local est conservé.

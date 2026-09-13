@@ -73,7 +73,7 @@ export const adminNav: NavItem[] = [
   {
     label: 'Questionnaires',
     href: '/admin/questionnaires',
-    description: 'Configurez les questions qui orientent la génération.',
+    description: 'Suivez les questionnaires utilisateurs en cours et terminés.',
     icon: ClipboardList,
   },
   {
@@ -99,6 +99,12 @@ export const adminNav: NavItem[] = [
     href: '/admin/page-lab',
     description: 'Testez le moteur graphique de rendu des pages de cahier.',
     icon: FlaskConical,
+  },
+  {
+    label: 'Editorial Lab',
+    href: '/admin/editorial-lab',
+    description: 'Composez un plan éditorial déterministe à partir d’un profil.',
+    icon: PenLine,
   },
   {
     label: 'Univers',

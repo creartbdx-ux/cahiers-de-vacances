@@ -2,29 +2,16 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { AdminPageHeader } from "@/components/admin/admin-page-header"
+import {
+  canUseInEditorialLab,
+  parseQuestionnairePayload,
+  statusLabelFr,
+} from "@/lib/books/lifecycle"
 import { getBookPhotos, getBookProject } from "@/lib/data/books"
 import { calculateProfileRichness } from "@/lib/questionnaire/richness"
-import type { BookProfileV1, QuestionnaireV1 } from "@/lib/questionnaire/types"
 
 export const metadata: Metadata = {
   title: "Détail questionnaire",
-}
-
-function parsePayload(data: Record<string, unknown>): {
-  questionnaire: QuestionnaireV1 | null
-  profile: BookProfileV1 | null
-} {
-  const questionnaire =
-    data.questionnaire && typeof data.questionnaire === "object"
-      ? (data.questionnaire as QuestionnaireV1)
-      : data.schemaVersion === 1
-        ? (data as unknown as QuestionnaireV1)
-        : null
-  const profile =
-    data.bookProfile && typeof data.bookProfile === "object"
-      ? (data.bookProfile as BookProfileV1)
-      : null
-  return { questionnaire, profile }
 }
 
 export default async function AdminQuestionnaireDetailPage({
@@ -37,8 +24,20 @@ export default async function AdminQuestionnaireDetailPage({
   if (!project) notFound()
 
   const photos = await getBookPhotos(project.id)
-  const { questionnaire, profile } = parsePayload(project.questionnaire_data)
-  const richness = questionnaire ? calculateProfileRichness(questionnaire, profile ?? undefined) : null
+  const { questionnaire, profile, richnessLevel, ownerEmail } = parseQuestionnairePayload(
+    project.questionnaire_data,
+  )
+  const richness =
+    richnessLevel != null && questionnaire
+      ? { level: richnessLevel, message: "" }
+      : questionnaire
+        ? calculateProfileRichness(questionnaire, profile ?? undefined)
+        : null
+  const editorialOk = canUseInEditorialLab({
+    status: project.status,
+    profile,
+    richnessLevel: richness?.level ?? null,
+  })
 
   return (
     <div className="flex flex-col gap-8">
@@ -52,15 +51,36 @@ export default async function AdminQuestionnaireDetailPage({
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Meta label="Statut" value={project.status} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Meta label="Statut" value={statusLabelFr(project.status)} />
+        <Meta label="Utilisateur" value={ownerEmail ?? project.user_id?.slice(0, 8) ?? "—"} />
+        <Meta
+          label="Éligible Editorial Lab"
+          value={editorialOk ? "Oui" : "Non"}
+        />
+        <Meta label="Créé le" value={new Date(project.created_at).toLocaleString("fr-FR")} />
+        <Meta
+          label="Dernière modification"
+          value={new Date(project.updated_at).toLocaleString("fr-FR")}
+        />
+        <Meta label="Richesse" value={richness?.level ?? "—"} />
         <Meta label="Style" value={project.style_id ?? "AUTO"} />
         <Meta label="Palette" value={project.palette_id ?? "AUTO"} />
-        <Meta label="Richesse" value={richness?.level ?? "—"} />
       </div>
 
-      {richness && (
+      {richness && "message" in richness && richness.message ? (
         <p className="rounded-xl border border-border bg-muted/40 p-4 text-sm">{richness.message}</p>
+      ) : null}
+
+      {editorialOk && (
+        <p className="text-sm">
+          <Link
+            href="/admin/editorial-lab"
+            className="underline underline-offset-4"
+          >
+            Ouvrir l&apos;Editorial Lab
+          </Link>
+        </p>
       )}
 
       <section className="rounded-2xl border border-border bg-card p-5">
@@ -73,7 +93,7 @@ export default async function AdminQuestionnaireDetailPage({
       <section className="rounded-2xl border border-border bg-card p-5">
         <h2 className="mb-3 text-base font-semibold">BookProfileV1</h2>
         <pre className="max-h-[420px] overflow-auto rounded-lg bg-muted/50 p-4 text-xs">
-          {profile ? JSON.stringify(profile, null, 2) : "— profil non stocké —"}
+          {profile ? JSON.stringify(profile, null, 2) : "— profil non stocké (brouillon) —"}
         </pre>
       </section>
 

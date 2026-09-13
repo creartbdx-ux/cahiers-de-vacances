@@ -10,45 +10,65 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState } from "react"
 
-// Only the credential/existence signal is genericized — naming it would confirm
-// whether an email is registered. Errors the user can act on are passed through.
-function loginErrorMessage(error: unknown): string {
+function signUpErrorMessage(error: unknown): string {
   const { code, status } = (error ?? {}) as { code?: string; status?: number }
 
-  if (code === "email_not_confirmed") {
-    return "Confirmez votre adresse e-mail — le lien vous a été envoyé par courriel."
+  if (code === "weak_password") {
+    return "Choisissez un mot de passe plus robuste."
   }
-  if (code === "over_request_rate_limit" || status === 429) {
+  if (code === "email_address_invalid") {
+    return "Utilisez une adresse e-mail réelle — les domaines de test ne sont pas acceptés."
+  }
+  if (code === "email_address_not_authorized") {
+    return "Impossible d'envoyer l'e-mail de confirmation à cette adresse. Essayez-en une autre."
+  }
+  if (code === "validation_failed") {
+    return "Veuillez vérifier les informations saisies."
+  }
+  if (code === "over_email_send_rate_limit" || status === 429) {
     return "Trop de tentatives. Patientez un instant avant de réessayer."
   }
-  if (code === "invalid_credentials") {
-    return "E-mail ou mot de passe incorrect."
-  }
-  return "Une erreur est survenue. Veuillez réessayer."
+  return "Inscription impossible pour le moment. Veuillez réessayer."
 }
 
-export function LoginForm() {
+export function SignUpForm() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [repeatPassword, setRepeatPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
   const next = searchParams.get("next") ?? "/mes-cahiers"
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
     const supabase = createClient()
     setIsLoading(true)
     setError(null)
 
+    if (password !== repeatPassword) {
+      setError("Les mots de passe ne correspondent pas.")
+      setIsLoading(false)
+      return
+    }
+
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      const origin = window.location.origin
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo:
+            process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
+            `${origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        },
+      })
       if (error) throw error
-      router.push(next)
+      router.push("/auth/sign-up-success")
     } catch (error: unknown) {
-      console.error("Login error:", error)
-      setError(loginErrorMessage(error))
+      console.error("Sign-up error:", error)
+      setError(signUpErrorMessage(error))
     } finally {
       setIsLoading(false)
     }
@@ -62,11 +82,11 @@ export function LoginForm() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle className="font-serif text-2xl">Connexion</CardTitle>
-            <CardDescription>Accédez à votre espace cahiers.</CardDescription>
+            <CardTitle className="font-serif text-2xl">Créer un compte</CardTitle>
+            <CardDescription>Rejoignez l&apos;atelier pour composer vos cahiers.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleLogin}>
+            <form onSubmit={handleSignUp}>
               <div className="flex flex-col gap-6">
                 <div className="grid gap-2">
                   <Label htmlFor="email">E-mail</Label>
@@ -89,18 +109,28 @@ export function LoginForm() {
                     onChange={(e) => setPassword(e.target.value)}
                   />
                 </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="repeat-password">Confirmer le mot de passe</Label>
+                  <Input
+                    id="repeat-password"
+                    type="password"
+                    required
+                    value={repeatPassword}
+                    onChange={(e) => setRepeatPassword(e.target.value)}
+                  />
+                </div>
                 {error && <p className="text-sm text-destructive">{error}</p>}
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Connexion..." : "Se connecter"}
+                  {isLoading ? "Création du compte..." : "Créer mon compte"}
                 </Button>
               </div>
               <div className="mt-4 text-center text-sm text-muted-foreground">
-                Pas encore de compte ?{" "}
+                Vous avez déjà un compte ?{" "}
                 <Link
-                  href={`/auth/sign-up${next !== "/mes-cahiers" ? `?next=${encodeURIComponent(next)}` : ""}`}
+                  href={`/auth/login${next !== "/mes-cahiers" ? `?next=${encodeURIComponent(next)}` : ""}`}
                   className="text-foreground underline underline-offset-4"
                 >
-                  Créer un compte
+                  Se connecter
                 </Link>
               </div>
             </form>

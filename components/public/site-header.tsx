@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import { BrandLogo } from '@/components/brand-logo'
+import { PublicAuthLinks } from '@/components/public/public-auth-links'
 import { Button } from '@/components/ui/button'
 import { publicNav } from '@/lib/navigation'
 import { cn } from '@/lib/utils'
@@ -18,7 +19,13 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`)
 }
 
-export function SiteHeader() {
+export function SiteHeader({
+  isAuthenticated = false,
+  isAdmin = false,
+}: {
+  isAuthenticated?: boolean
+  isAdmin?: boolean
+}) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
 
@@ -40,9 +47,21 @@ export function SiteHeader() {
               {item.label}
             </Link>
           ))}
+          {isAuthenticated && (
+            <Link
+              href="/mes-cahiers"
+              className={cn(
+                'rounded-full px-3.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
+                isActive(pathname, '/mes-cahiers') && 'bg-accent text-accent-foreground',
+              )}
+            >
+              Mes cahiers
+            </Link>
+          )}
         </nav>
 
-        <div className="hidden md:block">
+        <div className="hidden items-center gap-2 md:flex">
+          <PublicAuthLinks isAuthenticated={isAuthenticated} isAdmin={isAdmin} />
           <Button
             render={<Link href="/creer" />}
             nativeButton={false}
@@ -82,6 +101,21 @@ export function SiteHeader() {
                 {item.label}
               </Link>
             ))}
+            {isAuthenticated && (
+              <Link
+                href="/mes-cahiers"
+                onClick={() => setOpen(false)}
+                className={cn(
+                  'rounded-xl px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
+                  isActive(pathname, '/mes-cahiers') && 'bg-accent text-accent-foreground',
+                )}
+              >
+                Mes cahiers
+              </Link>
+            )}
+            <div className="mt-2 px-4">
+              <PublicAuthLinks isAuthenticated={isAuthenticated} isAdmin={isAdmin} />
+            </div>
             <Button
               render={<Link href="/creer" onClick={() => setOpen(false)} />}
               nativeButton={false}

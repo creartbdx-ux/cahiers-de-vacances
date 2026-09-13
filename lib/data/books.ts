@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import type { BookPhoto, BookProject } from "@/lib/supabase/types"
+import { BOOK_STATUS } from "@/lib/books/lifecycle"
 
 /**
  * Read helpers for customer book projects. RLS scopes every row to its owner
@@ -9,7 +10,29 @@ import type { BookPhoto, BookProject } from "@/lib/supabase/types"
 
 export async function getBookProjects(): Promise<BookProject[]> {
   const supabase = await createClient()
-  const { data } = await supabase.from("book_projects").select("*").order("created_at", { ascending: false })
+  const { data } = await supabase.from("book_projects").select("*").order("updated_at", {
+    ascending: false,
+  })
+  return data ?? []
+}
+
+export async function getBookProjectsForUser(userId: string): Promise<BookProject[]> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from("book_projects")
+    .select("*")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+  return data ?? []
+}
+
+export async function getCompletedBookProjects(): Promise<BookProject[]> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from("book_projects")
+    .select("*")
+    .eq("status", BOOK_STATUS.QUESTIONNAIRE_COMPLETED)
+    .order("updated_at", { ascending: false })
   return data ?? []
 }
 
@@ -83,6 +106,15 @@ export async function updateBookProject(
 
   if (error) return { project: null, error: error.message }
   return { project: data, error: null }
+}
+
+export async function deleteBookProject(
+  id: string,
+): Promise<{ ok: boolean; error: string | null }> {
+  const supabase = await createClient()
+  const { error } = await supabase.from("book_projects").delete().eq("id", id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, error: null }
 }
 
 export async function insertBookPhoto(input: {
