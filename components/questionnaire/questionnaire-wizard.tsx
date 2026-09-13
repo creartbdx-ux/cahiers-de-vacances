@@ -8,9 +8,10 @@ import { StylePreview } from "@/components/questionnaire/style-preview"
 import { cn } from "@/lib/utils"
 import {
   claimLocalDraftAction,
+  deleteBookPhotoAction,
+  registerBookPhotoAction,
   saveQuestionnaireDraftAction,
   submitQuestionnaireAction,
-  uploadQuestionnairePhotoAction,
 } from "@/app/(public)/questionnaire/actions"
 import {
   AGE_BRACKETS,
@@ -25,30 +26,44 @@ import {
   MIN_GROUP_SIZE,
   PERSONAL_FACT_CATEGORIES,
   PERSONALITY_TRAIT_OPTIONS,
+  PHOTO_UPLOAD_USER_ERROR,
   applyAudienceDefaults,
   audienceHumanLabel,
   buildJourneySteps,
   calculateProfileRichness,
   clearGroupParticularity,
+  countRecapPhotos,
   createEmptyQuestionnaire,
   difficultyLabel,
   getStepCopy,
+  isPhotoPersisted,
   listGroupParticularities,
   memorySuggestions,
   newId,
   richnessClientMessage,
   truncateTagList,
+  validatePhotoFile,
   validateStep,
   type AudienceType,
   type QuestionnaireParticipant,
+  type QuestionnairePhoto,
   type QuestionnaireV1,
   type StepId,
 } from "@/lib/questionnaire"
+import {
+  clearAllPhotoFiles,
+  clearPhotoFile,
+  getPhotoFile,
+  getPhotoObjectUrl,
+  setPhotoFile,
+} from "@/lib/questionnaire/photo-files"
 import {
   clearQuestionnaireDraft,
   loadQuestionnaireDraft,
   saveQuestionnaireDraft,
 } from "@/lib/questionnaire/storage"
+import { uploadBookPhotoFile } from "@/lib/questionnaire/upload-book-photo"
+import { createClient } from "@/lib/supabase/client"
 import type { Palette, Style, Universe } from "@/lib/supabase/types"
 
 export function QuestionnaireWizard({
@@ -260,6 +275,110 @@ export function QuestionnaireWizard({
     })
   }
 
+  async function resolveUserId(): Promise<string | null> {
+    const supabase = createClient()
+    const { data } = await supabase.auth.getUser()
+    return data.user?.id ?? null
+  }
+
+  async function ensureProjectId(snapshot: QuestionnaireV1): Promise<string | null> {
+    if (snapshot.draftProjectId) return snapshot.draftProjectId
+    const saved = await saveQuestionnaireDraftAction(snapshot)
+    if (!saved.ok) {
+      setSubmitError(saved.error)
+      return null
+    }
+    setQ((prev) => ({ ...prev, draftProjectId: saved.projectId }))
+    return saved.projectId
+  }
+
+  async function persistPhoto(
+    photo: QuestionnairePhoto,
+    projectId: string,
+    userId: string,
+  ): Promise<{ ok: true; storagePath: string } | { ok: false; error: string }> {
+    if (isPhotoPersisted(photo) && photo.storagePath) {
+      return { ok: true, storagePath: photo.storagePath }
+    }
+
+    const file = getPhotoFile(photo.id)
+    if (!file) {
+      return { ok: false, error: PHOTO_UPLOAD_USER_ERROR }
+    }
+
+    setQ((prev) => ({
+      ...prev,
+      photos: prev.photos.map((p) =>
+        p.id === photo.id
+          ? { ...p, uploadStatus: "uploading", uploadError: undefined }
+          : p,
+      ),
+    }))
+
+    const uploaded = await uploadBookPhotoFile({
+      userId,
+      projectId,
+      photoId: photo.id,
+      file,
+    })
+    if (!uploaded.ok) {
+      setQ((prev) => ({
+        ...prev,
+        photos: prev.photos.map((p) =>
+          p.id === photo.id
+            ? {
+                ...p,
+                uploadStatus: "error",
+                uploadError: uploaded.error,
+                storagePath: undefined,
+              }
+            : p,
+        ),
+      }))
+      return uploaded
+    }
+
+    const registered = await registerBookPhotoAction({
+      projectId,
+      storagePath: uploaded.storagePath,
+      caption: photo.caption,
+      anecdote: photo.anecdote,
+      useAuthorized: photo.useAuthorized,
+    })
+    if (!registered.ok) {
+      setQ((prev) => ({
+        ...prev,
+        photos: prev.photos.map((p) =>
+          p.id === photo.id
+            ? {
+                ...p,
+                uploadStatus: "error",
+                uploadError: registered.error,
+                storagePath: undefined,
+              }
+            : p,
+        ),
+      }))
+      return registered
+    }
+
+    setQ((prev) => ({
+      ...prev,
+      draftProjectId: projectId,
+      photos: prev.photos.map((p) =>
+        p.id === photo.id
+          ? {
+              ...p,
+              storagePath: uploaded.storagePath,
+              uploadStatus: "persisted",
+              uploadError: undefined,
+            }
+          : p,
+      ),
+    }))
+    return { ok: true, storagePath: uploaded.storagePath }
+  }
+
   async function handleSubmit() {
     setSubmitError(null)
     setSubmitOk(null)
@@ -268,33 +387,51 @@ export function QuestionnaireWizard({
       return
     }
     startTransition(async () => {
-      const result = await submitQuestionnaireAction(q)
+      const userId = await resolveUserId()
+      if (!userId) {
+        setSubmitError("Connectez-vous pour créer votre cahier — votre brouillon est conservé.")
+        return
+      }
+
+      const projectId = await ensureProjectId(q)
+      if (!projectId) return
+
+      // Upload pending photos before completing — never via Server Action body.
+      let workingPhotos = q.photos
+      for (const photo of workingPhotos) {
+        if (!photo.useAuthorized) continue
+        if (isPhotoPersisted(photo)) continue
+        const result = await persistPhoto(photo, projectId, userId)
+        if (!result.ok) {
+          setSubmitError(result.error)
+          return
+        }
+        workingPhotos = workingPhotos.map((p) =>
+          p.id === photo.id
+            ? {
+                ...p,
+                storagePath: result.storagePath,
+                uploadStatus: "persisted" as const,
+                uploadError: undefined,
+              }
+            : p,
+        )
+      }
+
+      const toSubmit: QuestionnaireV1 = {
+        ...q,
+        draftProjectId: projectId,
+        photos: workingPhotos.filter((p) => p.uploadStatus !== "error"),
+      }
+
+      const result = await submitQuestionnaireAction(toSubmit)
       if (!result.ok) {
         setSubmitError(result.error)
         return
       }
 
-      for (const photo of q.photos) {
-        if (!photo.previewDataUrl || !photo.useAuthorized) continue
-        const match = photo.previewDataUrl.match(/^data:([^;]+);base64,(.+)$/)
-        if (!match) continue
-        const upload = await uploadQuestionnairePhotoAction({
-          projectId: result.projectId,
-          photoId: photo.id,
-          fileName: photo.fileName ?? `${photo.id}.jpg`,
-          contentType: match[1],
-          base64: match[2],
-          caption: photo.caption,
-          anecdote: photo.anecdote,
-          useAuthorized: photo.useAuthorized,
-        })
-        if (!upload.ok) {
-          setSubmitError(`Photo: ${upload.error}`)
-          return
-        }
-      }
-
       clearQuestionnaireDraft()
+      clearAllPhotoFiles()
       setQ((prev) => ({ ...prev, draftProjectId: result.projectId }))
       setSubmitOk("Questionnaire terminé et enregistré. Retrouvez-le dans Mes cahiers.")
     })
@@ -354,7 +491,17 @@ export function QuestionnaireWizard({
         {step === "memories" && <MemoriesStep q={q} copy={copy} setQ={setQ} />}
         {step === "insideJokes" && <InsideJokesStep q={q} copy={copy} setQ={setQ} />}
         {step === "games" && <GamesStep q={q} copy={copy} setQ={setQ} />}
-        {step === "photos" && <PhotosStep q={q} copy={copy} setQ={setQ} />}
+        {step === "photos" && (
+          <PhotosStep
+            q={q}
+            copy={copy}
+            setQ={setQ}
+            isAuthenticated={isAuthenticated}
+            ensureProjectId={ensureProjectId}
+            persistPhoto={persistPhoto}
+            resolveUserId={resolveUserId}
+          />
+        )}
         {step === "forbidden" && <ForbiddenStep q={q} copy={copy} update={update} />}
         {step === "color" && <ColorStep q={q} copy={copy} update={update} palettes={palettes} />}
         {step === "style" && <StyleStep q={q} copy={copy} update={update} styles={styles} />}
@@ -1426,10 +1573,22 @@ function PhotosStep({
   q,
   copy,
   setQ,
+  isAuthenticated,
+  ensureProjectId,
+  persistPhoto,
+  resolveUserId,
 }: {
   q: QuestionnaireV1
   copy: { title: string; subtitle?: string }
   setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
+  isAuthenticated: boolean
+  ensureProjectId: (snapshot: QuestionnaireV1) => Promise<string | null>
+  persistPhoto: (
+    photo: QuestionnairePhoto,
+    projectId: string,
+    userId: string,
+  ) => Promise<{ ok: true; storagePath: string } | { ok: false; error: string }>
+  resolveUserId: () => Promise<string | null>
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -1441,18 +1600,26 @@ function PhotosStep({
     setUploadErrors((prev) => [...prev, message])
   }
 
-  function addPhotoWithPreview(file: File, previewDataUrl: string) {
+  function addPhotoFromFile(file: File) {
+    const validation = validatePhotoFile(file)
+    if (validation) {
+      pushUploadError(validation)
+      return
+    }
     setQ((prev) => {
       if (prev.photos.length >= MAX_PHOTOS) return prev
+      const id = newId("ph")
+      const previewDataUrl = setPhotoFile(id, file)
       return {
         ...prev,
         photos: [
           ...prev.photos,
           {
-            id: newId("ph"),
+            id,
             previewDataUrl,
             fileName: file.name,
             useAuthorized: false,
+            uploadStatus: "local",
           },
         ],
       }
@@ -1475,42 +1642,62 @@ function PhotosStep({
     const remaining = MAX_PHOTOS - q.photos.length
     if (remaining <= 0 || images.length === 0) return
     if (images.length > remaining) {
-      pushUploadError(`Maximum ${MAX_PHOTOS} photos : seules les ${remaining} premières ont été prises en compte.`)
+      pushUploadError(
+        `Maximum ${MAX_PHOTOS} photos : seules les ${remaining} premières ont été prises en compte.`,
+      )
     }
-    const toAdd = images.slice(0, remaining)
+    images.slice(0, remaining).forEach((file) => addPhotoFromFile(file))
+  }
 
-    toAdd.forEach((file) => {
-      const reader = new FileReader()
-      reader.onload = () => {
-        const result = reader.result
-        if (typeof result !== "string" || !result.startsWith("data:image/")) {
-          pushUploadError(
-            `Impossible de créer l'aperçu de « ${file.name} ». Essayez un JPG ou PNG.`,
-          )
-          return
-        }
-        const probe = new window.Image()
-        probe.onload = () => addPhotoWithPreview(file, result)
-        probe.onerror = () => {
-          pushUploadError(
-            `Impossible d'afficher « ${file.name} ». Le fichier semble corrompu ou dans un format non supporté.`,
-          )
-        }
-        probe.src = result
-      }
-      reader.onerror = () => {
-        pushUploadError(`Impossible de lire « ${file.name} ».`)
-      }
-      reader.readAsDataURL(file)
-    })
+  async function uploadAuthorizedPhoto(photo: QuestionnairePhoto) {
+    if (!isAuthenticated) return
+    const userId = await resolveUserId()
+    if (!userId) return
+    const projectId = await ensureProjectId(q)
+    if (!projectId) {
+      setQ((prev) => ({
+        ...prev,
+        photos: prev.photos.map((p) =>
+          p.id === photo.id
+            ? {
+                ...p,
+                uploadStatus: "error",
+                uploadError: PHOTO_UPLOAD_USER_ERROR,
+              }
+            : p,
+        ),
+      }))
+      return
+    }
+    await persistPhoto({ ...photo, useAuthorized: true }, projectId, userId)
+  }
+
+  async function removePhoto(photo: QuestionnairePhoto) {
+    if (photo.storagePath && q.draftProjectId) {
+      await deleteBookPhotoAction({
+        projectId: q.draftProjectId,
+        storagePath: photo.storagePath,
+      })
+    }
+    clearPhotoFile(photo.id)
+    setQ((prev) => ({
+      ...prev,
+      photos: prev.photos.filter((p) => p.id !== photo.id),
+    }))
   }
 
   return (
     <div className="flex flex-col gap-5">
       <StepHeader title={copy.title} subtitle={copy.subtitle} />
       <p className="text-sm text-muted-foreground">
-        {q.photos.length} / {MAX_PHOTOS} photos
+        {q.photos.length} / {MAX_PHOTOS} photos · max 10 Mo · JPG, PNG, WebP, GIF
       </p>
+      {!isAuthenticated && q.photos.length > 0 && (
+        <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+          Connectez-vous pour enregistrer vos photos sur le serveur. Elles restent visibles ici en
+          local.
+        </p>
+      )}
 
       {uploadErrors.length > 0 && (
         <ul className="list-disc space-y-1 rounded-lg border border-destructive/40 bg-destructive/10 p-3 pl-6 text-sm text-destructive">
@@ -1548,7 +1735,7 @@ function PhotosStep({
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp,image/gif"
             multiple
             className="hidden"
             onChange={(e) => {
@@ -1560,8 +1747,13 @@ function PhotosStep({
       )}
 
       {q.photos.map((photo, i) => {
-        const previewBroken = brokenPreviewIds.includes(photo.id) || !photo.previewDataUrl
-        const hasPreview = Boolean(photo.previewDataUrl) && !brokenPreviewIds.includes(photo.id)
+        const objectUrl = getPhotoObjectUrl(photo.id)
+        const previewSrc = objectUrl ?? photo.previewDataUrl
+        const previewBroken =
+          brokenPreviewIds.includes(photo.id) || (!previewSrc && !isPhotoPersisted(photo))
+        const hasPreview = Boolean(previewSrc) && !brokenPreviewIds.includes(photo.id)
+        const status = photo.uploadStatus ?? (photo.storagePath ? "persisted" : "local")
+
         return (
           <div
             key={photo.id}
@@ -1570,7 +1762,7 @@ function PhotosStep({
             {hasPreview ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={photo.previewDataUrl}
+                src={previewSrc}
                 alt={photo.fileName ? `Aperçu de ${photo.fileName}` : "Aperçu photo"}
                 className="h-28 w-28 shrink-0 rounded-lg object-cover"
                 onError={() =>
@@ -1585,7 +1777,14 @@ function PhotosStep({
               </div>
             )}
             <div className="flex min-w-0 flex-1 flex-col gap-2">
-              {previewBroken && (
+              <p className="text-xs text-muted-foreground">
+                {status === "uploading" && "Enregistrement…"}
+                {status === "persisted" && "Enregistrée"}
+                {status === "local" &&
+                  (isAuthenticated ? "En attente d'autorisation" : "Brouillon local")}
+                {status === "error" && (photo.uploadError ?? PHOTO_UPLOAD_USER_ERROR)}
+              </p>
+              {previewBroken && status !== "persisted" && (
                 <p className="text-sm text-destructive">
                   Impossible d&apos;afficher cette photo. Supprimez-la et réessayez avec un autre
                   fichier (JPG ou PNG).
@@ -1655,32 +1854,42 @@ function PhotosStep({
                   type="checkbox"
                   className="mt-1"
                   checked={photo.useAuthorized}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const checked = e.target.checked
                     setQ((prev) => ({
                       ...prev,
                       photos: prev.photos.map((x, idx) =>
-                        idx === i ? { ...x, useAuthorized: e.target.checked } : x,
+                        idx === i ? { ...x, useAuthorized: checked } : x,
                       ),
                     }))
-                  }
+                    if (checked && isAuthenticated && !isPhotoPersisted(photo)) {
+                      void uploadAuthorizedPhoto({ ...photo, useAuthorized: true })
+                    }
+                  }}
                 />
                 <span>
                   J&apos;autorise l&apos;utilisation de cette photo dans le cahier. Elle restera privée
                   et ne sera utilisée que pour ce projet. *
                 </span>
               </label>
-              <button
-                type="button"
-                className="self-start text-sm text-destructive"
-                onClick={() =>
-                  setQ((prev) => ({
-                    ...prev,
-                    photos: prev.photos.filter((_, idx) => idx !== i),
-                  }))
-                }
-              >
-                Supprimer
-              </button>
+              <div className="flex flex-wrap gap-3">
+                {status === "error" && (
+                  <button
+                    type="button"
+                    className="text-sm text-primary underline underline-offset-4"
+                    onClick={() => void uploadAuthorizedPhoto({ ...photo, useAuthorized: true })}
+                  >
+                    Réessayer
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="text-sm text-destructive"
+                  onClick={() => void removePhoto(photo)}
+                >
+                  Supprimer
+                </button>
+              </div>
             </div>
           </div>
         )
@@ -2082,7 +2291,10 @@ function RecapStep({
         {" · "}
         {memoriesCount} souvenir{memoriesCount > 1 ? "s" : ""}
         {" · "}
-        {q.photos.length} photo{q.photos.length > 1 ? "s" : ""}
+        {countRecapPhotos(q.photos)} photo{countRecapPhotos(q.photos) > 1 ? "s" : ""}
+        {q.photos.some((p) => p.uploadStatus === "error")
+          ? " (certaines non enregistrées)"
+          : ""}
       </RecapBlock>
 
       <div

@@ -119,6 +119,16 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
         errors.push(`Maximum ${MAX_PHOTOS} photos.`)
       }
       for (const photo of q.photos) {
+        if (photo.uploadStatus === "error") {
+          errors.push(
+            "Une photo n'a pas pu être enregistrée. Réessayez ou supprimez-la pour continuer.",
+          )
+          break
+        }
+        if (photo.uploadStatus === "uploading") {
+          errors.push("Patientez pendant l'enregistrement des photos.")
+          break
+        }
         if (!photo.useAuthorized) {
           errors.push("Chaque photo doit être autorisée pour usage dans le cahier.")
           break

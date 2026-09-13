@@ -86,7 +86,12 @@ export function calculateProfileRichness(
 
   const memories = (profile?.memories ?? questionnaire.memories).filter((m) => m.text.trim())
   const jokes = (profile?.insideJokes ?? questionnaire.insideJokes).filter((j) => j.text.trim())
-  const photos = profile?.photos ?? questionnaire.photos
+  const photos = (profile?.photos ?? questionnaire.photos).filter((p) => {
+    if ("uploadStatus" in p && (p as { uploadStatus?: string }).uploadStatus === "error") {
+      return false
+    }
+    return true
+  })
 
   if (memories.length > 0) bonuses.push("souvenirs")
   if (jokes.length > 0) bonuses.push("private jokes")

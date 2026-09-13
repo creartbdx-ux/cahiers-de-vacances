@@ -7,7 +7,11 @@ import {
   parseQuestionnairePayload,
   statusLabelFr,
 } from "@/lib/books/lifecycle"
-import { getBookPhotos, getBookProject } from "@/lib/data/books"
+import {
+  createBookPhotoSignedUrls,
+  getBookPhotos,
+  getBookProject,
+} from "@/lib/data/books"
 import { calculateProfileRichness } from "@/lib/questionnaire/richness"
 
 export const metadata: Metadata = {
@@ -24,6 +28,7 @@ export default async function AdminQuestionnaireDetailPage({
   if (!project) notFound()
 
   const photos = await getBookPhotos(project.id)
+  const signedUrls = await createBookPhotoSignedUrls(photos.map((p) => p.storage_path))
   const { questionnaire, profile, richnessLevel, ownerEmail } = parseQuestionnairePayload(
     project.questionnaire_data,
   )
@@ -102,14 +107,34 @@ export default async function AdminQuestionnaireDetailPage({
         {photos.length === 0 ? (
           <p className="text-sm text-muted-foreground">Aucune photo.</p>
         ) : (
-          <ul className="space-y-2 text-sm">
-            {photos.map((p) => (
-              <li key={p.id} className="font-mono text-xs">
-                {p.storage_path}
-                {p.caption ? ` — ${p.caption}` : ""}
-                {p.use_authorized ? " · autorisée" : " · non autorisée"}
-              </li>
-            ))}
+          <ul className="grid gap-4 sm:grid-cols-2">
+            {photos.map((p) => {
+              const url = signedUrls[p.storage_path]
+              return (
+                <li key={p.id} className="rounded-xl border border-border p-3">
+                  {url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={url}
+                      alt={p.caption ?? "Photo du questionnaire"}
+                      className="mb-2 aspect-square w-full rounded-lg object-cover"
+                    />
+                  ) : (
+                    <p className="mb-2 text-sm text-destructive">
+                      Aperçu indisponible (URL signée).
+                    </p>
+                  )}
+                  <p className="font-mono text-xs break-all text-muted-foreground">{p.storage_path}</p>
+                  {p.caption ? <p className="mt-1 text-sm">{p.caption}</p> : null}
+                  {p.anecdote ? (
+                    <p className="mt-1 text-sm text-muted-foreground">{p.anecdote}</p>
+                  ) : null}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {p.use_authorized ? "Autorisée" : "Non autorisée"} · URL signée temporaire
+                  </p>
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>

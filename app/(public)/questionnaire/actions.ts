@@ -9,14 +9,23 @@ import {
   parseQuestionnairePayload,
 } from "@/lib/books/lifecycle"
 import {
+  deleteBookPhotoByStoragePath,
   deleteBookProject,
+  getBookPhotos,
   getBookProject,
   insertBookPhoto,
   insertBookProject,
   updateBookProject,
+  createBookPhotoSignedUrls,
 } from "@/lib/data/books"
 import { buildBookProfile } from "@/lib/questionnaire/build-profile"
 import { calculateProfileRichness } from "@/lib/questionnaire/richness"
+import {
+  assertPhotoBelongsToProject,
+  BOOK_PHOTOS_BUCKET,
+  mergeBookPhotosIntoQuestionnaire,
+  toUserFacingPhotoError,
+} from "@/lib/questionnaire/photos"
 import {
   createEmptyQuestionnaire,
   type BookProfileV1,
@@ -25,12 +34,13 @@ import {
 import { validateQuestionnaireComplete, withDerivedAudienceFields } from "@/lib/questionnaire/validate"
 import { createClient } from "@/lib/supabase/server"
 
-const BOOK_PHOTOS_BUCKET = "book-photos"
-
 function stripPhotoPreviews(q: QuestionnaireV1): QuestionnaireV1 {
   return {
     ...q,
-    photos: q.photos.map(({ previewDataUrl: _, ...rest }) => rest),
+    photos: q.photos.map(({ previewDataUrl: _, uploadError: __, ...rest }) => ({
+      ...rest,
+      uploadStatus: rest.storagePath ? ("persisted" as const) : rest.uploadStatus,
+    })),
   }
 }
 
@@ -297,48 +307,90 @@ export async function submitQuestionnaireAction(
 }
 
 /**
- * Upload one photo to private book-photos bucket and attach a book_photos row.
+ * Register a book_photos row after a successful client-side Storage upload.
+ * The file itself must already exist in the private book-photos bucket.
+ * Payload stays tiny (metadata only) — never accepts file bytes / base64.
  */
-export async function uploadQuestionnairePhotoAction(input: {
+export async function registerBookPhotoAction(input: {
   projectId: string
-  photoId: string
-  fileName: string
-  contentType: string
-  base64: string
+  storagePath: string
   caption?: string
   anecdote?: string
   useAuthorized: boolean
 }): Promise<{ ok: true; storagePath: string } | { ok: false; error: string }> {
   const { user } = await getCurrentUser()
-  if (!user) return { ok: false, error: "Non authentifié" }
+  if (!user) return { ok: false, error: toUserFacingPhotoError("Non authentifié") }
 
   const existing = await getBookProject(input.projectId)
   if (!existing || existing.user_id !== user.id) {
-    return { ok: false, error: "Projet inaccessible" }
+    return { ok: false, error: toUserFacingPhotoError("Projet inaccessible") }
+  }
+
+  if (
+    !assertPhotoBelongsToProject({
+      storagePath: input.storagePath,
+      userId: user.id,
+      projectId: input.projectId,
+    })
+  ) {
+    return { ok: false, error: toUserFacingPhotoError("Chemin photo invalide") }
   }
 
   const supabase = await createClient()
-  const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_")
-  const storagePath = `${user.id}/${input.projectId}/${input.photoId}-${safeName}`
-
-  const binary = Buffer.from(input.base64, "base64")
-  const { error: uploadError } = await supabase.storage
+  const { error: missingError } = await supabase.storage
     .from(BOOK_PHOTOS_BUCKET)
-    .upload(storagePath, binary, { contentType: input.contentType, upsert: true })
+    .createSignedUrl(input.storagePath, 60)
 
-  if (uploadError) return { ok: false, error: uploadError.message }
+  if (missingError) {
+    return { ok: false, error: toUserFacingPhotoError(missingError.message) }
+  }
 
   const { error: rowError } = await insertBookPhoto({
     bookProjectId: input.projectId,
-    storagePath,
+    storagePath: input.storagePath,
     caption: input.caption?.trim() || null,
     anecdote: input.anecdote?.trim() || null,
     useAuthorized: input.useAuthorized,
   })
 
-  if (rowError) return { ok: false, error: rowError }
+  if (rowError) return { ok: false, error: toUserFacingPhotoError(rowError) }
+  return { ok: true, storagePath: input.storagePath }
+}
 
-  return { ok: true, storagePath }
+/**
+ * Delete Storage object + book_photos row for a photo the user owns.
+ */
+export async function deleteBookPhotoAction(input: {
+  projectId: string
+  storagePath: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { user } = await getCurrentUser()
+  if (!user) return { ok: false, error: toUserFacingPhotoError("Non authentifié") }
+
+  const existing = await getBookProject(input.projectId)
+  if (!existing || existing.user_id !== user.id) {
+    return { ok: false, error: toUserFacingPhotoError("Projet inaccessible") }
+  }
+
+  if (
+    !assertPhotoBelongsToProject({
+      storagePath: input.storagePath,
+      userId: user.id,
+      projectId: input.projectId,
+    })
+  ) {
+    return { ok: false, error: toUserFacingPhotoError("Chemin photo invalide") }
+  }
+
+  const supabase = await createClient()
+  await supabase.storage.from(BOOK_PHOTOS_BUCKET).remove([input.storagePath])
+
+  const { error } = await deleteBookPhotoByStoragePath({
+    bookProjectId: input.projectId,
+    storagePath: input.storagePath,
+  })
+  if (error) return { ok: false, error: toUserFacingPhotoError(error) }
+  return { ok: true }
 }
 
 export async function loadProjectQuestionnaireAction(
@@ -356,16 +408,17 @@ export async function loadProjectQuestionnaireAction(
     return { ok: false, error: "Accès refusé", code: "FORBIDDEN" }
   }
   const { questionnaire } = parseQuestionnairePayload(project.questionnaire_data)
-  if (!questionnaire) {
-    return {
-      ok: true,
-      questionnaire: { ...createEmptyQuestionnaire(), draftProjectId: projectId },
-      status: project.status,
-    }
-  }
+  const base = questionnaire
+    ? { ...questionnaire, draftProjectId: projectId }
+    : { ...createEmptyQuestionnaire(), draftProjectId: projectId }
+
+  const rows = await getBookPhotos(projectId)
+  const signedUrls = await createBookPhotoSignedUrls(rows.map((r) => r.storage_path))
+  const merged = mergeBookPhotosIntoQuestionnaire(base, rows, signedUrls)
+
   return {
     ok: true,
-    questionnaire: { ...questionnaire, draftProjectId: projectId },
+    questionnaire: merged,
     status: project.status,
   }
 }

@@ -125,6 +125,30 @@ export async function insertBookPhoto(input: {
   useAuthorized: boolean
 }): Promise<{ photo: BookPhoto | null; error: string | null }> {
   const supabase = await createClient()
+
+  // Idempotent register: same storage path must not create duplicates on retry.
+  const { data: existing } = await supabase
+    .from("book_photos")
+    .select("*")
+    .eq("book_project_id", input.bookProjectId)
+    .eq("storage_path", input.storagePath)
+    .maybeSingle()
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from("book_photos")
+      .update({
+        caption: input.caption,
+        anecdote: input.anecdote,
+        use_authorized: input.useAuthorized,
+      })
+      .eq("id", existing.id)
+      .select("*")
+      .single()
+    if (error) return { photo: null, error: error.message }
+    return { photo: data, error: null }
+  }
+
   const { data, error } = await supabase
     .from("book_photos")
     .insert({
@@ -139,4 +163,44 @@ export async function insertBookPhoto(input: {
 
   if (error) return { photo: null, error: error.message }
   return { photo: data, error: null }
+}
+
+export async function deleteBookPhotoByStoragePath(input: {
+  bookProjectId: string
+  storagePath: string
+}): Promise<{ ok: boolean; error: string | null }> {
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from("book_photos")
+    .delete()
+    .eq("book_project_id", input.bookProjectId)
+    .eq("storage_path", input.storagePath)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, error: null }
+}
+
+export async function createBookPhotoSignedUrl(
+  storagePath: string,
+  expiresInSeconds = 3600,
+): Promise<string | null> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.storage
+    .from("book-photos")
+    .createSignedUrl(storagePath, expiresInSeconds)
+  if (error || !data?.signedUrl) return null
+  return data.signedUrl
+}
+
+export async function createBookPhotoSignedUrls(
+  storagePaths: string[],
+  expiresInSeconds = 3600,
+): Promise<Record<string, string>> {
+  const unique = [...new Set(storagePaths.filter(Boolean))]
+  const entries = await Promise.all(
+    unique.map(async (path) => {
+      const url = await createBookPhotoSignedUrl(path, expiresInSeconds)
+      return url ? ([path, url] as const) : null
+    }),
+  )
+  return Object.fromEntries(entries.filter(Boolean) as Array<[string, string]>)
 }

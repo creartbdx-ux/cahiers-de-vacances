@@ -1,6 +1,7 @@
 export * from "./types"
 export * from "./audience"
 export * from "./journey"
+export * from "./photos"
 export {
   validateStep,
   validateQuestionnaireComplete,

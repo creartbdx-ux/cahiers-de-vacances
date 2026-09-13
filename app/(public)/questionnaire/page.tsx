@@ -3,9 +3,14 @@ import { PageIntro } from "@/components/public/page-intro"
 import { QuestionnaireWizard } from "@/components/questionnaire/questionnaire-wizard"
 import { getCurrentUser } from "@/lib/auth"
 import { isQuestionnaireCompleted, parseQuestionnairePayload } from "@/lib/books/lifecycle"
-import { getBookProject } from "@/lib/data/books"
+import {
+  createBookPhotoSignedUrls,
+  getBookPhotos,
+  getBookProject,
+} from "@/lib/data/books"
 import { getActivePalettes } from "@/lib/data/assets"
 import { getActiveStyles, getActiveUniverses } from "@/lib/data/reference"
+import { mergeBookPhotosIntoQuestionnaire } from "@/lib/questionnaire/photos"
 import { createEmptyQuestionnaire, type QuestionnaireV1 } from "@/lib/questionnaire/types"
 
 export const metadata: Metadata = {
@@ -32,10 +37,13 @@ export default async function QuestionnairePage({
     const project = await getBookProject(params.project)
     if (project && project.user_id === user.id) {
       const parsed = parseQuestionnairePayload(project.questionnaire_data)
-      initialQuestionnaire = {
+      const base: QuestionnaireV1 = {
         ...(parsed.questionnaire ?? createEmptyQuestionnaire()),
         draftProjectId: project.id,
       }
+      const rows = await getBookPhotos(project.id)
+      const signedUrls = await createBookPhotoSignedUrls(rows.map((r) => r.storage_path))
+      initialQuestionnaire = mergeBookPhotosIntoQuestionnaire(base, rows, signedUrls)
       projectStatus = project.status
     }
   }

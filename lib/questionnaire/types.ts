@@ -79,16 +79,23 @@ export interface InsideJoke {
   participantIds?: string[]
 }
 
+export type PhotoUploadStatus = "local" | "uploading" | "persisted" | "error"
+
 export interface QuestionnairePhoto {
   id: string
-  /** Local preview (data URL) or remote path after upload. */
+  /** Local object URL / signed URL for preview — never treated as server persistence. */
   previewDataUrl?: string
+  /** Set only when the file exists in Storage and a book_photos row is linked. */
   storagePath?: string
   fileName?: string
   caption?: string
   anecdote?: string
   participantIds?: string[]
   useAuthorized: boolean
+  /** Client upload lifecycle; omit or "local" until Storage + book_photos succeed. */
+  uploadStatus?: PhotoUploadStatus
+  /** User-facing upload error only (never raw gateway/Supabase messages). */
+  uploadError?: string
 }
 
 export interface ForbiddenTopicsAnswer {
