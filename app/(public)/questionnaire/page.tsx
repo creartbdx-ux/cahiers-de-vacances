@@ -21,7 +21,7 @@ export default async function QuestionnairePage() {
     <PageIntro
       eyebrow="Étape 2"
       title="Questionnaire"
-      description="Quelques questions pour composer un cahier vraiment personnel. Vos réponses restent structurées : aucune invention, aucune génération automatique à ce stade."
+      description="Quelques minutes suffisent pour créer un cahier qui vous ressemble. Plus vous nous en dites, plus il sera personnel."
     >
       <QuestionnaireWizard
         universes={universes}

@@ -210,23 +210,24 @@ export const AGE_BRACKETS: { value: AgeBracket; label: string }[] = [
 ]
 
 export const PERSONALITY_TRAIT_OPTIONS = [
-  "complice",
-  "taquin",
-  "aventurier",
-  "tranquille",
+  "drôle",
+  "calme",
+  "sociable",
+  "curieux",
   "compétitif",
   "gourmand",
-  "fêtard",
-  "curieux",
-  "rêveur",
-  "sportif",
   "créatif",
+  "sportif",
+  "aventurier",
+  "rêveur",
   "organisé",
+  "tête en l'air",
   "spontané",
   "sensible",
-  "opposés mais complémentaires",
+  "taquin",
 ] as const
 
+/** Relation / duo dynamics — never shown as solo individual traits. */
 export const DUO_DYNAMICS_OPTIONS = [
   "complice",
   "taquin",
@@ -238,20 +239,50 @@ export const DUO_DYNAMICS_OPTIONS = [
   "opposés mais complémentaires",
 ] as const
 
-export const PERSONAL_FACT_CATEGORIES: { value: PersonalFactCategory; label: string }[] = [
-  { value: "FOOD", label: "Nourriture" },
-  { value: "DRINK", label: "Boisson" },
-  { value: "MUSIC", label: "Musique" },
-  { value: "MOVIE_SERIES", label: "Films / séries" },
-  { value: "BOOK", label: "Livre" },
-  { value: "ACTIVITY", label: "Activité" },
-  { value: "PLACE", label: "Lieu" },
-  { value: "HABIT", label: "Habitude" },
-  { value: "EXPRESSION", label: "Expression" },
-  { value: "FUNNY_FLAW", label: "Petit défaut amusant" },
-  { value: "DISLIKE", label: "Aversion" },
-  { value: "OBJECT", label: "Objet" },
-  { value: "OTHER", label: "Autre" },
+/** Traits usable for group description (can overlap dynamics, not "opposés…"). */
+export const GROUP_TRAIT_OPTIONS = [
+  "complice",
+  "taquin",
+  "aventurier",
+  "tranquille",
+  "compétitif",
+  "gourmand",
+  "fêtard",
+  "sociable",
+  "sportif",
+  "créatif",
+] as const
+
+export const PERSONAL_FACT_CATEGORIES: {
+  value: PersonalFactCategory
+  label: string
+  placeholder: string
+}[] = [
+  { value: "FOOD", label: "Nourriture préférée", placeholder: "Ex. pâtes carbonara" },
+  { value: "DRINK", label: "Boisson préférée", placeholder: "Ex. café latte" },
+  { value: "MUSIC", label: "Musique ou artiste", placeholder: "Ex. Queen" },
+  { value: "MOVIE_SERIES", label: "Film ou série", placeholder: "Ex. Friends" },
+  { value: "BOOK", label: "Livre", placeholder: "Ex. un polar le soir" },
+  { value: "ACTIVITY", label: "Une activité", placeholder: "Ex. randonnée" },
+  { value: "PLACE", label: "Un lieu que vous adorez", placeholder: "Ex. le bassin d'Arcachon" },
+  {
+    value: "HABIT",
+    label: "Une petite habitude",
+    placeholder: "Ex. impossible de commencer la journée sans café",
+  },
+  {
+    value: "EXPRESSION",
+    label: "Une expression que vous dites souvent",
+    placeholder: "Ex. On verra demain",
+  },
+  { value: "DISLIKE", label: "Une chose que vous détestez", placeholder: "Ex. être en retard" },
+  {
+    value: "FUNNY_FLAW",
+    label: "Un petit défaut amusant",
+    placeholder: "Ex. oublie toujours ses clés",
+  },
+  { value: "OBJECT", label: "Un objet fétiche", placeholder: "Ex. un carnet de voyage" },
+  { value: "OTHER", label: "Autre", placeholder: "Ex. un détail qui vous définit" },
 ]
 
 export const GAME_TYPE_OPTIONS: { value: GameTypePreference; label: string }[] = [
@@ -268,10 +299,10 @@ export const GAME_TYPE_OPTIONS: { value: GameTypePreference; label: string }[] =
 ]
 
 export const DIFFICULTY_OPTIONS: { value: DifficultyLevel; label: string }[] = [
-  { value: 1, label: "1 — Détente" },
-  { value: 2, label: "2 — Facile" },
-  { value: 3, label: "3 — Un peu challenge" },
-  { value: 4, label: "4 — Difficile" },
+  { value: 1, label: "Détente" },
+  { value: 2, label: "Facile" },
+  { value: 3, label: "Un peu challenge" },
+  { value: 4, label: "Difficile" },
 ]
 
 export const DUO_TYPE_OPTIONS: { value: DuoType; label: string }[] = [

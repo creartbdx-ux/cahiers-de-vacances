@@ -1,9 +1,10 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState, useTransition } from "react"
-import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
+import { ChevronLeft, ChevronRight, Plus, Trash2, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { StylePreview } from "@/components/questionnaire/style-preview"
 import { cn } from "@/lib/utils"
 import {
   submitQuestionnaireAction,
@@ -11,20 +12,27 @@ import {
 } from "@/app/(public)/questionnaire/actions"
 import {
   AGE_BRACKETS,
+  AUDIENCE_OPTIONS,
   DIFFICULTY_OPTIONS,
   DUO_DYNAMICS_OPTIONS,
   DUO_TYPE_OPTIONS,
   GAME_TYPE_OPTIONS,
+  GROUP_TRAIT_OPTIONS,
   MAX_GROUP_SIZE,
   MAX_PHOTOS,
   MIN_GROUP_SIZE,
   PERSONAL_FACT_CATEGORIES,
   PERSONALITY_TRAIT_OPTIONS,
   applyAudienceDefaults,
+  audienceHumanLabel,
+  buildJourneySteps,
   calculateProfileRichness,
   createEmptyQuestionnaire,
+  difficultyLabel,
+  getStepCopy,
+  memorySuggestions,
   newId,
-  stepsForAudience,
+  richnessClientMessage,
   validateStep,
   type AudienceType,
   type QuestionnaireParticipant,
@@ -37,29 +45,6 @@ import {
   saveQuestionnaireDraft,
 } from "@/lib/questionnaire/storage"
 import type { Palette, Style, Universe } from "@/lib/supabase/types"
-
-const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
-  { value: "ME", label: "Moi" },
-  { value: "OTHER_PERSON", label: "Une autre personne" },
-  { value: "DUO", label: "Deux personnes" },
-  { value: "GROUP", label: "Un groupe d'amis" },
-]
-
-const STEP_LABELS: Record<StepId, string> = {
-  audience: "Qui remplit ?",
-  participants: "Participants",
-  personality: "Personnalité",
-  interests: "Centres d'intérêt",
-  personalFacts: "Petits détails",
-  memories: "Souvenirs",
-  insideJokes: "Private jokes",
-  games: "Jeux",
-  photos: "Photos",
-  forbidden: "Sujets à éviter",
-  visual: "Style & couleur",
-  finale: "Derniers détails",
-  recap: "Récapitulatif",
-}
 
 export function QuestionnaireWizard({
   universes,
@@ -91,15 +76,32 @@ export function QuestionnaireWizard({
     saveQuestionnaireDraft(q)
   }, [q, hydrated])
 
-  const steps = useMemo(() => stepsForAudience(q.audience), [q.audience])
-  const step = steps[Math.min(stepIndex, steps.length - 1)] ?? "audience"
-  const progress = ((stepIndex + 1) / steps.length) * 100
+  const steps = useMemo(
+    () => buildJourneySteps(q.audience, q.creatorIsParticipant),
+    [q.audience, q.creatorIsParticipant],
+  )
+  const safeIndex = Math.min(stepIndex, steps.length - 1)
+  const step = steps[safeIndex] ?? "audience"
+  const copy = getStepCopy(step, q)
+  const progress = ((safeIndex + 1) / steps.length) * 100
   const richness = calculateProfileRichness(q)
+
+  useEffect(() => {
+    if (stepIndex > steps.length - 1) setStepIndex(steps.length - 1)
+  }, [steps.length, stepIndex])
 
   function update(patch: Partial<QuestionnaireV1>) {
     setQ((prev) => applyAudienceDefaults({ ...prev, ...patch }))
     setErrors([])
     setSubmitError(null)
+  }
+
+  function goToStep(id: StepId) {
+    const idx = steps.indexOf(id)
+    if (idx >= 0) {
+      setErrors([])
+      setStepIndex(idx)
+    }
   }
 
   function goNext() {
@@ -150,7 +152,7 @@ export function QuestionnaireWizard({
     setSubmitError(null)
     setSubmitOk(null)
     if (!isAuthenticated) {
-      setSubmitError("Connectez-vous pour enregistrer votre cahier.")
+      setSubmitError("Connectez-vous pour créer votre cahier — votre brouillon est conservé.")
       return
     }
     startTransition(async () => {
@@ -181,9 +183,7 @@ export function QuestionnaireWizard({
       }
 
       clearQuestionnaireDraft()
-      setSubmitOk(
-        `Questionnaire enregistré (${result.richnessLevel}). Projet ${result.projectId.slice(0, 8)}… Aucune génération lancée.`,
-      )
+      setSubmitOk("Votre questionnaire est enregistré. Vous pourrez bientôt créer votre cahier.")
     })
   }
 
@@ -196,7 +196,7 @@ export function QuestionnaireWizard({
       <div>
         <div className="mb-2 flex items-center justify-between text-sm text-muted-foreground">
           <span>
-            Étape {stepIndex + 1} / {steps.length} — {STEP_LABELS[step]}
+            Étape {safeIndex + 1} / {steps.length} — {copy.navLabel}
           </span>
           <span>{Math.round(progress)} %</span>
         </div>
@@ -209,6 +209,7 @@ export function QuestionnaireWizard({
         {step === "audience" && (
           <AudienceStep
             q={q}
+            copy={copy}
             onAudience={(a) => {
               ensureParticipantsForAudience(a)
               setStepIndex(0)
@@ -217,31 +218,35 @@ export function QuestionnaireWizard({
           />
         )}
         {step === "participants" && (
-          <ParticipantsStep q={q} setQ={setQ} update={update} />
+          <ParticipantsStep q={q} copy={copy} setQ={setQ} update={update} />
         )}
-        {step === "personality" && <PersonalityStep q={q} setQ={setQ} />}
+        {step === "personality" && <PersonalityStep q={q} copy={copy} setQ={setQ} />}
         {step === "interests" && (
-          <InterestsStep q={q} update={update} universes={universes} />
+          <InterestsStep q={q} copy={copy} update={update} universes={universes} />
         )}
-        {step === "personalFacts" && <PersonalFactsStep q={q} setQ={setQ} />}
-        {step === "memories" && <MemoriesStep q={q} setQ={setQ} />}
-        {step === "insideJokes" && <InsideJokesStep q={q} setQ={setQ} />}
-        {step === "games" && <GamesStep q={q} setQ={setQ} />}
-        {step === "photos" && <PhotosStep q={q} setQ={setQ} />}
-        {step === "forbidden" && <ForbiddenStep q={q} update={update} />}
-        {step === "visual" && (
-          <VisualStep q={q} update={update} palettes={palettes} styles={styles} />
-        )}
-        {step === "finale" && <FinaleStep q={q} update={update} />}
+        {step === "personalFacts" && <PersonalFactsStep q={q} copy={copy} setQ={setQ} />}
+        {step === "memories" && <MemoriesStep q={q} copy={copy} setQ={setQ} />}
+        {step === "insideJokes" && <InsideJokesStep q={q} copy={copy} setQ={setQ} />}
+        {step === "games" && <GamesStep q={q} copy={copy} setQ={setQ} />}
+        {step === "photos" && <PhotosStep q={q} copy={copy} setQ={setQ} />}
+        {step === "forbidden" && <ForbiddenStep q={q} copy={copy} update={update} />}
+        {step === "color" && <ColorStep q={q} copy={copy} update={update} palettes={palettes} />}
+        {step === "style" && <StyleStep q={q} copy={copy} update={update} styles={styles} />}
+        {step === "finale" && <FinaleStep q={q} copy={copy} update={update} />}
         {step === "recap" && (
           <RecapStep
             q={q}
+            copy={copy}
             richness={richness}
+            universes={universes}
+            palettes={palettes}
+            styles={styles}
             isAuthenticated={isAuthenticated}
             submitError={submitError}
             submitOk={submitOk}
             pending={pending}
             onSubmit={handleSubmit}
+            onEdit={goToStep}
           />
         )}
 
@@ -255,7 +260,7 @@ export function QuestionnaireWizard({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button type="button" variant="outline" onClick={goPrev} disabled={stepIndex === 0}>
+        <Button type="button" variant="outline" onClick={goPrev} disabled={safeIndex === 0}>
           <ChevronLeft className="size-4" />
           Précédent
         </Button>
@@ -266,6 +271,21 @@ export function QuestionnaireWizard({
           </Button>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+function StepHeader({
+  title,
+  subtitle,
+}: {
+  title: string
+  subtitle?: string
+}) {
+  return (
+    <div className="mb-5">
+      <h2 className="font-serif text-2xl font-semibold">{title}</h2>
+      {subtitle ? <p className="mt-2 text-muted-foreground">{subtitle}</p> : null}
     </div>
   )
 }
@@ -301,29 +321,38 @@ function Chip({
 
 function AudienceStep({
   q,
+  copy,
   onAudience,
   onCreator,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   onAudience: (a: AudienceType) => void
   onCreator: (v: boolean) => void
 }) {
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="font-serif text-2xl font-semibold">Qui va remplir ce cahier ?</h2>
-        <p className="mt-2 text-muted-foreground">Le parcours s&apos;adapte à votre réponse.</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      <div className="grid gap-2 sm:grid-cols-2">
         {AUDIENCE_OPTIONS.map((o) => (
-          <Chip key={o.value} active={q.audience === o.value} onClick={() => onAudience(o.value)}>
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onAudience(o.value)}
+            className={cn(
+              "rounded-2xl border px-4 py-4 text-left text-base font-medium transition-colors",
+              q.audience === o.value
+                ? "border-primary bg-primary/5 ring-2 ring-primary/25"
+                : "border-border hover:bg-muted/50",
+            )}
+          >
             {o.label}
-          </Chip>
+          </button>
         ))}
       </div>
       {(q.audience === "DUO" || q.audience === "GROUP") && (
         <div>
-          <FieldLabel>Tu feras partie des personnes qui rempliront ce cahier ?</FieldLabel>
+          <FieldLabel>Vous faites partie des personnes qui utiliseront ce cahier ?</FieldLabel>
           <div className="flex gap-2">
             <Chip active={q.creatorIsParticipant === true} onClick={() => onCreator(true)}>
               Oui
@@ -340,10 +369,12 @@ function AudienceStep({
 
 function ParticipantsStep({
   q,
+  copy,
   setQ,
   update,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
   update: (p: Partial<QuestionnaireV1>) => void
 }) {
@@ -356,10 +387,10 @@ function ParticipantsStep({
 
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Les participants</h2>
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
       {q.audience === "DUO" && (
         <div>
-          <FieldLabel>Quel type de duo êtes-vous ?</FieldLabel>
+          <FieldLabel>Quel type de duo ?</FieldLabel>
           <div className="flex flex-wrap gap-2">
             {DUO_TYPE_OPTIONS.map((o) => (
               <Chip key={o.value} active={q.duoType === o.value} onClick={() => update({ duoType: o.value })}>
@@ -390,9 +421,9 @@ function ParticipantsStep({
                 }))
               }
             >
-              <Plus className="size-4" /> Ajouter
+              <Plus className="size-4" /> Ajouter quelqu&apos;un
             </Button>
-            <span className="text-sm text-muted-foreground">
+            <span className="self-center text-sm text-muted-foreground">
               {q.participants.length} / {MAX_GROUP_SIZE} (min {MIN_GROUP_SIZE})
             </span>
           </div>
@@ -427,14 +458,16 @@ function ParticipantsStep({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Surnom (facultatif)
-            <input
-              className="h-10 rounded-lg border border-input bg-background px-3"
-              value={p.nickname ?? ""}
-              onChange={(e) => patchParticipant(i, { nickname: e.target.value })}
-            />
-          </label>
+          {q.audience !== "GROUP" && (
+            <label className="flex flex-col gap-1 text-sm">
+              Surnom (facultatif)
+              <input
+                className="h-10 rounded-lg border border-input bg-background px-3"
+                value={p.nickname ?? ""}
+                onChange={(e) => patchParticipant(i, { nickname: e.target.value })}
+              />
+            </label>
+          )}
           {q.audience === "OTHER_PERSON" && (
             <label className="flex flex-col gap-1 text-sm">
               Lien avec cette personne *
@@ -467,9 +500,11 @@ function ParticipantsStep({
 
 function PersonalityStep({
   q,
+  copy,
   setQ,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
 }) {
   const soloId = q.participants[0]?.id
@@ -495,10 +530,13 @@ function PersonalityStep({
 
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Personnalité</h2>
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
       {(q.audience === "ME" || q.audience === "OTHER_PERSON") && soloId && (
         <div>
-          <FieldLabel>Traits (3 à 6) *</FieldLabel>
+          <FieldLabel>
+            {q.audience === "ME" ? "Quels traits vous ressemblent ?" : "Quels traits lui ressemblent ?"}{" "}
+            (3 à 6)
+          </FieldLabel>
           <div className="flex flex-wrap gap-2">
             {PERSONALITY_TRAIT_OPTIONS.map((t) => (
               <Chip
@@ -528,7 +566,7 @@ function PersonalityStep({
       {q.audience === "DUO" && (
         <>
           <label className="flex flex-col gap-1 text-sm">
-            Description commune du duo *
+            Comment décririez-vous leur duo ? *
             <textarea
               className="min-h-20 rounded-lg border border-input bg-background p-3"
               value={q.personality.duoDescription ?? ""}
@@ -541,7 +579,7 @@ function PersonalityStep({
             />
           </label>
           <div>
-            <FieldLabel>Dynamique (au moins 2) *</FieldLabel>
+            <FieldLabel>Dynamique du duo (au moins 2) *</FieldLabel>
             <div className="flex flex-wrap gap-2">
               {DUO_DYNAMICS_OPTIONS.map((t) => {
                 const active = q.personality.duoDynamics?.includes(t) ?? false
@@ -570,9 +608,9 @@ function PersonalityStep({
           </div>
           {q.participants.map((p) => (
             <div key={p.id}>
-              <FieldLabel>Traits pour {p.firstName || "participant"} (2–3 recommandés)</FieldLabel>
+              <FieldLabel>Traits pour {p.firstName || "cette personne"} (facultatif)</FieldLabel>
               <div className="flex flex-wrap gap-2">
-                {PERSONALITY_TRAIT_OPTIONS.slice(0, 10).map((t) => (
+                {PERSONALITY_TRAIT_OPTIONS.map((t) => (
                   <Chip
                     key={t}
                     active={(q.personality.traitsByParticipantId[p.id] ?? []).includes(t)}
@@ -591,7 +629,7 @@ function PersonalityStep({
           <div>
             <FieldLabel>Caractéristiques du groupe (3 à 5) *</FieldLabel>
             <div className="flex flex-wrap gap-2">
-              {PERSONALITY_TRAIT_OPTIONS.map((t) => {
+              {GROUP_TRAIT_OPTIONS.map((t) => {
                 const active = q.personality.groupTraits?.includes(t) ?? false
                 return (
                   <Chip
@@ -618,7 +656,7 @@ function PersonalityStep({
           </div>
           {q.participants.map((p, i) => (
             <label key={p.id} className="flex flex-col gap-1 text-sm">
-              Trait court pour {p.firstName || `participant ${i + 1}`} (facultatif)
+              Petite caractéristique pour {p.firstName || `personne ${i + 1}`} (facultatif)
               <input
                 className="h-10 rounded-lg border border-input bg-background px-3"
                 placeholder="ex. toujours en retard"
@@ -642,21 +680,18 @@ function PersonalityStep({
 
 function InterestsStep({
   q,
+  copy,
   update,
   universes,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   update: (p: Partial<QuestionnaireV1>) => void
   universes: Universe[]
 }) {
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">
-        {q.audience === "DUO" || q.audience === "GROUP"
-          ? "Centres d'intérêt communs"
-          : "Ce qu'ils aiment"}
-      </h2>
-      <p className="text-sm text-muted-foreground">Choisissez au moins 3 univers.</p>
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
       <div className="flex flex-wrap gap-2">
         {universes.map((u) => {
           const active = q.interestUniverseIds.includes(u.id)
@@ -691,98 +726,119 @@ function InterestsStep({
 
 function PersonalFactsStep({
   q,
+  copy,
   setQ,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
 }) {
+  const showWho = q.audience === "DUO" || q.audience === "GROUP"
+  const everyoneLabel = q.audience === "DUO" ? "Tout le duo" : "Tout le groupe"
+
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Petites informations personnelles</h2>
-      <p className="text-sm text-muted-foreground">Minimum 3, idéal 5–8, maximum 15.</p>
-      {q.personalFacts.map((f, i) => (
-        <div key={f.id} className="flex flex-col gap-2 rounded-xl border border-border p-3">
-          <div className="flex gap-2">
-            <select
-              className="h-10 rounded-lg border border-input bg-background px-2 text-sm"
-              value={f.category}
-              onChange={(e) =>
-                setQ((prev) => ({
-                  ...prev,
-                  personalFacts: prev.personalFacts.map((x, idx) =>
-                    idx === i
-                      ? { ...x, category: e.target.value as typeof f.category }
-                      : x,
-                  ),
-                }))
-              }
-            >
-              {PERSONAL_FACT_CATEGORIES.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-            <input
-              className="h-10 flex-1 rounded-lg border border-input bg-background px-3 text-sm"
-              value={f.value}
-              onChange={(e) =>
-                setQ((prev) => ({
-                  ...prev,
-                  personalFacts: prev.personalFacts.map((x, idx) =>
-                    idx === i ? { ...x, value: e.target.value } : x,
-                  ),
-                }))
-              }
-              placeholder="Valeur"
-            />
-            <button
-              type="button"
-              onClick={() =>
-                setQ((prev) => ({
-                  ...prev,
-                  personalFacts: prev.personalFacts.filter((_, idx) => idx !== i),
-                }))
-              }
-            >
-              <Trash2 className="size-4 text-muted-foreground" />
-            </button>
-          </div>
-          {(q.audience === "DUO" || q.audience === "GROUP") && (
-            <div className="flex flex-wrap gap-2">
-              {q.participants.map((p) => {
-                const active = f.participantIds?.includes(p.id) ?? false
-                return (
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      {q.personalFacts.map((f, i) => {
+        const cat = PERSONAL_FACT_CATEGORIES.find((c) => c.value === f.category)
+        return (
+          <div key={f.id} className="flex flex-col gap-3 rounded-xl border border-border p-4">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <select
+                className="h-10 rounded-lg border border-input bg-background px-2 text-sm sm:w-56"
+                value={f.category}
+                onChange={(e) =>
+                  setQ((prev) => ({
+                    ...prev,
+                    personalFacts: prev.personalFacts.map((x, idx) =>
+                      idx === i
+                        ? { ...x, category: e.target.value as typeof f.category }
+                        : x,
+                    ),
+                  }))
+                }
+              >
+                {PERSONAL_FACT_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="h-10 flex-1 rounded-lg border border-input bg-background px-3 text-sm"
+                value={f.value}
+                onChange={(e) =>
+                  setQ((prev) => ({
+                    ...prev,
+                    personalFacts: prev.personalFacts.map((x, idx) =>
+                      idx === i ? { ...x, value: e.target.value } : x,
+                    ),
+                  }))
+                }
+                placeholder={cat?.placeholder ?? "Ex. …"}
+              />
+              <button
+                type="button"
+                aria-label="Supprimer ce détail"
+                onClick={() =>
+                  setQ((prev) => ({
+                    ...prev,
+                    personalFacts: prev.personalFacts.filter((_, idx) => idx !== i),
+                  }))
+                }
+              >
+                <Trash2 className="size-4 text-muted-foreground" />
+              </button>
+            </div>
+            {showWho && (
+              <div>
+                <FieldLabel>Qui cela concerne ?</FieldLabel>
+                <div className="flex flex-wrap gap-2">
                   <Chip
-                    key={p.id}
-                    active={active}
+                    active={!f.participantIds?.length}
                     onClick={() =>
                       setQ((prev) => ({
                         ...prev,
-                        personalFacts: prev.personalFacts.map((x, idx) => {
-                          if (idx !== i) return x
-                          const ids = x.participantIds ?? []
-                          return {
-                            ...x,
-                            participantIds: active
-                              ? ids.filter((id) => id !== p.id)
-                              : [...ids, p.id],
-                          }
-                        }),
+                        personalFacts: prev.personalFacts.map((x, idx) =>
+                          idx === i ? { ...x, participantIds: undefined } : x,
+                        ),
                       }))
                     }
                   >
-                    {p.firstName || "?"}
+                    {everyoneLabel}
                   </Chip>
-                )
-              })}
-              <span className="text-xs text-muted-foreground self-center">
-                (vide = tout le monde)
-              </span>
-            </div>
-          )}
-        </div>
-      ))}
+                  {q.participants.map((p) => {
+                    const active = f.participantIds?.includes(p.id) ?? false
+                    return (
+                      <Chip
+                        key={p.id}
+                        active={active}
+                        onClick={() =>
+                          setQ((prev) => ({
+                            ...prev,
+                            personalFacts: prev.personalFacts.map((x, idx) => {
+                              if (idx !== i) return x
+                              const ids = x.participantIds ?? []
+                              return {
+                                ...x,
+                                participantIds: active
+                                  ? ids.filter((id) => id !== p.id)
+                                  : [...ids, p.id],
+                              }
+                            }),
+                          }))
+                        }
+                      >
+                        {p.firstName || "?"}
+                      </Chip>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
       <Button
         type="button"
         variant="outline"
@@ -797,7 +853,7 @@ function PersonalFactsStep({
           }))
         }
       >
-        <Plus className="size-4" /> Ajouter une information
+        <Plus className="size-4" /> Ajouter un autre détail
       </Button>
     </div>
   )
@@ -805,42 +861,44 @@ function PersonalFactsStep({
 
 function MemoriesStep({
   q,
+  copy,
   setQ,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
 }) {
-  const prompts =
-    q.audience === "DUO"
-      ? ["Rencontre", "Souvenir marquant", "Voyage", "Anecdote drôle", "Habitude commune"]
-      : q.audience === "GROUP"
-        ? ["Souvenir culte", "Voyage", "Soirée", "Anecdote drôle", "Tradition", "Private joke"]
-        : ["Souvenir marquant", "Anecdote drôle", "Voyage"]
+  const suggestions = memorySuggestions(q.audience)
+
+  function addMemory(seedTitle?: string) {
+    setQ((prev) => ({
+      ...prev,
+      memories: [...prev.memories, { id: newId("m"), text: "", title: seedTitle }],
+    }))
+  }
 
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Souvenirs & anecdotes</h2>
-      <p className="text-sm text-muted-foreground">
-        Facultatif mais recommandé. Suggestions : {prompts.join(", ")}.
-      </p>
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {suggestions.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => addMemory(s)}
+              className="rounded-full border border-dashed border-border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
       {q.memories.map((m, i) => (
-        <div key={m.id} className="flex flex-col gap-2 rounded-xl border border-border p-3">
-          <input
-            className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-            placeholder="Titre (facultatif)"
-            value={m.title ?? ""}
-            onChange={(e) =>
-              setQ((prev) => ({
-                ...prev,
-                memories: prev.memories.map((x, idx) =>
-                  idx === i ? { ...x, title: e.target.value } : x,
-                ),
-              }))
-            }
-          />
+        <div key={m.id} className="flex flex-col gap-2 rounded-xl border border-border p-4">
           <textarea
-            className="min-h-20 rounded-lg border border-input bg-background p-3 text-sm"
-            placeholder="Récit *"
+            className="min-h-24 rounded-lg border border-input bg-background p-3 text-sm"
+            placeholder="Racontez ce moment…"
             value={m.text}
             onChange={(e) =>
               setQ((prev) => ({
@@ -851,19 +909,39 @@ function MemoriesStep({
               }))
             }
           />
-          <input
-            className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-            placeholder="Lieu (facultatif)"
-            value={m.place ?? ""}
-            onChange={(e) =>
-              setQ((prev) => ({
-                ...prev,
-                memories: prev.memories.map((x, idx) =>
-                  idx === i ? { ...x, place: e.target.value } : x,
-                ),
-              }))
-            }
-          />
+          <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground">
+              Titre ou lieu (facultatif)
+            </summary>
+            <div className="mt-2 flex flex-col gap-2">
+              <input
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                placeholder="Petit titre"
+                value={m.title ?? ""}
+                onChange={(e) =>
+                  setQ((prev) => ({
+                    ...prev,
+                    memories: prev.memories.map((x, idx) =>
+                      idx === i ? { ...x, title: e.target.value } : x,
+                    ),
+                  }))
+                }
+              />
+              <input
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                placeholder="Lieu"
+                value={m.place ?? ""}
+                onChange={(e) =>
+                  setQ((prev) => ({
+                    ...prev,
+                    memories: prev.memories.map((x, idx) =>
+                      idx === i ? { ...x, place: e.target.value } : x,
+                    ),
+                  }))
+                }
+              />
+            </div>
+          </details>
           <button
             type="button"
             className="self-start text-sm text-destructive"
@@ -878,17 +956,7 @@ function MemoriesStep({
           </button>
         </div>
       ))}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() =>
-          setQ((prev) => ({
-            ...prev,
-            memories: [...prev.memories, { id: newId("m"), text: "" }],
-          }))
-        }
-      >
+      <Button type="button" variant="outline" size="sm" onClick={() => addMemory()}>
         <Plus className="size-4" /> Ajouter un souvenir
       </Button>
     </div>
@@ -897,19 +965,21 @@ function MemoriesStep({
 
 function InsideJokesStep({
   q,
+  copy,
   setQ,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
 }) {
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Private jokes & habitudes</h2>
-      <p className="text-sm text-muted-foreground">Facultatif — expressions, blagues internes…</p>
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
       {q.insideJokes.map((j, i) => (
         <div key={j.id} className="flex gap-2">
           <input
             className="h-10 flex-1 rounded-lg border border-input bg-background px-3 text-sm"
+            placeholder="Ex. une expression, une blague interne…"
             value={j.text}
             onChange={(e) =>
               setQ((prev) => ({
@@ -952,9 +1022,11 @@ function InsideJokesStep({
 
 function GamesStep({
   q,
+  copy,
   setQ,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
 }) {
   const liked = q.gamePreferences.likedTypes ?? []
@@ -962,9 +1034,9 @@ function GamesStep({
 
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Jeux</h2>
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
       <div>
-        <FieldLabel>Quels types de jeux aimez-vous ? *</FieldLabel>
+        <FieldLabel>Types de jeux *</FieldLabel>
         <div className="flex flex-wrap gap-2">
           {GAME_TYPE_OPTIONS.map((o) => (
             <Chip
@@ -1042,141 +1114,217 @@ function GamesStep({
 
 function PhotosStep({
   q,
+  copy,
   setQ,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
 }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
+  const showWho = q.audience === "DUO" || q.audience === "GROUP"
+
+  function readFiles(fileList: FileList | File[]) {
+    const files = Array.from(fileList).filter((f) => f.type.startsWith("image/"))
+    const remaining = MAX_PHOTOS - q.photos.length
+    if (remaining <= 0 || files.length === 0) return
+    const toAdd = files.slice(0, remaining)
+
+    toAdd.forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        setQ((prev) => {
+          if (prev.photos.length >= MAX_PHOTOS) return prev
+          return {
+            ...prev,
+            photos: [
+              ...prev.photos,
+              {
+                id: newId("ph"),
+                previewDataUrl: String(reader.result),
+                fileName: file.name,
+                useAuthorized: false,
+              },
+            ],
+          }
+        })
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Photos</h2>
-      <p className="rounded-lg bg-muted/60 p-3 text-sm text-muted-foreground">
-        Les photos sont totalement facultatives. Votre cahier sera entièrement conçu même si vous
-        n&apos;en ajoutez aucune. Maximum {MAX_PHOTOS}.
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      <p className="text-sm text-muted-foreground">
+        {q.photos.length} / {MAX_PHOTOS} photos
       </p>
-      {q.photos.map((photo, i) => (
-        <div key={photo.id} className="flex flex-col gap-2 rounded-xl border border-border p-3">
-          {photo.previewDataUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={photo.previewDataUrl} alt="" className="h-28 w-auto rounded-lg object-cover" />
+
+      {q.photos.length < MAX_PHOTOS && (
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDragging(true)
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDragging(false)
+            if (e.dataTransfer.files?.length) readFiles(e.dataTransfer.files)
+          }}
+          className={cn(
+            "flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors",
+            dragging ? "border-primary bg-primary/5" : "border-border bg-muted/30",
           )}
+        >
+          <Upload className="size-8 text-muted-foreground" />
+          <div>
+            <p className="font-medium">Glissez vos photos ici</p>
+            <p className="mt-1 text-sm text-muted-foreground">ou</p>
+          </div>
+          <Button type="button" variant="outline" onClick={() => inputRef.current?.click()}>
+            Choisir des photos
+          </Button>
           <input
+            ref={inputRef}
             type="file"
             accept="image/*"
+            multiple
+            className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (!file) return
-              const reader = new FileReader()
-              reader.onload = () => {
-                setQ((prev) => ({
-                  ...prev,
-                  photos: prev.photos.map((x, idx) =>
-                    idx === i
-                      ? {
-                          ...x,
-                          previewDataUrl: String(reader.result),
-                          fileName: file.name,
-                        }
-                      : x,
-                  ),
-                }))
-              }
-              reader.readAsDataURL(file)
+              if (e.target.files?.length) readFiles(e.target.files)
+              e.target.value = ""
             }}
           />
-          <input
-            className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-            placeholder="Légende"
-            value={photo.caption ?? ""}
-            onChange={(e) =>
-              setQ((prev) => ({
-                ...prev,
-                photos: prev.photos.map((x, idx) =>
-                  idx === i ? { ...x, caption: e.target.value } : x,
-                ),
-              }))
-            }
-          />
-          <input
-            className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-            placeholder="Anecdote"
-            value={photo.anecdote ?? ""}
-            onChange={(e) =>
-              setQ((prev) => ({
-                ...prev,
-                photos: prev.photos.map((x, idx) =>
-                  idx === i ? { ...x, anecdote: e.target.value } : x,
-                ),
-              }))
-            }
-          />
-          <label className="flex items-center gap-2 text-sm">
+        </div>
+      )}
+
+      {q.photos.map((photo, i) => (
+        <div key={photo.id} className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row">
+          {photo.previewDataUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={photo.previewDataUrl}
+              alt=""
+              className="h-28 w-28 shrink-0 rounded-lg object-cover"
+            />
+          ) : null}
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            {showWho && (
+              <div>
+                <FieldLabel>Qui apparaît sur cette photo ?</FieldLabel>
+                <div className="flex flex-wrap gap-2">
+                  {q.participants.map((p) => {
+                    const active = photo.participantIds?.includes(p.id) ?? false
+                    return (
+                      <Chip
+                        key={p.id}
+                        active={active}
+                        onClick={() =>
+                          setQ((prev) => ({
+                            ...prev,
+                            photos: prev.photos.map((x, idx) => {
+                              if (idx !== i) return x
+                              const ids = x.participantIds ?? []
+                              return {
+                                ...x,
+                                participantIds: active
+                                  ? ids.filter((id) => id !== p.id)
+                                  : [...ids, p.id],
+                              }
+                            }),
+                          }))
+                        }
+                      >
+                        {p.firstName || "?"}
+                      </Chip>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             <input
-              type="checkbox"
-              checked={photo.useAuthorized}
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+              placeholder="Une petite légende ?"
+              value={photo.caption ?? ""}
               onChange={(e) =>
                 setQ((prev) => ({
                   ...prev,
                   photos: prev.photos.map((x, idx) =>
-                    idx === i ? { ...x, useAuthorized: e.target.checked } : x,
+                    idx === i ? { ...x, caption: e.target.value } : x,
                   ),
                 }))
               }
             />
-            J&apos;autorise l&apos;usage de cette photo dans le cahier *
-          </label>
-          <button
-            type="button"
-            className="self-start text-sm text-destructive"
-            onClick={() =>
-              setQ((prev) => ({
-                ...prev,
-                photos: prev.photos.filter((_, idx) => idx !== i),
-              }))
-            }
-          >
-            Supprimer
-          </button>
+            <input
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+              placeholder="Une anecdote liée à cette photo ?"
+              value={photo.anecdote ?? ""}
+              onChange={(e) =>
+                setQ((prev) => ({
+                  ...prev,
+                  photos: prev.photos.map((x, idx) =>
+                    idx === i ? { ...x, anecdote: e.target.value } : x,
+                  ),
+                }))
+              }
+            />
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={photo.useAuthorized}
+                onChange={(e) =>
+                  setQ((prev) => ({
+                    ...prev,
+                    photos: prev.photos.map((x, idx) =>
+                      idx === i ? { ...x, useAuthorized: e.target.checked } : x,
+                    ),
+                  }))
+                }
+              />
+              <span>
+                J&apos;autorise l&apos;utilisation de cette photo dans le cahier. Elle restera privée et
+                ne sera utilisée que pour ce projet. *
+              </span>
+            </label>
+            <button
+              type="button"
+              className="self-start text-sm text-destructive"
+              onClick={() =>
+                setQ((prev) => ({
+                  ...prev,
+                  photos: prev.photos.filter((_, idx) => idx !== i),
+                }))
+              }
+            >
+              Supprimer
+            </button>
+          </div>
         </div>
       ))}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={q.photos.length >= MAX_PHOTOS}
-        onClick={() =>
-          setQ((prev) => ({
-            ...prev,
-            photos: [...prev.photos, { id: newId("ph"), useAuthorized: false }],
-          }))
-        }
-      >
-        <Plus className="size-4" /> Ajouter une photo
-      </Button>
     </div>
   )
 }
 
 function ForbiddenStep({
   q,
+  copy,
   update,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   update: (p: Partial<QuestionnaireV1>) => void
 }) {
   const ft = q.forbiddenTopics
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Sujets à éviter</h2>
-      <p className="text-muted-foreground">
-        Y a-t-il des sujets, personnes ou événements que le cahier ne doit jamais évoquer ?
-      </p>
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
       <div className="flex gap-2">
         <Chip
           active={ft?.answered === true && ft.hasRestrictions === false}
-          onClick={() =>
-            update({ forbiddenTopics: { answered: true, hasRestrictions: false } })
-          }
+          onClick={() => update({ forbiddenTopics: { answered: true, hasRestrictions: false } })}
         >
           Rien à signaler
         </Chip>
@@ -1200,7 +1348,7 @@ function ForbiddenStep({
         <>
           <textarea
             className="min-h-24 rounded-lg border border-input bg-background p-3 text-sm"
-            placeholder="Précisez les sujets à éviter *"
+            placeholder="Précisez ce qu'il faut éviter *"
             value={ft.text ?? ""}
             onChange={(e) =>
               update({
@@ -1224,104 +1372,122 @@ function ForbiddenStep({
   )
 }
 
-function VisualStep({
+function ColorStep({
   q,
+  copy,
   update,
   palettes,
-  styles,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   update: (p: Partial<QuestionnaireV1>) => void
   palettes: Palette[]
-  styles: Style[]
 }) {
   return (
-    <div className="flex flex-col gap-6">
-      <h2 className="font-serif text-2xl font-semibold">Style & couleur</h2>
-      <div>
-        <FieldLabel>Palette *</FieldLabel>
-        <div className="grid gap-3 sm:grid-cols-2">
+    <div className="flex flex-col gap-5">
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() =>
+            update({
+              visualPreferences: { ...q.visualPreferences, paletteId: "AUTO" },
+            })
+          }
+          className={cn(
+            "rounded-2xl border p-4 text-left",
+            q.visualPreferences.paletteId === "AUTO"
+              ? "border-primary ring-2 ring-primary/30"
+              : "border-border",
+          )}
+        >
+          <div className="mb-3 h-10 overflow-hidden rounded-xl bg-gradient-to-r from-rose-300 via-amber-200 to-sky-300" />
+          <p className="font-medium">Surprenez-moi</p>
+          <p className="mt-1 text-xs text-muted-foreground">On choisit une ambiance pour vous</p>
+        </button>
+        {palettes.map((p) => (
           <button
+            key={p.id}
             type="button"
             onClick={() =>
               update({
-                visualPreferences: { ...q.visualPreferences, paletteId: "AUTO" },
+                visualPreferences: { ...q.visualPreferences, paletteId: p.id },
               })
             }
             className={cn(
-              "rounded-xl border p-3 text-left text-sm",
-              q.visualPreferences.paletteId === "AUTO"
+              "rounded-2xl border p-4 text-left",
+              q.visualPreferences.paletteId === p.id
                 ? "border-primary ring-2 ring-primary/30"
                 : "border-border",
             )}
           >
-            AUTO — on choisit pour vous
+            <div className="mb-3 flex h-10 overflow-hidden rounded-xl">
+              <span className="flex-1" style={{ backgroundColor: p.primary_color }} />
+              <span className="flex-1" style={{ backgroundColor: p.secondary_color }} />
+              <span className="flex-1" style={{ backgroundColor: p.accent_color }} />
+              <span className="flex-1" style={{ backgroundColor: p.background_color }} />
+            </div>
+            <p className="font-medium">{p.name}</p>
           </button>
-          {palettes.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() =>
-                update({
-                  visualPreferences: { ...q.visualPreferences, paletteId: p.id },
-                })
-              }
-              className={cn(
-                "rounded-xl border p-3 text-left",
-                q.visualPreferences.paletteId === p.id
-                  ? "border-primary ring-2 ring-primary/30"
-                  : "border-border",
-              )}
-            >
-              <div className="mb-2 flex h-6 overflow-hidden rounded-md">
-                <span className="flex-1" style={{ backgroundColor: p.primary_color }} />
-                <span className="flex-1" style={{ backgroundColor: p.secondary_color }} />
-                <span className="flex-1" style={{ backgroundColor: p.accent_color }} />
-                <span className="flex-1" style={{ backgroundColor: p.background_color }} />
-              </div>
-              <p className="text-sm font-medium">{p.name}</p>
-            </button>
-          ))}
-        </div>
+        ))}
       </div>
-      <div>
-        <FieldLabel>Style *</FieldLabel>
-        <div className="grid gap-3 sm:grid-cols-2">
+    </div>
+  )
+}
+
+function StyleStep({
+  q,
+  copy,
+  update,
+  styles,
+}: {
+  q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
+  update: (p: Partial<QuestionnaireV1>) => void
+  styles: Style[]
+}) {
+  return (
+    <div className="flex flex-col gap-5">
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() =>
+            update({ visualPreferences: { ...q.visualPreferences, styleId: "AUTO" } })
+          }
+          className={cn(
+            "rounded-2xl border p-3 text-left",
+            q.visualPreferences.styleId === "AUTO"
+              ? "border-primary ring-2 ring-primary/30"
+              : "border-border",
+          )}
+        >
+          <div className="mb-3 rounded-xl border border-dashed border-border bg-muted/40 p-3 text-center text-sm text-muted-foreground">
+            Aperçu surprise
+          </div>
+          <p className="font-medium">Surprenez-moi</p>
+        </button>
+        {styles.map((s) => (
           <button
+            key={s.id}
             type="button"
             onClick={() =>
-              update({ visualPreferences: { ...q.visualPreferences, styleId: "AUTO" } })
+              update({ visualPreferences: { ...q.visualPreferences, styleId: s.id } })
             }
             className={cn(
-              "rounded-xl border p-3 text-left text-sm",
-              q.visualPreferences.styleId === "AUTO"
+              "rounded-2xl border p-3 text-left",
+              q.visualPreferences.styleId === s.id
                 ? "border-primary ring-2 ring-primary/30"
                 : "border-border",
             )}
           >
-            AUTO — on choisit pour vous
+            <StylePreview name={s.name} styleId={s.id} className="mb-3" />
+            <p className="font-medium">{s.name}</p>
+            {s.description ? (
+              <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{s.description}</p>
+            ) : null}
           </button>
-          {styles.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() =>
-                update({ visualPreferences: { ...q.visualPreferences, styleId: s.id } })
-              }
-              className={cn(
-                "rounded-xl border p-3 text-left",
-                q.visualPreferences.styleId === s.id
-                  ? "border-primary ring-2 ring-primary/30"
-                  : "border-border",
-              )}
-            >
-              <p className="text-sm font-medium">{s.name}</p>
-              {s.description && (
-                <p className="mt-1 text-xs text-muted-foreground line-clamp-3">{s.description}</p>
-              )}
-            </button>
-          ))}
-        </div>
+        ))}
       </div>
     </div>
   )
@@ -1329,84 +1495,192 @@ function VisualStep({
 
 function FinaleStep({
   q,
+  copy,
   update,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   update: (p: Partial<QuestionnaireV1>) => void
 }) {
+  const isMe = q.audience === "ME"
+  const isOther = q.audience === "OTHER_PERSON"
+  const isGift =
+    (q.audience === "DUO" || q.audience === "GROUP") && q.creatorIsParticipant === false
+
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Derniers détails</h2>
-      <label className="flex flex-col gap-1 text-sm">
-        Souhaites-tu ajouter un petit message dans le cahier ? (facultatif)
-        <textarea
-          className="min-h-24 rounded-lg border border-input bg-background p-3"
-          value={q.finalMessage ?? ""}
-          onChange={(e) => update({ finalMessage: e.target.value })}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        Une dernière chose que nous devrions savoir ? (facultatif)
-        <textarea
-          className="min-h-20 rounded-lg border border-input bg-background p-3"
-          value={q.lastNote ?? ""}
-          onChange={(e) => update({ lastNote: e.target.value })}
-        />
-      </label>
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      {isMe && (
+        <label className="flex flex-col gap-1 text-sm">
+          Une dernière chose que vous aimeriez nous dire ?
+          <textarea
+            className="min-h-24 rounded-lg border border-input bg-background p-3"
+            value={q.lastNote ?? ""}
+            onChange={(e) => update({ lastNote: e.target.value })}
+          />
+        </label>
+      )}
+      {isOther && (
+        <>
+          <label className="flex flex-col gap-1 text-sm">
+            Souhaitez-vous ajouter un petit mot personnel dans son cahier ?
+            <textarea
+              className="min-h-24 rounded-lg border border-input bg-background p-3"
+              value={q.finalMessage ?? ""}
+              onChange={(e) => update({ finalMessage: e.target.value })}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            Une dernière chose que nous devrions savoir ?
+            <textarea
+              className="min-h-20 rounded-lg border border-input bg-background p-3"
+              value={q.lastNote ?? ""}
+              onChange={(e) => update({ lastNote: e.target.value })}
+            />
+          </label>
+        </>
+      )}
+      {(q.audience === "DUO" || q.audience === "GROUP") && (
+        <>
+          <label className="flex flex-col gap-1 text-sm">
+            {isGift
+              ? "Un petit mot cadeau à glisser dans le cahier ?"
+              : "Une phrase ou un message à glisser dans le cahier ?"}
+            <textarea
+              className="min-h-24 rounded-lg border border-input bg-background p-3"
+              value={q.finalMessage ?? ""}
+              onChange={(e) => update({ finalMessage: e.target.value })}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            Une dernière chose que nous devrions savoir ?
+            <textarea
+              className="min-h-20 rounded-lg border border-input bg-background p-3"
+              value={q.lastNote ?? ""}
+              onChange={(e) => update({ lastNote: e.target.value })}
+            />
+          </label>
+        </>
+      )}
+    </div>
+  )
+}
+
+function RecapBlock({
+  title,
+  children,
+  onEdit,
+}: {
+  title: string
+  children: React.ReactNode
+  onEdit?: () => void
+}) {
+  return (
+    <div className="rounded-xl border border-border p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="font-medium">{title}</h3>
+        {onEdit ? (
+          <button type="button" className="text-sm text-primary underline-offset-2 hover:underline" onClick={onEdit}>
+            Modifier
+          </button>
+        ) : null}
+      </div>
+      <div className="text-sm text-muted-foreground">{children}</div>
     </div>
   )
 }
 
 function RecapStep({
   q,
+  copy,
   richness,
+  universes,
+  palettes,
+  styles,
   isAuthenticated,
   submitError,
   submitOk,
   pending,
   onSubmit,
+  onEdit,
 }: {
   q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
   richness: ReturnType<typeof calculateProfileRichness>
+  universes: Universe[]
+  palettes: Palette[]
+  styles: Style[]
   isAuthenticated: boolean
   submitError: string | null
   submitOk: string | null
   pending: boolean
   onSubmit: () => void
+  onEdit: (step: StepId) => void
 }) {
+  const names = q.participants.map((p) => p.firstName).filter(Boolean)
+  const forLabel =
+    q.audience === "ME"
+      ? `Pour vous${names[0] ? `, ${names[0]}` : ""}`
+      : names.length
+        ? names.join(" · ")
+        : audienceHumanLabel(q.audience)
+
+  const universeNames = q.interestUniverseIds
+    .map((id) => universes.find((u) => u.id === id)?.name ?? null)
+    .filter(Boolean) as string[]
+
+  const gameLabels = (q.gamePreferences.likedTypes ?? [])
+    .map((t) => GAME_TYPE_OPTIONS.find((o) => o.value === t)?.label ?? null)
+    .filter(Boolean) as string[]
+
+  const paletteLabel =
+    q.visualPreferences.paletteId === "AUTO"
+      ? "Surprenez-moi"
+      : palettes.find((p) => p.id === q.visualPreferences.paletteId)?.name ?? "—"
+
+  const styleLabel =
+    q.visualPreferences.styleId === "AUTO"
+      ? "Surprenez-moi"
+      : styles.find((s) => s.id === q.visualPreferences.styleId)?.name ?? "—"
+
+  const factsCount = q.personalFacts.filter((f) => f.value.trim()).length
+  const memoriesCount = q.memories.filter((m) => m.text.trim()).length
+
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="font-serif text-2xl font-semibold">Récapitulatif</h2>
-      <dl className="grid gap-2 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="text-muted-foreground">Audience</dt>
-          <dd className="font-medium">{q.audience}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Participants</dt>
-          <dd className="font-medium">
-            {q.participants.map((p) => p.firstName).filter(Boolean).join(", ") || "—"}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Intérêts</dt>
-          <dd className="font-medium">{q.interestUniverseIds.length}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Infos personnelles</dt>
-          <dd className="font-medium">{q.personalFacts.filter((f) => f.value.trim()).length}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Difficulté</dt>
-          <dd className="font-medium">{q.gamePreferences.difficulty ?? "—"}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Style / palette</dt>
-          <dd className="font-medium">
-            {q.visualPreferences.styleId ?? "—"} / {q.visualPreferences.paletteId ?? "—"}
-          </dd>
-        </div>
-      </dl>
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+
+      <RecapBlock title={forLabel} onEdit={() => onEdit("participants")}>
+        {audienceHumanLabel(q.audience)}
+      </RecapBlock>
+
+      <RecapBlock title={q.audience === "ME" ? "Vos univers" : "Univers"} onEdit={() => onEdit("interests")}>
+        {universeNames.length ? universeNames.join(" · ") : "—"}
+      </RecapBlock>
+
+      <RecapBlock title={q.audience === "ME" ? "Vos jeux" : "Jeux"} onEdit={() => onEdit("games")}>
+        <p>{gameLabels.length ? gameLabels.join(" · ") : "—"}</p>
+        <p className="mt-1">Niveau : {difficultyLabel(q.gamePreferences.difficulty)}</p>
+      </RecapBlock>
+
+      <RecapBlock
+        title={q.audience === "ME" ? "Votre univers graphique" : "Univers graphique"}
+        onEdit={() => onEdit("style")}
+      >
+        <p>{styleLabel}</p>
+        <p className="mt-1">{paletteLabel}</p>
+      </RecapBlock>
+
+      <RecapBlock
+        title={q.audience === "ME" ? "Votre personnalisation" : "Personnalisation"}
+        onEdit={() => onEdit("personalFacts")}
+      >
+        {factsCount} petit{factsCount > 1 ? "s" : ""} détail{factsCount > 1 ? "s" : ""}
+        {" · "}
+        {memoriesCount} souvenir{memoriesCount > 1 ? "s" : ""}
+        {" · "}
+        {q.photos.length} photo{q.photos.length > 1 ? "s" : ""}
+      </RecapBlock>
 
       <div
         className={cn(
@@ -1416,29 +1690,37 @@ function RecapStep({
             : "border-border bg-muted/40 text-foreground",
         )}
       >
-        <p className="font-medium">Niveau : {richness.level}</p>
-        <p className="mt-1 opacity-90">{richness.message}</p>
+        {richness.level === "INSUFFICIENT" ? (
+          <>
+            <p className="font-medium">Encore quelques infos manquent</p>
+            <p className="mt-1 opacity-90">{richness.message}</p>
+          </>
+        ) : (
+          <p>{richnessClientMessage(richness.level)}</p>
+        )}
       </div>
 
       {!isAuthenticated && (
         <p className="text-sm text-muted-foreground">
-          Pour enregistrer,{" "}
+          Pour créer votre cahier,{" "}
           <Link href="/auth/login?next=/questionnaire" className="underline">
-            connectez-vous
-          </Link>{" "}
-          (votre brouillon local est conservé).
+            connectez-vous ou créez un compte
+          </Link>
+          . Votre brouillon local est conservé.
         </p>
       )}
 
       {submitError && <p className="text-sm text-destructive">{submitError}</p>}
       {submitOk && <p className="text-sm text-chart-4">{submitOk}</p>}
 
-      <Button type="button" onClick={onSubmit} disabled={pending || richness.level === "INSUFFICIENT"}>
-        {pending ? "Enregistrement…" : "Valider le questionnaire"}
+      <Button
+        type="button"
+        size="lg"
+        onClick={onSubmit}
+        disabled={pending || richness.level === "INSUFFICIENT"}
+      >
+        {pending ? "Enregistrement…" : "Créer mon cahier"}
       </Button>
-      <p className="text-xs text-muted-foreground">
-        Aucune page, moteur de jeu ou IA ne sera lancé à cette étape.
-      </p>
     </div>
   )
 }

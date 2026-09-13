@@ -7,54 +7,23 @@ import {
   MIN_INTERESTS,
   MIN_PERSONAL_FACTS,
   MIN_TRAITS_SOLO,
-  type AudienceType,
   type QuestionnaireV1,
 } from "./types"
 import { deriveCreatorIsParticipant } from "./audience"
-
-export type StepId =
-  | "audience"
-  | "participants"
-  | "personality"
-  | "interests"
-  | "personalFacts"
-  | "memories"
-  | "insideJokes"
-  | "games"
-  | "photos"
-  | "forbidden"
-  | "visual"
-  | "finale"
-  | "recap"
-
-export function stepsForAudience(audience: AudienceType | null): StepId[] {
-  const base: StepId[] = [
-    "audience",
-    "participants",
-    "personality",
-    "interests",
-    "personalFacts",
-    "memories",
-  ]
-  if (audience === "DUO" || audience === "GROUP") {
-    base.push("insideJokes")
-  }
-  base.push("games", "photos", "forbidden", "visual", "finale", "recap")
-  return base
-}
+import { buildJourneySteps, type StepId } from "./journey"
 
 export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
   const errors: string[] = []
 
   switch (step) {
     case "audience": {
-      if (!q.audience) errors.push("Choisissez qui va remplir le cahier.")
+      if (!q.audience) errors.push("Indiquez pour qui vous créez ce cahier.")
       else if (
         (q.audience === "DUO" || q.audience === "GROUP") &&
         q.creatorIsParticipant !== true &&
         q.creatorIsParticipant !== false
       ) {
-        errors.push("Indiquez si vous ferez partie des participants.")
+        errors.push("Indiquez si vous faites partie des personnes qui utiliseront ce cahier.")
       }
       break
     }
@@ -103,10 +72,10 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
         }
       } else if (q.audience === "DUO") {
         if (!q.personality.duoDescription?.trim()) {
-          errors.push("Décrivez votre duo.")
+          errors.push("Décrivez le duo.")
         }
         if ((q.personality.duoDynamics?.length ?? 0) < 2) {
-          errors.push("Choisissez au moins 2 caractéristiques de votre relation.")
+          errors.push("Choisissez au moins 2 caractéristiques de la dynamique du duo.")
         }
       } else if (q.audience === "GROUP") {
         const n = q.personality.groupTraits?.length ?? 0
@@ -118,17 +87,17 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
     }
     case "interests": {
       if (q.interestUniverseIds.length < MIN_INTERESTS) {
-        errors.push(`Choisissez au moins ${MIN_INTERESTS} centres d'intérêt.`)
+        errors.push(`Sélectionnez au moins ${MIN_INTERESTS} centres d'intérêt.`)
       }
       break
     }
     case "personalFacts": {
       const facts = q.personalFacts.filter((f) => f.value.trim())
       if (facts.length < MIN_PERSONAL_FACTS) {
-        errors.push(`Ajoutez au moins ${MIN_PERSONAL_FACTS} informations personnelles.`)
+        errors.push(`Ajoutez au moins ${MIN_PERSONAL_FACTS} petits détails.`)
       }
       if (facts.length > MAX_PERSONAL_FACTS) {
-        errors.push(`Maximum ${MAX_PERSONAL_FACTS} informations.`)
+        errors.push(`Maximum ${MAX_PERSONAL_FACTS} détails.`)
       }
       break
     }
@@ -141,7 +110,7 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
       }
       const d = q.gamePreferences.difficulty
       if (d !== 1 && d !== 2 && d !== 3 && d !== 4) {
-        errors.push("Choisissez un niveau de difficulté (1 à 4).")
+        errors.push("Choisissez un niveau de difficulté.")
       }
       break
     }
@@ -165,9 +134,12 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
       }
       break
     }
-    case "visual": {
-      if (!q.visualPreferences.paletteId) errors.push("Choisissez une palette ou AUTO.")
-      if (!q.visualPreferences.styleId) errors.push("Choisissez un style ou AUTO.")
+    case "color": {
+      if (!q.visualPreferences.paletteId) errors.push("Choisissez une ambiance de couleurs.")
+      break
+    }
+    case "style": {
+      if (!q.visualPreferences.styleId) errors.push("Choisissez un univers graphique.")
       break
     }
     case "finale":
@@ -180,12 +152,11 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
 
 export function validateQuestionnaireComplete(q: QuestionnaireV1): string[] {
   if (!q.audience) return ["Audience manquante."]
-  const steps = stepsForAudience(q.audience).filter((s) => s !== "recap")
+  const steps = buildJourneySteps(q.audience, q.creatorIsParticipant).filter((s) => s !== "recap")
   const errors: string[] = []
   for (const step of steps) {
     errors.push(...validateStep(step, q))
   }
-  // Extra group size hard fail
   if (q.audience === "GROUP" && q.participants.length > MAX_GROUP_SIZE) {
     errors.push(`GROUP > ${MAX_GROUP_SIZE} refusé.`)
   }
