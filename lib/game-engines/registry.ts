@@ -6,6 +6,10 @@
  */
 import { generateCrossword } from "./crossword"
 import type { CrosswordResult, GenerateCrosswordOptions } from "./crossword/types"
+import { generateQuiz } from "./quiz"
+import type { GenerateQuizOptions, QuizResult } from "./quiz/types"
+import { generateTrueFalse } from "./true-false"
+import type { GenerateTrueFalseOptions, TrueFalseResult } from "./true-false/types"
 import { generateWordSearch } from "./wordsearch"
 import type { GenerateWordSearchOptions, WordSearchResult } from "./wordsearch/types"
 import {
@@ -19,6 +23,8 @@ import {
 export interface GameEngineMap {
   CROSSWORD: { input: GenerateCrosswordOptions; result: CrosswordResult }
   WORDSEARCH: { input: GenerateWordSearchOptions; result: WordSearchResult }
+  QUIZ: { input: GenerateQuizOptions; result: QuizResult }
+  TRUE_FALSE: { input: GenerateTrueFalseOptions; result: TrueFalseResult }
 }
 
 export const CROSSWORD_ENGINE: GameEngineDescriptor<GenerateCrosswordOptions, CrosswordResult> = {
@@ -33,10 +39,24 @@ export const WORDSEARCH_ENGINE: GameEngineDescriptor<GenerateWordSearchOptions, 
   generate: generateWordSearch,
 }
 
+export const QUIZ_ENGINE: GameEngineDescriptor<GenerateQuizOptions, QuizResult> = {
+  id: "QUIZ",
+  version: 1,
+  generate: generateQuiz,
+}
+
+export const TRUE_FALSE_ENGINE: GameEngineDescriptor<GenerateTrueFalseOptions, TrueFalseResult> = {
+  id: "TRUE_FALSE",
+  version: 1,
+  generate: generateTrueFalse,
+}
+
 /** The registry. Adding an engine = add one entry here (and to GameEngineMap). */
 const ENGINES: { [K in GameEngineId]: GameEngineDescriptor<GameEngineMap[K]["input"], GameEngineMap[K]["result"]> } = {
   CROSSWORD: CROSSWORD_ENGINE,
   WORDSEARCH: WORDSEARCH_ENGINE,
+  QUIZ: QUIZ_ENGINE,
+  TRUE_FALSE: TRUE_FALSE_ENGINE,
 }
 
 /** Every registered engine id, e.g. for iteration in admin tooling. */

@@ -7,7 +7,7 @@
  */
 import type { GameEngineId } from "@/lib/game-engines/types"
 
-export type BookTemplateId = "CROSSWORD_01" | "WORDSEARCH_01"
+export type BookTemplateId = "CROSSWORD_01" | "WORDSEARCH_01" | "QUIZ_01" | "TRUE_FALSE_01"
 
 export interface BookTemplateDef {
   id: BookTemplateId
@@ -24,6 +24,8 @@ export interface BookTemplateDef {
 export const BOOK_TEMPLATES: BookTemplateDef[] = [
   { id: "CROSSWORD_01", name: "Mots croisés · 01", structureKey: "CROSSWORD_01", engineId: "CROSSWORD" },
   { id: "WORDSEARCH_01", name: "Mots mêlés · 01", structureKey: "WORDSEARCH_01", engineId: "WORDSEARCH" },
+  { id: "QUIZ_01", name: "Quiz · 01", structureKey: "QUIZ_01", engineId: "QUIZ" },
+  { id: "TRUE_FALSE_01", name: "Vrai ou faux · 01", structureKey: "TRUE_FALSE_01", engineId: "TRUE_FALSE" },
 ]
 
 export function isBookTemplateId(id: string): id is BookTemplateId {
@@ -98,4 +100,28 @@ export const WORDSEARCH_01_SAMPLE: WordsearchSample = {
   instruction:
     "Retrouve les mots dans la grille. Ils se lisent de gauche à droite, de haut en bas, ou en diagonale — jamais à l'envers.",
   words: ["Montagne", "Chalet", "Sommet", "Sentier", "Glacier", "Neige", "Aigle", "Vallée"],
+}
+
+export interface QuizSample {
+  gameLabel: string
+  title: string
+  instruction: string
+}
+
+export interface TrueFalseSample {
+  gameLabel: string
+  title: string
+  instruction: string
+}
+
+export const QUIZ_01_SAMPLE: QuizSample = {
+  gameLabel: "Jeu · Quiz",
+  title: "Sommets et savoirs",
+  instruction: "Pour chaque question, entoure la bonne réponse parmi les quatre propositions.",
+}
+
+export const TRUE_FALSE_01_SAMPLE: TrueFalseSample = {
+  gameLabel: "Jeu · Vrai ou faux",
+  title: "Cimes à démêler",
+  instruction: "Pour chaque affirmation, choisis VRAI ou FAUX.",
 }

@@ -12,7 +12,7 @@
  */
 
 /** Typed identifier of a technical engine (the algorithm). Grows over time. */
-export type GameEngineId = "CROSSWORD" | "WORDSEARCH"
+export type GameEngineId = "CROSSWORD" | "WORDSEARCH" | "QUIZ" | "TRUE_FALSE"
 
 /** Identity + version stamped onto every generation so results stay reproducible. */
 export interface GameEngineMeta {

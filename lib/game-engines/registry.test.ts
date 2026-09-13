@@ -90,6 +90,8 @@ test("F. unknown engine id fails loud, never fabricates", () => {
 test("G. template resolves to its technical engine", () => {
   assert.equal(resolveTemplateEngine("CROSSWORD_01"), "CROSSWORD")
   assert.equal(resolveTemplateEngine("WORDSEARCH_01"), "WORDSEARCH")
+  assert.equal(resolveTemplateEngine("QUIZ_01"), "QUIZ")
+  assert.equal(resolveTemplateEngine("TRUE_FALSE_01"), "TRUE_FALSE")
   assert.equal(resolveTemplateEngine("DOES_NOT_EXIST"), null)
 })
 
@@ -114,4 +116,38 @@ test("I. resolveLabTemplates keeps WORDSEARCH_01 when active in DB", () => {
     labs.map((t) => t.id),
     ["CROSSWORD_01", "WORDSEARCH_01"],
   )
+})
+
+test("J. registry résout QUIZ v1", () => {
+  assert.ok(GAME_ENGINE_IDS.includes("QUIZ"))
+  const engine = getEngine("QUIZ")
+  assert.ok(engine)
+  assert.equal(engine.version, 1)
+  const result = generateGame("QUIZ", {
+    questions: [
+      {
+        question: "Test ?",
+        choices: ["A", "B", "C", "D"],
+        correctIndex: 1,
+      },
+    ],
+    seed: "reg-quiz",
+  })
+  assert.equal(result.engineId, "QUIZ")
+  assert.equal(result.engineVersion, 1)
+  assert.equal(result.success, true)
+})
+
+test("K. registry résout TRUE_FALSE v1", () => {
+  assert.ok(GAME_ENGINE_IDS.includes("TRUE_FALSE"))
+  const engine = getEngine("TRUE_FALSE")
+  assert.ok(engine)
+  assert.equal(engine.version, 1)
+  const result = generateGame("TRUE_FALSE", {
+    statements: [{ statement: "La neige est froide.", correctAnswer: true }],
+    seed: "reg-tf",
+  })
+  assert.equal(result.engineId, "TRUE_FALSE")
+  assert.equal(result.engineVersion, 1)
+  assert.equal(result.success, true)
 })

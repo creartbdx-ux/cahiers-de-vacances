@@ -11,9 +11,13 @@ import {
   type RenderableAsset,
 } from "@/components/book-renderer/templates/crossword-template"
 import { WordsearchTemplate } from "@/components/book-renderer/templates/wordsearch-template"
+import { QuizTemplate } from "@/components/book-renderer/templates/quiz-template"
+import { TrueFalseTemplate } from "@/components/book-renderer/templates/true-false-template"
 import { getStyleTokens } from "@/lib/book-renderer/styles"
 import {
   CROSSWORD_01_SAMPLE,
+  QUIZ_01_SAMPLE,
+  TRUE_FALSE_01_SAMPLE,
   WORDSEARCH_01_SAMPLE,
   resolveTemplateEngine,
   type BookTemplateDef,
@@ -23,10 +27,20 @@ import { generateGame } from "@/lib/game-engines/registry"
 import type { WithEngineMeta } from "@/lib/game-engines/types"
 import type { CrosswordEntry, CrosswordResult, CrosswordSuccess } from "@/lib/game-engines/crossword/types"
 import type { WordSearchEntry, WordSearchResult, WordSearchSuccess } from "@/lib/game-engines/wordsearch/types"
+import type { QuizQuestionInput, QuizResult, QuizSuccess } from "@/lib/game-engines/quiz/types"
+import type {
+  TrueFalseResult,
+  TrueFalseStatementInput,
+  TrueFalseSuccess,
+} from "@/lib/game-engines/true-false/types"
 import type { Palette, Style, Universe } from "@/lib/supabase/types"
 
 /** The lab result carries the engine identity stamped by the registry. */
-type LabResult = WithEngineMeta<CrosswordResult> | WithEngineMeta<WordSearchResult>
+type LabResult =
+  | WithEngineMeta<CrosswordResult>
+  | WithEngineMeta<WordSearchResult>
+  | WithEngineMeta<QuizResult>
+  | WithEngineMeta<TrueFalseResult>
 
 function isCrosswordLab(result: LabResult): result is WithEngineMeta<CrosswordResult> {
   return result.engineId === "CROSSWORD"
@@ -34,6 +48,14 @@ function isCrosswordLab(result: LabResult): result is WithEngineMeta<CrosswordRe
 
 function isWordsearchLab(result: LabResult): result is WithEngineMeta<WordSearchResult> {
   return result.engineId === "WORDSEARCH"
+}
+
+function isQuizLab(result: LabResult): result is WithEngineMeta<QuizResult> {
+  return result.engineId === "QUIZ"
+}
+
+function isTrueFalseLab(result: LabResult): result is WithEngineMeta<TrueFalseResult> {
+  return result.engineId === "TRUE_FALSE"
 }
 
 /** Quick-compare palette buttons -> palette ids seeded in Supabase. */
@@ -82,6 +104,43 @@ const DEMO_WORDS: WordSearchEntry[] = [
   { word: "Randonnée" },
 ]
 
+const DEMO_QUIZ: QuizQuestionInput[] = [
+  {
+    question: "Quel animal siffle dans les alpages ?",
+    choices: ["Marmotte", "Aigle", "Chamois", "Bouquetin"],
+    correctIndex: 0,
+    explanation: "La marmotte siffle pour alerter le groupe.",
+  },
+  {
+    question: "Que désigne un névé ?",
+    choices: ["Un glacier entier", "De la neige tassée persistante", "Un torrent", "Un refuge"],
+    correctIndex: 1,
+  },
+  {
+    question: "Où trouve-t-on typiquement un chalet ?",
+    choices: ["En plaine", "En altitude", "En mer", "En désert"],
+    correctIndex: 1,
+    explanation: "Le chalet est la maison traditionnelle de montagne.",
+  },
+]
+
+const DEMO_TRUE_FALSE: TrueFalseStatementInput[] = [
+  {
+    statement: "L'aigle royal niche en montagne.",
+    correctAnswer: true,
+    explanation: "Il affectionne les falaises d'altitude.",
+  },
+  {
+    statement: "Un glacier avance toujours vers le sommet.",
+    correctAnswer: false,
+    explanation: "Un glacier s'écoule vers l'aval sous son propre poids.",
+  },
+  {
+    statement: "La marmotte hiberne en hiver.",
+    correctAnswer: true,
+  },
+]
+
 export function PageLabClient({
   templates,
   styles,
@@ -111,6 +170,9 @@ export function PageLabClient({
   // Lab state (local only, never persisted).
   const [entries, setEntries] = useState<CrosswordEntry[]>(DEMO_ENTRIES)
   const [words, setWords] = useState<WordSearchEntry[]>(DEMO_WORDS)
+  const [quizQuestions, setQuizQuestions] = useState<QuizQuestionInput[]>(DEMO_QUIZ)
+  const [trueFalseStatements, setTrueFalseStatements] =
+    useState<TrueFalseStatementInput[]>(DEMO_TRUE_FALSE)
   const [seed, setSeed] = useState("montagne-01")
   const [gridWidth, setGridWidth] = useState(12)
   const [gridHeight, setGridHeight] = useState(12)
@@ -123,6 +185,8 @@ export function PageLabClient({
   const engineId = templateId ? resolveTemplateEngine(templateId) : null
   const isCrossword = engineId === "CROSSWORD"
   const isWordsearch = engineId === "WORDSEARCH"
+  const isQuiz = engineId === "QUIZ"
+  const isTrueFalse = engineId === "TRUE_FALSE"
 
   const palette = useMemo(
     () => palettes.find((p) => p.id === paletteId) ?? palettes[0],
@@ -159,6 +223,14 @@ export function PageLabClient({
           maxWords: 15,
         }),
       )
+      return
+    }
+    if (engineId === "QUIZ") {
+      setResult(generateGame("QUIZ", { questions: quizQuestions, seed }))
+      return
+    }
+    if (engineId === "TRUE_FALSE") {
+      setResult(generateGame("TRUE_FALSE", { statements: trueFalseStatements, seed }))
     }
   }
 
@@ -166,6 +238,10 @@ export function PageLabClient({
     result && isCrosswordLab(result) && result.success ? result : null
   const wordsearchSuccess: WordSearchSuccess | null =
     result && isWordsearchLab(result) && result.success ? result : null
+  const quizSuccess: QuizSuccess | null =
+    result && isQuizLab(result) && result.success ? result : null
+  const trueFalseSuccess: TrueFalseSuccess | null =
+    result && isTrueFalseLab(result) && result.success ? result : null
 
   if (!palette) {
     return <p className="text-muted-foreground">Aucune palette active disponible.</p>
@@ -300,6 +376,32 @@ export function PageLabClient({
         />
       )}
 
+      {isQuiz && (
+        <QuizPanel
+          questions={quizQuestions}
+          setQuestions={setQuizQuestions}
+          seed={seed}
+          setSeed={setSeed}
+          onGenerate={handleGenerate}
+          result={result && isQuizLab(result) ? result : null}
+          mode={mode}
+          setMode={setMode}
+        />
+      )}
+
+      {isTrueFalse && (
+        <TrueFalsePanel
+          statements={trueFalseStatements}
+          setStatements={setTrueFalseStatements}
+          seed={seed}
+          setSeed={setSeed}
+          onGenerate={handleGenerate}
+          result={result && isTrueFalseLab(result) ? result : null}
+          mode={mode}
+          setMode={setMode}
+        />
+      )}
+
       {showDebug && (
         <DebugPanel
           templateId={templateId}
@@ -322,6 +424,24 @@ export function PageLabClient({
                 palette={palette}
                 assets={selectedAssets}
                 wordsearch={wordsearchSuccess}
+                mode={mode}
+              />
+            ) : isQuiz ? (
+              <QuizTemplate
+                sample={QUIZ_01_SAMPLE}
+                style={styleTokens}
+                palette={palette}
+                assets={selectedAssets}
+                quiz={quizSuccess}
+                mode={mode}
+              />
+            ) : isTrueFalse ? (
+              <TrueFalseTemplate
+                sample={TRUE_FALSE_01_SAMPLE}
+                style={styleTokens}
+                palette={palette}
+                assets={selectedAssets}
+                trueFalse={trueFalseSuccess}
                 mode={mode}
               />
             ) : (
@@ -635,6 +755,302 @@ function WordsearchPanel({
   )
 }
 
+function QuizPanel({
+  questions,
+  setQuestions,
+  seed,
+  setSeed,
+  onGenerate,
+  result,
+  mode,
+  setMode,
+}: {
+  questions: QuizQuestionInput[]
+  setQuestions: (updater: (prev: QuizQuestionInput[]) => QuizQuestionInput[]) => void
+  seed: string
+  setSeed: (v: string) => void
+  onGenerate: () => void
+  result: WithEngineMeta<QuizResult> | null
+  mode: "game" | "solution"
+  setMode: (m: "game" | "solution") => void
+}) {
+  function updateQuestion(index: number, patch: Partial<QuizQuestionInput>) {
+    setQuestions((prev) => prev.map((q, i) => (i === index ? { ...q, ...patch } : q)))
+  }
+  function updateChoice(qi: number, ci: number, value: string) {
+    setQuestions((prev) =>
+      prev.map((q, i) => {
+        if (i !== qi) return q
+        const choices = q.choices.slice()
+        choices[ci] = value
+        return { ...q, choices }
+      }),
+    )
+  }
+  function addQuestion() {
+    setQuestions((prev) => [
+      ...prev,
+      { question: "", choices: ["", "", "", ""], correctIndex: 0 },
+    ])
+  }
+  function removeQuestion(index: number) {
+    setQuestions((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Test · Quiz</h2>
+          <p className="text-sm text-muted-foreground">
+            Questions locales à 4 choix. Rien n&apos;est enregistré.
+          </p>
+        </div>
+        <ModeToggle mode={mode} setMode={setMode} />
+      </div>
+
+      <div className="flex flex-col gap-4">
+        {questions.map((q, qi) => (
+          <div key={qi} className="rounded-xl border border-border p-3">
+            <div className="mb-2 flex gap-2">
+              <input
+                value={q.question}
+                onChange={(e) => updateQuestion(qi, { question: e.target.value })}
+                placeholder={`Question ${qi + 1}`}
+                className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <button
+                type="button"
+                onClick={() => removeQuestion(qi)}
+                aria-label={`Supprimer la question ${qi + 1}`}
+                className="inline-flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {q.choices.map((choice, ci) => (
+                <label key={ci} className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name={`quiz-correct-${qi}`}
+                    checked={q.correctIndex === ci}
+                    onChange={() => updateQuestion(qi, { correctIndex: ci })}
+                    aria-label={`Bonne réponse ${String.fromCharCode(65 + ci)}`}
+                  />
+                  <span className="w-4 text-xs font-semibold text-muted-foreground">
+                    {String.fromCharCode(65 + ci)}
+                  </span>
+                  <input
+                    value={choice}
+                    onChange={(e) => updateChoice(qi, ci, e.target.value)}
+                    placeholder={`Réponse ${String.fromCharCode(65 + ci)}`}
+                    className="h-8 flex-1 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                </label>
+              ))}
+            </div>
+            <input
+              value={q.explanation ?? ""}
+              onChange={(e) => updateQuestion(qi, { explanation: e.target.value })}
+              placeholder="Explication (optionnelle)"
+              className="mt-2 h-8 w-full rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" variant="outline" size="sm" onClick={addQuestion}>
+          <Plus className="size-4" />
+          Ajouter
+        </Button>
+        <label className="flex items-center gap-2">
+          <span className="text-sm font-medium text-foreground">Seed</span>
+          <input
+            value={seed}
+            onChange={(e) => setSeed(e.target.value)}
+            className="h-9 w-40 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <Button type="button" size="sm" onClick={onGenerate}>
+          <Wand2 className="size-4" />
+          Générer
+        </Button>
+        <span className="text-sm text-muted-foreground">{questions.length} question(s)</span>
+      </div>
+
+      {result && !result.success && (
+        <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-medium">Validation impossible ({result.reason})</p>
+            <p className="opacity-90">{result.message}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TrueFalsePanel({
+  statements,
+  setStatements,
+  seed,
+  setSeed,
+  onGenerate,
+  result,
+  mode,
+  setMode,
+}: {
+  statements: TrueFalseStatementInput[]
+  setStatements: (updater: (prev: TrueFalseStatementInput[]) => TrueFalseStatementInput[]) => void
+  seed: string
+  setSeed: (v: string) => void
+  onGenerate: () => void
+  result: WithEngineMeta<TrueFalseResult> | null
+  mode: "game" | "solution"
+  setMode: (m: "game" | "solution") => void
+}) {
+  function updateStatement(index: number, patch: Partial<TrueFalseStatementInput>) {
+    setStatements((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)))
+  }
+  function addStatement() {
+    setStatements((prev) => [...prev, { statement: "", correctAnswer: true }])
+  }
+  function removeStatement(index: number) {
+    setStatements((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Test · Vrai ou faux</h2>
+          <p className="text-sm text-muted-foreground">
+            Affirmations locales. Rien n&apos;est enregistré.
+          </p>
+        </div>
+        <ModeToggle mode={mode} setMode={setMode} />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {statements.map((s, i) => (
+          <div key={i} className="flex flex-col gap-2 rounded-xl border border-border p-3">
+            <div className="flex gap-2">
+              <input
+                value={s.statement}
+                onChange={(e) => updateStatement(i, { statement: e.target.value })}
+                placeholder={`Affirmation ${i + 1}`}
+                className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <button
+                type="button"
+                onClick={() => removeStatement(i)}
+                aria-label={`Supprimer l'affirmation ${i + 1}`}
+                className="inline-flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={`tf-correct-${i}`}
+                  checked={s.correctAnswer === true}
+                  onChange={() => updateStatement(i, { correctAnswer: true })}
+                />
+                Vrai
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={`tf-correct-${i}`}
+                  checked={s.correctAnswer === false}
+                  onChange={() => updateStatement(i, { correctAnswer: false })}
+                />
+                Faux
+              </label>
+              <input
+                value={s.explanation ?? ""}
+                onChange={(e) => updateStatement(i, { explanation: e.target.value })}
+                placeholder="Explication (optionnelle)"
+                className="h-8 min-w-[200px] flex-1 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" variant="outline" size="sm" onClick={addStatement}>
+          <Plus className="size-4" />
+          Ajouter
+        </Button>
+        <label className="flex items-center gap-2">
+          <span className="text-sm font-medium text-foreground">Seed</span>
+          <input
+            value={seed}
+            onChange={(e) => setSeed(e.target.value)}
+            className="h-9 w-40 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <Button type="button" size="sm" onClick={onGenerate}>
+          <Wand2 className="size-4" />
+          Générer
+        </Button>
+        <span className="text-sm text-muted-foreground">{statements.length} affirmation(s)</span>
+      </div>
+
+      {result && !result.success && (
+        <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-medium">Validation impossible ({result.reason})</p>
+            <p className="opacity-90">{result.message}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ModeToggle({
+  mode,
+  setMode,
+}: {
+  mode: "game" | "solution"
+  setMode: (m: "game" | "solution") => void
+}) {
+  return (
+    <div className="inline-flex overflow-hidden rounded-lg border border-border">
+      <button
+        type="button"
+        onClick={() => setMode("game")}
+        className={cn(
+          "px-3 py-1.5 text-sm font-medium transition-colors",
+          mode === "game" ? "bg-primary text-primary-foreground" : "bg-background text-foreground hover:bg-muted",
+        )}
+      >
+        Jeu
+      </button>
+      <button
+        type="button"
+        onClick={() => setMode("solution")}
+        className={cn(
+          "px-3 py-1.5 text-sm font-medium transition-colors",
+          mode === "solution"
+            ? "bg-primary text-primary-foreground"
+            : "bg-background text-foreground hover:bg-muted",
+        )}
+      >
+        Correction
+      </button>
+    </div>
+  )
+}
+
 function LabSelect({
   label,
   value,
@@ -700,7 +1116,13 @@ function DebugPanel({
       {/* Engine debug */}
       <div className="mt-4 border-t border-border pt-4">
         <p className="mb-2 font-sans text-sm font-medium text-muted-foreground">
-          {result?.engineId === "WORDSEARCH" ? "Moteur mots mêlés" : "Moteur mots croisés"}
+          {result?.engineId === "WORDSEARCH"
+            ? "Moteur mots mêlés"
+            : result?.engineId === "QUIZ"
+              ? "Moteur quiz"
+              : result?.engineId === "TRUE_FALSE"
+                ? "Moteur vrai/faux"
+                : "Moteur mots croisés"}
         </p>
         {!result ? (
           <p className="text-muted-foreground">— aucune génération lancée</p>
@@ -709,34 +1131,44 @@ function DebugPanel({
             <DebugRow label="engine_id" value={result.engineId} />
             <DebugRow label="engine_version" value={fmt(result.engineVersion)} />
             <DebugRow label="success" value={String(result.success)} />
-            <DebugRow label="seed" value={result.stats.seed ?? "—"} />
-            <DebugRow
-              label="dimensions"
-              value={
-                result.stats.width && result.stats.height
-                  ? `${result.stats.width} × ${result.stats.height}`
-                  : "—"
-              }
-            />
-            <DebugRow label="reçus" value={fmt(result.stats.received)} />
-            <DebugRow label="placés" value={fmt(result.stats.placed)} />
-            <DebugRow label="non placés" value={fmt(result.stats.unused)} />
-            <DebugRow label="croisements" value={fmt(result.stats.crossings)} />
-            {isWordsearchLab(result) && result.success && (
-              <DebugRow
-                label="orientations"
-                value={Object.entries(result.stats.orientationCounts)
-                  .map(([k, v]) => `${k}:${v}`)
-                  .join(" ")}
-              />
+            <DebugRow label="seed" value={result.stats.seed ?? ("seed" in result ? String(result.seed ?? "—") : "—")} />
+            {(isCrosswordLab(result) || isWordsearchLab(result)) && (
+              <>
+                <DebugRow
+                  label="dimensions"
+                  value={
+                    result.stats.width && result.stats.height
+                      ? `${result.stats.width} × ${result.stats.height}`
+                      : "—"
+                  }
+                />
+                <DebugRow label="reçus" value={fmt(result.stats.received)} />
+                <DebugRow label="placés" value={fmt(result.stats.placed)} />
+                <DebugRow label="non placés" value={fmt(result.stats.unused)} />
+                <DebugRow label="croisements" value={fmt(result.stats.crossings)} />
+                {isWordsearchLab(result) && result.success && (
+                  <DebugRow
+                    label="orientations"
+                    value={Object.entries(result.stats.orientationCounts)
+                      .map(([k, v]) => `${k}:${v}`)
+                      .join(" ")}
+                  />
+                )}
+                <DebugRow label="score" value={fmt(result.stats.score)} />
+                <DebugRow label="candidates_tried" value={fmt(result.stats.candidatesTried)} />
+              </>
             )}
-            <DebugRow label="score" value={fmt(result.stats.score)} />
-            <DebugRow label="candidates_tried" value={fmt(result.stats.candidatesTried)} />
+            {(isQuizLab(result) || isTrueFalseLab(result)) && (
+              <>
+                <DebugRow label="reçus" value={fmt(result.stats.received)} />
+                <DebugRow label="validés" value={fmt(result.stats.validated)} />
+              </>
+            )}
             <DebugRow
               label="validation"
               value={
                 result.success
-                  ? isWordsearchLab(result)
+                  ? isWordsearchLab(result) || isQuizLab(result) || isTrueFalseLab(result)
                     ? result.validation.ok
                       ? "OK"
                       : result.validation.errors.join(" ")
@@ -746,7 +1178,9 @@ function DebugPanel({
             />
           </dl>
         )}
-        {result && result.unusedEntries.length > 0 && (
+        {result &&
+          (isCrosswordLab(result) || isWordsearchLab(result)) &&
+          result.unusedEntries.length > 0 && (
           <div className="mt-2">
             <p className="font-sans text-muted-foreground">mots non placés</p>
             <p className="mt-1">
