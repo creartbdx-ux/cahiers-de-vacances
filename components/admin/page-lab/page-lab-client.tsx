@@ -13,10 +13,11 @@ import {
 import { WordsearchTemplate } from "@/components/book-renderer/templates/wordsearch-template"
 import { getStyleTokens } from "@/lib/book-renderer/styles"
 import {
-  BOOK_TEMPLATES,
   CROSSWORD_01_SAMPLE,
   WORDSEARCH_01_SAMPLE,
   resolveTemplateEngine,
+  type BookTemplateDef,
+  type BookTemplateId,
 } from "@/lib/book-renderer/templates"
 import { generateGame } from "@/lib/game-engines/registry"
 import type { WithEngineMeta } from "@/lib/game-engines/types"
@@ -82,11 +83,14 @@ const DEMO_WORDS: WordSearchEntry[] = [
 ]
 
 export function PageLabClient({
+  templates,
   styles,
   universes,
   palettes,
   assets,
 }: {
+  /** Pre-resolved on the server: active DB ∩ local renderer ∩ registered engine. */
+  templates: BookTemplateDef[]
   styles: Style[]
   universes: Universe[]
   palettes: Palette[]
@@ -95,7 +99,7 @@ export function PageLabClient({
   const defaultPalette =
     palettes.find((p) => p.id === "ORANGE")?.id ?? palettes[0]?.id ?? ""
 
-  const [templateId, setTemplateId] = useState(BOOK_TEMPLATES[0].id)
+  const [templateId, setTemplateId] = useState<BookTemplateId | "">(templates[0]?.id ?? "")
   const [styleId, setStyleId] = useState(styles.find((s) => s.id === "RETRO")?.id ?? styles[0]?.id ?? "")
   const [paletteId, setPaletteId] = useState(defaultPalette)
   const [universeId, setUniverseId] = useState(
@@ -116,7 +120,7 @@ export function PageLabClient({
   // The template declares which technical engine renders it. Resolving through
   // the registry (never a hardcoded call) is what lets any game sharing the
   // engine reuse this template.
-  const engineId = resolveTemplateEngine(templateId)
+  const engineId = templateId ? resolveTemplateEngine(templateId) : null
   const isCrossword = engineId === "CROSSWORD"
   const isWordsearch = engineId === "WORDSEARCH"
 
@@ -167,6 +171,14 @@ export function PageLabClient({
     return <p className="text-muted-foreground">Aucune palette active disponible.</p>
   }
 
+  if (templates.length === 0) {
+    return (
+      <p className="text-muted-foreground">
+        Aucun template actif supporté (registry local + moteur enregistré).
+      </p>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* Selectors */}
@@ -175,11 +187,11 @@ export function PageLabClient({
           label="Template"
           value={templateId}
           onChange={(v) => {
-            setTemplateId(v as typeof templateId)
+            setTemplateId(v as BookTemplateId)
             setResult(null)
           }}
         >
-          {BOOK_TEMPLATES.map((t) => (
+          {templates.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
             </option>

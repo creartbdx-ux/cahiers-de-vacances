@@ -2,9 +2,8 @@
  * Template registry. A template defines the STRUCTURE of a page (what blocks
  * exist and where), independently of style, palette and universe.
  *
- * CROSSWORD_01 is defined here in code as the first structural template while
- * the Supabase `templates` table does not yet contain it. Later steps can move
- * this to the database without changing the renderer contract.
+ * CROSSWORD_01 / WORDSEARCH_01 are defined here in code as structural templates.
+ * Supabase holds the active catalogue; the lab intersects both sources.
  */
 import type { GameEngineId } from "@/lib/game-engines/types"
 
@@ -27,9 +26,26 @@ export const BOOK_TEMPLATES: BookTemplateDef[] = [
   { id: "WORDSEARCH_01", name: "Mots mêlés · 01", structureKey: "WORDSEARCH_01", engineId: "WORDSEARCH" },
 ]
 
+export function isBookTemplateId(id: string): id is BookTemplateId {
+  return BOOK_TEMPLATES.some((t) => t.id === id)
+}
+
 /** Resolve a template id to its technical engine, or null if unknown. */
 export function resolveTemplateEngine(templateId: string): GameEngineId | null {
   return BOOK_TEMPLATES.find((t) => t.id === templateId)?.engineId ?? null
+}
+
+/**
+ * Intersect the local renderer registry with active Supabase template ids.
+ * Engine registration is checked by the caller (Page Lab server) via the
+ * game-engine registry — this file stays free of that dependency.
+ */
+export function resolveLabTemplates(
+  dbTemplates: Array<{ id: string; active: boolean }>,
+): BookTemplateDef[] {
+  const activeIds = new Set(dbTemplates.filter((t) => t.active).map((t) => t.id))
+  if (activeIds.size === 0) return BOOK_TEMPLATES
+  return BOOK_TEMPLATES.filter((t) => activeIds.has(t.id))
 }
 
 /**

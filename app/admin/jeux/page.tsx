@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { AdminPageHeader } from "@/components/admin/admin-page-header"
 import { getGames } from "@/lib/data/reference"
-import { getEngine } from "@/lib/game-engines/registry"
+import { resolveEngineStatus } from "@/lib/game-engines/registry"
 
 export const metadata: Metadata = {
   title: "Jeux",
@@ -10,8 +10,8 @@ export const metadata: Metadata = {
 /**
  * Read-only view of the GAMES catalogue. A GAME is an editorial choice
  * (personalised vs thematic crossword…), distinct from the TECHNICAL ENGINE
- * that actually generates it. We surface that engine and flag any game whose
- * engine is not yet implemented in the registry.
+ * that actually generates it. Implementation status comes from the registry —
+ * never from a hardcoded engine→version map in this page.
  */
 export default async function AdminJeuxPage() {
   const games = await getGames()
@@ -45,7 +45,7 @@ export default async function AdminJeuxPage() {
             </thead>
             <tbody>
               {games.map((game) => {
-                const engine = getEngine(game.technical_engine)
+                const status = resolveEngineStatus(game.technical_engine)
                 return (
                   <tr key={game.id} className="border-b border-border last:border-0">
                     <Td>
@@ -56,14 +56,14 @@ export default async function AdminJeuxPage() {
                       <Badge>{game.personalization_type}</Badge>
                     </Td>
                     <Td>
-                      {game.technical_engine ? (
-                        engine ? (
+                      {status.id ? (
+                        status.implemented ? (
                           <span className="font-mono text-xs text-foreground">
-                            {game.technical_engine} · v{engine.version}
+                            {status.id} · v{status.version}
                           </span>
                         ) : (
                           <span className="font-mono text-xs text-destructive">
-                            {game.technical_engine} · non implémenté
+                            {status.id} · non implémenté
                           </span>
                         )
                       ) : (

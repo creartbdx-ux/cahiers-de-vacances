@@ -4,7 +4,7 @@ import { FlaskConical } from "lucide-react"
 import { AdminPageHeader } from "@/components/admin/admin-page-header"
 import { Button } from "@/components/ui/button"
 import { getGames, getTemplates } from "@/lib/data/reference"
-import { getEngine } from "@/lib/game-engines/registry"
+import { resolveEngineStatus } from "@/lib/game-engines/registry"
 
 export const metadata: Metadata = {
   title: "Templates",
@@ -13,8 +13,7 @@ export const metadata: Metadata = {
 /**
  * Read-only view of the TEMPLATES catalogue. A TEMPLATE is a graphic structure
  * bound to a TECHNICAL ENGINE (not to a single game), so every game running on
- * that engine can reuse it. We show that reuse explicitly by listing the games
- * whose engine matches each template.
+ * that engine can reuse it. Engine implementation status comes from the registry.
  */
 export default async function AdminTemplatesPage() {
   const [templates, games] = await Promise.all([getTemplates(), getGames()])
@@ -37,7 +36,7 @@ export default async function AdminTemplatesPage() {
       ) : (
         <div className="flex flex-col gap-4">
           {templates.map((template) => {
-            const engine = getEngine(template.technical_engine)
+            const status = resolveEngineStatus(template.technical_engine)
             const compatibleGames = games.filter(
               (g) => g.technical_engine != null && g.technical_engine === template.technical_engine,
             )
@@ -53,14 +52,14 @@ export default async function AdminTemplatesPage() {
 
                 <dl className="mt-4 grid gap-3 sm:grid-cols-3">
                   <Field label="Moteur technique">
-                    {template.technical_engine ? (
-                      engine ? (
+                    {status.id ? (
+                      status.implemented ? (
                         <span className="font-mono text-foreground">
-                          {template.technical_engine} · v{engine.version}
+                          {status.id} · v{status.version}
                         </span>
                       ) : (
                         <span className="font-mono text-destructive">
-                          {template.technical_engine} · non implémenté
+                          {status.id} · non implémenté
                         </span>
                       )
                     ) : (

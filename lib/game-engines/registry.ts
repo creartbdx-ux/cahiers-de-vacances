@@ -44,7 +44,7 @@ export const GAME_ENGINE_IDS = Object.keys(ENGINES) as GameEngineId[]
 
 /** Narrowing guard: is this arbitrary string a known engine id? */
 export function isGameEngineId(id: string | null | undefined): id is GameEngineId {
-  return id != null && Object.prototype.hasOwnProperty.call(ENGINES, id)
+  return typeof id === "string" && Object.prototype.hasOwnProperty.call(ENGINES, id)
 }
 
 /** Resolve a stored `technical_engine` string to an engine id, or null. */
@@ -59,6 +59,22 @@ export function getEngine<K extends GameEngineId>(id: K): (typeof ENGINES)[K]
 export function getEngine(id: string | null | undefined): AnyRegisteredEngine | null
 export function getEngine(id: string | null | undefined): AnyRegisteredEngine | null {
   return isGameEngineId(id) ? ENGINES[id] : null
+}
+
+/**
+ * Admin display helper: registry is the only source of truth for "implemented".
+ * Never maintain a parallel version map in UI pages.
+ */
+export function resolveEngineStatus(
+  technicalEngine: string | null | undefined,
+):
+  | { implemented: true; id: GameEngineId; version: number }
+  | { implemented: false; id: string | null } {
+  if (!isGameEngineId(technicalEngine)) {
+    return { implemented: false, id: technicalEngine ?? null }
+  }
+  const engine = getEngine(technicalEngine)
+  return { implemented: true, id: engine.id, version: engine.version }
 }
 
 /**

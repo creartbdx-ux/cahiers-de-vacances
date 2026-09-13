@@ -6,9 +6,10 @@ import {
   getEngine,
   isGameEngineId,
   resolveEngineId,
+  resolveEngineStatus,
   UnknownGameEngineError,
 } from "./registry"
-import { resolveTemplateEngine } from "../book-renderer/templates"
+import { resolveLabTemplates, resolveTemplateEngine } from "../book-renderer/templates"
 
 const ENTRIES = [
   { answer: "MONTAGNE", clue: "Relief." },
@@ -90,4 +91,27 @@ test("G. template resolves to its technical engine", () => {
   assert.equal(resolveTemplateEngine("CROSSWORD_01"), "CROSSWORD")
   assert.equal(resolveTemplateEngine("WORDSEARCH_01"), "WORDSEARCH")
   assert.equal(resolveTemplateEngine("DOES_NOT_EXIST"), null)
+})
+
+test("H. resolveEngineStatus uses the registry (WORDSEARCH v1)", () => {
+  const ws = resolveEngineStatus("WORDSEARCH")
+  assert.equal(ws.implemented, true)
+  if (ws.implemented) {
+    assert.equal(ws.id, "WORDSEARCH")
+    assert.equal(ws.version, 1)
+  }
+  const unknown = resolveEngineStatus("SUDOKU")
+  assert.equal(unknown.implemented, false)
+})
+
+test("I. resolveLabTemplates keeps WORDSEARCH_01 when active in DB", () => {
+  const labs = resolveLabTemplates([
+    { id: "CROSSWORD_01", active: true },
+    { id: "WORDSEARCH_01", active: true },
+    { id: "UNKNOWN_99", active: true },
+  ])
+  assert.deepEqual(
+    labs.map((t) => t.id),
+    ["CROSSWORD_01", "WORDSEARCH_01"],
+  )
 })
