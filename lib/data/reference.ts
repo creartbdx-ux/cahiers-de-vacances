@@ -26,6 +26,18 @@ export async function getUniverses(): Promise<Universe[]> {
   return (data as Universe[]) ?? []
 }
 
+export async function getActiveUniverses(): Promise<Universe[]> {
+  const supabase = await createClient()
+  const { data } = await supabase.from("universes").select("*").eq("active", true).order("name")
+  return (data as Universe[]) ?? []
+}
+
+export async function getActiveStyles(): Promise<Style[]> {
+  const supabase = await createClient()
+  const { data } = await supabase.from("styles").select("*").eq("active", true).order("name")
+  return (data as Style[]) ?? []
+}
+
 export async function getAssets(): Promise<Asset[]> {
   const supabase = await createClient()
   const { data } = await supabase.from("assets").select("*").order("created_at", { ascending: false })
