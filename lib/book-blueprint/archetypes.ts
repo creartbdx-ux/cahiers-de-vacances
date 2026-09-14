@@ -67,6 +67,22 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     personalizationType: "THEME",
   },
   {
+    id: "THEME_TRUE_FALSE",
+    family: "THEME_GAME",
+    label: "Vrai ou faux thématique",
+    estimatedDensity: "LIGHT",
+    correctionRequired: true,
+    correctionWeight: 0.4,
+    implementationStatus: "READY",
+    supportedAudiences: ["*"],
+    minimumProfileRequirements: {},
+    tags: ["true_false", "theme", "light", "main"],
+    mechanicFamily: "TRUE_FALSE",
+    gameId: "TRUE_FALSE_THEME",
+    technicalEngine: "TRUE_FALSE",
+    personalizationType: "THEME",
+  },
+  {
     id: "THEME_VARIETY_GAME",
     family: "THEME_GAME",
     label: "Jeu thématique (mécanique à venir)",
@@ -257,6 +273,7 @@ export const READY_THEME_ARCHETYPE_IDS = [
   "THEME_QUIZ",
   "THEME_WORDSEARCH",
   "THEME_CROSSWORD",
+  "THEME_TRUE_FALSE",
 ] as const
 
 export const MAX_CORRECTION_PAGE_DENSITY = 1.6

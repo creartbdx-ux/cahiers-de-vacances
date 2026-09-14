@@ -57,6 +57,22 @@ export type {
   GeneratedCrosswordTheme,
   GeneratedCrosswordThemeEntry,
 } from "./crossword-theme/types"
+export { generateTrueFalseThemeContent } from "./true-false-theme/generate"
+export type {
+  GenerateTrueFalseThemeInput,
+  GenerateTrueFalseThemeResult,
+  GenerateTrueFalseThemeSuccess,
+} from "./true-false-theme/generate"
+export { toTrueFalseThemeEngineInput, toTrueFalseThemeStatementInput } from "./true-false-theme/adapter"
+export { validateTrueFalseThemeGeneration } from "./true-false-theme/validate"
+export {
+  buildTrueFalseThemeContext,
+  buildTrueFalseThemeUserPayload,
+} from "./true-false-theme/context"
+export type {
+  GeneratedTrueFalseTheme,
+  GeneratedTrueFalseThemeStatement,
+} from "./true-false-theme/types"
 export {
   resolveUniverseEditorial,
   topicHitsExcluded,

@@ -9,10 +9,12 @@ import {
   buildCrosswordThemeContext,
   buildQuizPersonalSourceContext,
   buildQuizThemeContext,
+  buildTrueFalseThemeContext,
   buildWordSearchThemeContext,
   generateCrosswordThemeContent,
   generateQuizPersonalContent,
   generateQuizThemeContent,
+  generateTrueFalseThemeContent,
   generateWordSearchThemeContent,
   isContentGenerationConfigured,
   lookupSourceText,
@@ -20,6 +22,7 @@ import {
   type GeneratedCrosswordThemeEntry,
   type GeneratedQuizPersonalQuestion,
   type GeneratedQuizThemeQuestion,
+  type GeneratedTrueFalseThemeStatement,
   type GeneratedWordSearchThemeWord,
 } from "@/lib/content-generation"
 import type { WordSearchSuccess } from "@/lib/game-engines/wordsearch/types"
@@ -736,5 +739,333 @@ function toCrosswordLabEntryView(e: GeneratedCrosswordThemeEntry): CrosswordThem
     clue: e.clue,
     topicKey: e.topicKey,
     topicLabel: e.topicLabel,
+  }
+}
+
+export type TrueFalseThemeLabStatementView = {
+  id: string
+  statement: string
+  answer: boolean
+  explanation: string
+  topicKey: string
+  topicLabel: string
+  statementStyle: string
+}
+
+export type GenerateTrueFalseThemeLabResult =
+  | {
+      ok: true
+      configured: true
+      slotId: string
+      title: string
+      universeId: string
+      universeName: string
+      difficulty: number
+      statementCount: number
+      trueCount: number
+      falseCount: number
+      topics: string[]
+      styles: string[]
+      styleDistinctCount: number
+      styleDiversityOk: boolean
+      durationMs: number
+      repaired: boolean
+      repairedCount: number
+      warnings: string[]
+      statements: TrueFalseThemeLabStatementView[]
+      seed: string
+    }
+  | {
+      ok: false
+      configured: boolean
+      code?: string
+      message: string
+      details?: string[]
+    }
+
+export async function generateTrueFalseThemeLabAction(input: {
+  bookProjectId: string
+  seed: string
+  slotId: string
+}): Promise<GenerateTrueFalseThemeLabResult> {
+  const { user, profile: authProfile } = await getCurrentUser()
+  if (!user || authProfile?.role !== "admin") {
+    return { ok: false, configured: isContentGenerationConfigured(), message: "Accès admin requis." }
+  }
+
+  if (!isContentGenerationConfigured()) {
+    return {
+      ok: false,
+      configured: false,
+      code: "NOT_CONFIGURED",
+      message:
+        "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY dans les variables d'environnement serveur (Vercel → Settings → Environment Variables), puis redéployez.",
+    }
+  }
+
+  const project = await getBookProject(input.bookProjectId)
+  if (!project) {
+    return { ok: false, configured: true, message: "Projet introuvable." }
+  }
+
+  const parsed = parseQuestionnairePayload(project.questionnaire_data)
+  if (!parsed.profile) {
+    return { ok: false, configured: true, message: "BookProfileV1 manquant sur ce projet." }
+  }
+
+  let richnessLevel = parsed.richnessLevel
+  if (!richnessLevel && parsed.questionnaire) {
+    richnessLevel = calculateProfileRichness(parsed.questionnaire, parsed.profile).level
+  }
+  if (
+    !canUseInEditorialLab({
+      status: project.status,
+      profile: parsed.profile,
+      richnessLevel: richnessLevel ?? null,
+    })
+  ) {
+    return { ok: false, configured: true, message: "Projet non éligible à l'Editorial Lab." }
+  }
+
+  const [games, universes] = await Promise.all([getGames(), getUniverses()])
+  const plan = buildEditorialPlan({
+    profile: parsed.profile,
+    seed: input.seed.trim() || "lab-seed-1",
+    games,
+    richnessLevel: richnessLevel ?? "ENOUGH",
+    maxSlots: 8,
+  })
+
+  const slot = plan.selectedGames.find((s) => s.slotId === input.slotId)
+  if (!slot) {
+    return { ok: false, configured: true, message: "Slot introuvable dans le plan reconstruit." }
+  }
+  if (slot.gameId !== "TRUE_FALSE_THEME") {
+    return {
+      ok: false,
+      configured: true,
+      message: "Ce slot n'est pas TRUE_FALSE_THEME.",
+    }
+  }
+
+  const universe =
+    universes.find((u) => u.id === slot.universeId) ??
+    (slot.universeId
+      ? {
+          id: slot.universeId,
+          name: slot.universeId,
+          editorial_description: null,
+          allowed_topics: [],
+          excluded_topics: [],
+          quiz_guidance: null,
+        }
+      : null)
+
+  const themeContext = buildTrueFalseThemeContext({ slot, universe })
+  const result = await generateTrueFalseThemeContent({
+    slot,
+    universe: universe ?? undefined,
+    universeName: themeContext.universeName,
+    bookProjectId: project.id,
+  })
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      configured: result.code !== "NOT_CONFIGURED",
+      code: result.code,
+      message: result.message,
+      details: result.details,
+    }
+  }
+
+  if (!result.engineResult.success) {
+    return {
+      ok: false,
+      configured: true,
+      code: "ENGINE_REJECTED",
+      message: result.engineResult.message,
+      details: result.engineResult.validation.errors,
+    }
+  }
+
+  return {
+    ok: true,
+    configured: true,
+    slotId: slot.slotId,
+    title: result.generated.title,
+    universeId: themeContext.universeId,
+    universeName: themeContext.universeName,
+    difficulty: themeContext.difficulty,
+    statementCount: result.generated.statements.length,
+    trueCount: result.validation.trueCount,
+    falseCount: result.validation.falseCount,
+    topics: result.validation.topics,
+    styles: result.validation.styles,
+    styleDistinctCount: result.validation.styleDistinctCount,
+    styleDiversityOk: result.validation.styleDiversityOk,
+    durationMs: result.durationMs,
+    repaired: result.repaired,
+    repairedCount: result.repairedCount,
+    warnings: result.validation.warnings,
+    statements: result.generated.statements.map(toTrueFalseLabStatementView),
+    seed: slot.seed,
+  }
+}
+
+export async function generateTrueFalseThemeCatalogTestAction(input: {
+  bookProjectId: string
+  seed: string
+  universeId: string
+}): Promise<GenerateTrueFalseThemeLabResult> {
+  const { user, profile: authProfile } = await getCurrentUser()
+  if (!user || authProfile?.role !== "admin") {
+    return { ok: false, configured: isContentGenerationConfigured(), message: "Accès admin requis." }
+  }
+
+  if (!isContentGenerationConfigured()) {
+    return {
+      ok: false,
+      configured: false,
+      code: "NOT_CONFIGURED",
+      message:
+        "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY dans les variables d'environnement serveur, puis redéployez.",
+    }
+  }
+
+  const project = await getBookProject(input.bookProjectId)
+  if (!project) {
+    return { ok: false, configured: true, message: "Projet introuvable." }
+  }
+
+  const parsed = parseQuestionnairePayload(project.questionnaire_data)
+  if (!parsed.profile) {
+    return { ok: false, configured: true, message: "BookProfileV1 manquant sur ce projet." }
+  }
+
+  let richnessLevel = parsed.richnessLevel
+  if (!richnessLevel && parsed.questionnaire) {
+    richnessLevel = calculateProfileRichness(parsed.questionnaire, parsed.profile).level
+  }
+  if (
+    !canUseInEditorialLab({
+      status: project.status,
+      profile: parsed.profile,
+      richnessLevel: richnessLevel ?? null,
+    })
+  ) {
+    return { ok: false, configured: true, message: "Projet non éligible à l'Editorial Lab." }
+  }
+
+  const [games, universes] = await Promise.all([getGames(), getUniverses()])
+  const catalogGame = games.find((g) => g.id === "TRUE_FALSE_THEME" && g.active)
+  if (!catalogGame) {
+    return {
+      ok: false,
+      configured: true,
+      message: "TRUE_FALSE_THEME absent du catalogue (exécutez scripts/010_true_false_theme_seed.sql).",
+    }
+  }
+
+  const universe =
+    universes.find((u) => u.id === input.universeId) ??
+    ({
+      id: input.universeId,
+      name: input.universeId,
+      editorial_description: null,
+      allowed_topics: [],
+      excluded_topics: [],
+      quiz_guidance: null,
+    } as const)
+
+  const seed = input.seed.trim() || "lab-seed-1"
+  const slot = {
+    slotId: `catalog_tf_${seed}`,
+    gameId: "TRUE_FALSE_THEME" as const,
+    gameName: catalogGame.name,
+    technicalEngine: "TRUE_FALSE",
+    personalizationType: "THEME" as const,
+    templateId: "TRUE_FALSE_01",
+    universeId: universe.id,
+    difficulty: parsed.profile.gamePreferences.difficulty,
+    sourceParticipantIds: [] as string[],
+    sourceMemoryIds: [] as string[],
+    sourceFactIds: [] as string[],
+    sourceInterestIds: [universe.id],
+    sourceJokeIds: [] as string[],
+    contentRequirements: {
+      type: "TRUE_FALSE_CONTENT" as const,
+      targetStatements: 8,
+      requirePersonalSource: false,
+      universeId: universe.id,
+    },
+    reason: "Test catalogue TRUE_FALSE_THEME (hors plan)",
+    priority: 0,
+    seed: `${seed}:catalog:TRUE_FALSE_THEME`,
+  }
+
+  const themeContext = buildTrueFalseThemeContext({ slot, universe })
+  const result = await generateTrueFalseThemeContent({
+    slot,
+    universe,
+    universeName: themeContext.universeName,
+    bookProjectId: project.id,
+  })
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      configured: result.code !== "NOT_CONFIGURED",
+      code: result.code,
+      message: result.message,
+      details: result.details,
+    }
+  }
+
+  if (!result.engineResult.success) {
+    return {
+      ok: false,
+      configured: true,
+      code: "ENGINE_REJECTED",
+      message: result.engineResult.message,
+      details: result.engineResult.validation.errors,
+    }
+  }
+
+  return {
+    ok: true,
+    configured: true,
+    slotId: slot.slotId,
+    title: result.generated.title,
+    universeId: themeContext.universeId,
+    universeName: themeContext.universeName,
+    difficulty: themeContext.difficulty,
+    statementCount: result.generated.statements.length,
+    trueCount: result.validation.trueCount,
+    falseCount: result.validation.falseCount,
+    topics: result.validation.topics,
+    styles: result.validation.styles,
+    styleDistinctCount: result.validation.styleDistinctCount,
+    styleDiversityOk: result.validation.styleDiversityOk,
+    durationMs: result.durationMs,
+    repaired: result.repaired,
+    repairedCount: result.repairedCount,
+    warnings: result.validation.warnings,
+    statements: result.generated.statements.map(toTrueFalseLabStatementView),
+    seed: slot.seed,
+  }
+}
+
+function toTrueFalseLabStatementView(
+  s: GeneratedTrueFalseThemeStatement,
+): TrueFalseThemeLabStatementView {
+  return {
+    id: s.id,
+    statement: s.statement,
+    answer: s.answer,
+    explanation: s.explanation,
+    topicKey: s.topicKey,
+    topicLabel: s.topicLabel,
+    statementStyle: s.statementStyle,
   }
 }

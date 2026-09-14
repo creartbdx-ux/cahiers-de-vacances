@@ -349,6 +349,13 @@ test("contentRequirements corrects par moteur", () => {
   }
   const tf = buildContentRequirements("TRUE_FALSE_PERSONAL", "PERSONAL", null)
   assert.equal(tf.type, "TRUE_FALSE_CONTENT")
+  const tfTheme = buildContentRequirements("TRUE_FALSE_THEME", "THEME", "BEAUTY")
+  assert.equal(tfTheme.type, "TRUE_FALSE_CONTENT")
+  if (tfTheme.type === "TRUE_FALSE_CONTENT") {
+    assert.equal(tfTheme.requirePersonalSource, false)
+    assert.equal(tfTheme.universeId, "BEAUTY")
+    assert.equal(tfTheme.targetStatements, 8)
+  }
 })
 
 test("plan V1 borné et versionné", () => {

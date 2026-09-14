@@ -129,7 +129,8 @@ export function evaluateEligibility(
     } else if (
       gameId === "CROSSWORD_THEME" ||
       gameId === "WORDSEARCH_THEME" ||
-      gameId === "QUIZ_THEME"
+      gameId === "QUIZ_THEME" ||
+      gameId === "TRUE_FALSE_THEME"
     ) {
       const n = inventory.interests.length
       ok = n >= 1
@@ -146,6 +147,11 @@ export function evaluateEligibility(
       ) {
         strength = Math.min(1, strength + 0.35)
         reason = `Univers thématiques disponibles (${n}) — favorisé car un quiz personnel est peu adapté à cette audience.`
+      }
+
+      // Light thematic activity — mild boost to diversify beyond heavy grids.
+      if (ok && gameId === "TRUE_FALSE_THEME") {
+        strength = Math.min(1, strength + 0.12)
       }
     }
 

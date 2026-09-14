@@ -59,6 +59,13 @@ export function buildContentRequirements(
         requirePersonalSource: true,
         universeId: null,
       }
+    case "TRUE_FALSE_THEME":
+      return {
+        type: "TRUE_FALSE_CONTENT",
+        targetStatements: 8,
+        requirePersonalSource: false,
+        universeId,
+      }
   }
 }
 

@@ -6,11 +6,13 @@ import { BookPage } from "@/components/book-renderer/book-page"
 import { PagePreview } from "@/components/book-renderer/page-preview"
 import { CrosswordTemplate } from "@/components/book-renderer/templates/crossword-template"
 import { QuizTemplate } from "@/components/book-renderer/templates/quiz-template"
+import { TrueFalseTemplate } from "@/components/book-renderer/templates/true-false-template"
 import { WordsearchTemplate } from "@/components/book-renderer/templates/wordsearch-template"
 import {
   CROSSWORD_01_INSTRUCTION,
   CROSSWORD_01_SAMPLE,
   QUIZ_01_SAMPLE,
+  TRUE_FALSE_01_SAMPLE,
   WORDSEARCH_01_SAMPLE,
 } from "@/lib/book-renderer/templates"
 import { getStyleTokens } from "@/lib/book-renderer/styles"
@@ -23,15 +25,19 @@ import {
 import { buildQuizPersonalSourceContext } from "@/lib/content-generation/source-context"
 import { buildCrosswordThemePreview } from "@/lib/content-generation/crossword-theme/preview"
 import { buildQuizThemePreview } from "@/lib/content-generation/quiz-theme/preview"
+import { buildTrueFalseThemePreview } from "@/lib/content-generation/true-false-theme/preview"
 import { buildWordSearchThemePreview } from "@/lib/content-generation/wordsearch-theme/preview"
 import {
   generateCrosswordThemeLabAction,
   generateQuizPersonalLabAction,
   generateQuizThemeLabAction,
+  generateTrueFalseThemeCatalogTestAction,
+  generateTrueFalseThemeLabAction,
   generateWordsearchThemeLabAction,
   type GenerateCrosswordThemeLabResult,
   type GenerateQuizPersonalLabResult,
   type GenerateQuizThemeLabResult,
+  type GenerateTrueFalseThemeLabResult,
   type GenerateWordsearchThemeLabResult,
 } from "@/app/admin/editorial-lab/actions"
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
@@ -44,6 +50,7 @@ type SlotGenResult =
   | GenerateQuizThemeLabResult
   | GenerateWordsearchThemeLabResult
   | GenerateCrosswordThemeLabResult
+  | GenerateTrueFalseThemeLabResult
 
 function isQuizPersonalLabOk(
   gen: SlotGenResult | undefined,
@@ -67,6 +74,12 @@ function isCrosswordThemeLabOk(
   gen: SlotGenResult | undefined,
 ): gen is Extract<GenerateCrosswordThemeLabResult, { ok: true }> {
   return Boolean(gen?.ok && "entryCount" in gen && "entries" in gen && "gridBuildable" in gen)
+}
+
+function isTrueFalseThemeLabOk(
+  gen: SlotGenResult | undefined,
+): gen is Extract<GenerateTrueFalseThemeLabResult, { ok: true }> {
+  return Boolean(gen?.ok && "statements" in gen && "trueCount" in gen)
 }
 
 export type EditorialLabProject = {
@@ -99,7 +112,9 @@ export function EditorialLabClient({
   const [genBySlot, setGenBySlot] = useState<Record<string, SlotGenResult | undefined>>({})
   const [previewSlotId, setPreviewSlotId] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState<"game" | "solution">("game")
+  const [catalogUniverseId, setCatalogUniverseId] = useState("")
   const [pending, startTransition] = useTransition()
+  const hasTrueFalseTheme = games.some((g) => g.id === "TRUE_FALSE_THEME")
 
   const selected = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
@@ -189,6 +204,60 @@ export function EditorialLabClient({
     })
   }
 
+  function generateTrueFalseSlot(slot: EditorialGameSlot) {
+    if (!selected) return
+    setError(null)
+    startTransition(async () => {
+      const result = await generateTrueFalseThemeLabAction({
+        bookProjectId: selected.id,
+        seed: seed.trim() || "lab-seed-1",
+        slotId: slot.slotId,
+      })
+      setGenBySlot((prev) => ({ ...prev, [slot.slotId]: result }))
+      if (result.ok) setPreviewSlotId(null)
+    })
+  }
+
+  const catalogUniverseOptions = useMemo(() => {
+    const interestIds = selected?.profile.sharedProfile.interestUniverseIds ?? []
+    if (interestIds.length > 0) {
+      return interestIds.map((id) => {
+        const found = universes.find((u) => u.id === id)
+        return { id, name: found?.name ?? id }
+      })
+    }
+    return universes.map((u) => ({ id: u.id, name: u.name }))
+  }, [selected, universes])
+
+  const catalogTfSlotId = useMemo(() => {
+    const s = seed.trim() || "lab-seed-1"
+    return `catalog_tf_${s}`
+  }, [seed])
+
+  const catalogTfGen = genBySlot[catalogTfSlotId]
+  const catalogTfOk = isTrueFalseThemeLabOk(catalogTfGen) ? catalogTfGen : null
+  const catalogTfErr = catalogTfGen && !catalogTfGen.ok ? catalogTfGen : null
+
+  function generateTrueFalseCatalogTest() {
+    if (!selected) return
+    const universeId = catalogUniverseId || catalogUniverseOptions[0]?.id
+    if (!universeId) return
+    if (!catalogUniverseId) setCatalogUniverseId(universeId)
+    setError(null)
+    startTransition(async () => {
+      const result = await generateTrueFalseThemeCatalogTestAction({
+        bookProjectId: selected.id,
+        seed: seed.trim() || "lab-seed-1",
+        universeId,
+      })
+      const slotKey = result.ok
+        ? result.slotId
+        : `catalog_tf_${seed.trim() || "lab-seed-1"}`
+      setGenBySlot((prev) => ({ ...prev, [slotKey]: result }))
+      if (result.ok) setPreviewSlotId(null)
+    })
+  }
+
   const previewSlot = plan?.selectedGames.find((s) => s.slotId === previewSlotId) ?? null
   const previewGen = previewSlotId ? genBySlot[previewSlotId] : null
 
@@ -220,6 +289,13 @@ export function EditorialLabClient({
     return buildCrosswordThemePreview(gen.entries, gen.seed)
   }, [previewSlotId, genBySlot])
 
+  const trueFalsePreview = useMemo(() => {
+    if (!previewSlotId) return null
+    const gen = genBySlot[previewSlotId]
+    if (!isTrueFalseThemeLabOk(gen)) return null
+    return buildTrueFalseThemePreview(gen.statements, gen.seed)
+  }, [previewSlotId, genBySlot])
+
   return (
     <div className="flex flex-col gap-6">
       <div
@@ -231,7 +307,7 @@ export function EditorialLabClient({
         )}
       >
         {aiConfigured
-          ? "Génération IA configurée (CONTENT_GENERATION_API_KEY). Disponible pour QUIZ_PERSONAL, QUIZ_THEME, WORDSEARCH_THEME et CROSSWORD_THEME."
+          ? "Génération IA configurée (CONTENT_GENERATION_API_KEY). Disponible pour QUIZ_PERSONAL, QUIZ_THEME, WORDSEARCH_THEME, CROSSWORD_THEME et TRUE_FALSE_THEME."
           : "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY dans les variables d'environnement serveur (Vercel), puis redéployez."}
       </div>
 
@@ -247,6 +323,7 @@ export function EditorialLabClient({
                 setPlan(null)
                 setGenBySlot({})
                 setPreviewSlotId(null)
+                setCatalogUniverseId("")
               }}
             >
               {projects.length === 0 && <option value="">Aucun projet disponible</option>}
@@ -311,6 +388,7 @@ export function EditorialLabClient({
                 const isQuizTheme = slot.gameId === "QUIZ_THEME"
                 const isWordsearchTheme = slot.gameId === "WORDSEARCH_THEME"
                 const isCrosswordTheme = slot.gameId === "CROSSWORD_THEME"
+                const isTrueFalseTheme = slot.gameId === "TRUE_FALSE_THEME"
                 const gen = genBySlot[slot.slotId]
                 const personalOk =
                   isQuizPersonal && gen?.ok && "sourceSummary" in gen ? gen : null
@@ -324,6 +402,9 @@ export function EditorialLabClient({
                 const crosswordOk =
                   isCrosswordTheme && isCrosswordThemeLabOk(gen) ? gen : null
                 const crosswordErr = isCrosswordTheme && gen && !gen.ok ? gen : null
+                const trueFalseOk =
+                  isTrueFalseTheme && isTrueFalseThemeLabOk(gen) ? gen : null
+                const trueFalseErr = isTrueFalseTheme && gen && !gen.ok ? gen : null
                 const sourcePreview =
                   selected && isQuizPersonal
                     ? buildQuizPersonalSourceContext({
@@ -343,6 +424,10 @@ export function EditorialLabClient({
                   slot.contentRequirements.type === "CROSSWORD_CONTENT"
                     ? slot.contentRequirements.targetEntries
                     : 10
+                const trueFalseTargetStatements =
+                  slot.contentRequirements.type === "TRUE_FALSE_CONTENT"
+                    ? slot.contentRequirements.targetStatements
+                    : 8
 
                 return (
                   <article
@@ -935,6 +1020,152 @@ export function EditorialLabClient({
                         )}
                       </div>
                     )}
+
+                    {isTrueFalseTheme && (
+                      <div className="mt-4 rounded-lg border border-border bg-card/60 p-3">
+                        <h3 className="text-sm font-semibold">VRAI / FAUX THÉMATIQUE</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Univers :{" "}
+                          <span className="text-foreground">
+                            {universeName(slot.universeId) ?? slot.universeId ?? "—"}
+                          </span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Difficulté :{" "}
+                          <span className="text-foreground">{slot.difficulty}</span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Affirmations :{" "}
+                          <span className="text-foreground">{trueFalseTargetStatements}</span>
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={pending || !aiConfigured}
+                            onClick={() => generateTrueFalseSlot(slot)}
+                          >
+                            {pending ? "Génération…" : "Générer le contenu"}
+                          </Button>
+                          {trueFalseOk &&
+                            (previewSlotId === slot.slotId ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setPreviewSlotId(null)}
+                              >
+                                Masquer le rendu
+                              </Button>
+                            ) : (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setPreviewSlotId(slot.slotId)
+                                  setPreviewMode("game")
+                                }}
+                              >
+                                Voir le rendu
+                              </Button>
+                            ))}
+                        </div>
+
+                        {trueFalseErr && (
+                          <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                            <p className="font-medium">{trueFalseErr.message}</p>
+                            {trueFalseErr.details?.length ? (
+                              <ul className="mt-2 list-disc pl-5">
+                                {trueFalseErr.details.map((d) => (
+                                  <li key={d}>{d}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {trueFalseOk && (
+                          <div className="mt-4 flex flex-col gap-4">
+                            <p className="text-sm font-medium">{trueFalseOk.title}</p>
+                            <p className="text-sm text-muted-foreground">
+                              Validation OK · {trueFalseOk.statementCount} affirmation
+                              {trueFalseOk.statementCount > 1 ? "s" : ""} ·{" "}
+                              {trueFalseOk.durationMs} ms
+                              {trueFalseOk.repaired
+                                ? ` · Réparation : ${trueFalseOk.repairedCount} affirmation${trueFalseOk.repairedCount > 1 ? "s" : ""} remplacée${trueFalseOk.repairedCount > 1 ? "s" : ""}`
+                                : ""}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              Debug : trueCount={trueFalseOk.trueCount} / falseCount=
+                              {trueFalseOk.falseCount} · styleDistinctCount=
+                              {trueFalseOk.styleDistinctCount}
+                              {" · "}
+                              Validation diversité :{" "}
+                              {trueFalseOk.styleDiversityOk ? "OK" : "KO"}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              Topics : {trueFalseOk.topics.join(", ") || "—"}
+                            </p>
+                            {trueFalseOk.warnings.length > 0 && (
+                              <ul className="text-sm text-muted-foreground">
+                                {trueFalseOk.warnings.map((w) => (
+                                  <li key={w}>{w}</li>
+                                ))}
+                              </ul>
+                            )}
+                            {trueFalseOk.statements.map((s, si) => (
+                              <div key={s.id} className="rounded-lg border border-border p-3">
+                                <p className="text-sm font-medium">Affirmation {si + 1}</p>
+                                <p className="mt-1 text-sm">&ldquo;{s.statement}&rdquo;</p>
+                                <p className="mt-2 text-sm">
+                                  Réponse : {s.answer ? "VRAI" : "FAUX"}
+                                </p>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                  Explication : {s.explanation}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Sujet : {s.topicKey}
+                                  {s.topicLabel ? ` · ${s.topicLabel}` : ""}
+                                  {" · "}
+                                  Style : {s.statementStyle}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {previewSlotId === slot.slotId && trueFalseOk && (
+                          <div className="mt-4 rounded-lg border border-border bg-background p-4">
+                            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                              <h4 className="text-sm font-semibold">APERÇU</h4>
+                              <ModeToggle mode={previewMode} setMode={setPreviewMode} />
+                            </div>
+                            {trueFalsePreview && !trueFalsePreview.ok ? (
+                              <p className="text-sm text-destructive">{trueFalsePreview.message}</p>
+                            ) : trueFalsePreview?.ok ? (
+                              <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-8">
+                                <PagePreview>
+                                  <BookPage palette={palette} showSafeArea={false}>
+                                    <TrueFalseTemplate
+                                      sample={{
+                                        ...TRUE_FALSE_01_SAMPLE,
+                                        title: trueFalseOk.title,
+                                      }}
+                                      style={styleTokens}
+                                      palette={palette}
+                                      assets={[]}
+                                      trueFalse={trueFalsePreview.trueFalse}
+                                      mode={previewMode}
+                                    />
+                                  </BookPage>
+                                </PagePreview>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </article>
                 )
               })}
@@ -1031,6 +1262,155 @@ export function EditorialLabClient({
             </div>
           </section>
         </>
+      )}
+
+      {hasTrueFalseTheme && selected && (
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <h2 className="mb-4 text-base font-semibold">Test catalogue TRUE_FALSE_THEME</h2>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Génération hors plan éditorial, pour valider le catalogue et un univers donné.
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex min-w-[220px] flex-col gap-1 text-sm">
+              Univers
+              <select
+                className="h-10 rounded-lg border border-input bg-background px-3"
+                value={catalogUniverseId || catalogUniverseOptions[0]?.id || ""}
+                onChange={(e) => setCatalogUniverseId(e.target.value)}
+              >
+                {catalogUniverseOptions.length === 0 && (
+                  <option value="">Aucun univers</option>
+                )}
+                {catalogUniverseOptions.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              type="button"
+              disabled={
+                pending ||
+                !aiConfigured ||
+                !(catalogUniverseId || catalogUniverseOptions[0]?.id)
+              }
+              onClick={() => generateTrueFalseCatalogTest()}
+            >
+              {pending ? "Génération…" : "Générer (hors plan)"}
+            </Button>
+          </div>
+
+          {catalogTfErr && (
+            <div className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <p className="font-medium">{catalogTfErr.message}</p>
+              {catalogTfErr.details?.length ? (
+                <ul className="mt-2 list-disc pl-5">
+                  {catalogTfErr.details.map((d) => (
+                    <li key={d}>{d}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          )}
+
+          {catalogTfOk && (
+            <div className="mt-4 flex flex-col gap-4">
+              <div className="flex flex-wrap gap-2">
+                {previewSlotId === catalogTfOk.slotId ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPreviewSlotId(null)}
+                  >
+                    Masquer le rendu
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setPreviewSlotId(catalogTfOk.slotId)
+                      setPreviewMode("game")
+                    }}
+                  >
+                    Voir le rendu
+                  </Button>
+                )}
+              </div>
+              <p className="text-sm font-medium">{catalogTfOk.title}</p>
+              <p className="text-sm text-muted-foreground">
+                Univers : {catalogTfOk.universeName} · Difficulté : {catalogTfOk.difficulty} ·{" "}
+                {catalogTfOk.statementCount} affirmation
+                {catalogTfOk.statementCount > 1 ? "s" : ""} · {catalogTfOk.durationMs} ms
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Debug : trueCount={catalogTfOk.trueCount} / falseCount={catalogTfOk.falseCount} ·
+                styleDistinctCount={catalogTfOk.styleDistinctCount}
+                {" · "}
+                Validation diversité : {catalogTfOk.styleDiversityOk ? "OK" : "KO"}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Topics : {catalogTfOk.topics.join(", ") || "—"}
+              </p>
+              {catalogTfOk.warnings.length > 0 && (
+                <ul className="text-sm text-muted-foreground">
+                  {catalogTfOk.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              )}
+              {catalogTfOk.statements.map((s, si) => (
+                <div key={s.id} className="rounded-lg border border-border p-3">
+                  <p className="text-sm font-medium">Affirmation {si + 1}</p>
+                  <p className="mt-1 text-sm">&ldquo;{s.statement}&rdquo;</p>
+                  <p className="mt-2 text-sm">Réponse : {s.answer ? "VRAI" : "FAUX"}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Explication : {s.explanation}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Sujet : {s.topicKey}
+                    {s.topicLabel ? ` · ${s.topicLabel}` : ""}
+                    {" · "}
+                    Style : {s.statementStyle}
+                  </p>
+                </div>
+              ))}
+
+              {previewSlotId === catalogTfOk.slotId && (
+                <div className="mt-2 rounded-lg border border-border bg-background p-4">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <h4 className="text-sm font-semibold">APERÇU</h4>
+                    <ModeToggle mode={previewMode} setMode={setPreviewMode} />
+                  </div>
+                  {trueFalsePreview && !trueFalsePreview.ok ? (
+                    <p className="text-sm text-destructive">{trueFalsePreview.message}</p>
+                  ) : trueFalsePreview?.ok ? (
+                    <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-8">
+                      <PagePreview>
+                        <BookPage palette={palette} showSafeArea={false}>
+                          <TrueFalseTemplate
+                            sample={{
+                              ...TRUE_FALSE_01_SAMPLE,
+                              title: catalogTfOk.title,
+                            }}
+                            style={styleTokens}
+                            palette={palette}
+                            assets={[]}
+                            trueFalse={trueFalsePreview.trueFalse}
+                            mode={previewMode}
+                          />
+                        </BookPage>
+                      </PagePreview>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
       )}
     </div>
   )

@@ -16,6 +16,7 @@ export const EDITORIAL_V1_GAME_IDS = [
   "QUIZ_PERSONAL",
   "QUIZ_THEME",
   "TRUE_FALSE_PERSONAL",
+  "TRUE_FALSE_THEME",
 ] as const
 
 export type EditorialV1GameId = (typeof EDITORIAL_V1_GAME_IDS)[number]

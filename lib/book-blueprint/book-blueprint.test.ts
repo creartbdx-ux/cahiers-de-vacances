@@ -4,6 +4,7 @@ import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
 import type { Palette, Style } from "@/lib/supabase/types"
 import { packCorrections } from "./corrections"
 import { buildBookBlueprint } from "./planner"
+import { READY_THEME_ARCHETYPE_IDS } from "./archetypes"
 import { DEFAULT_TARGET_INTERIOR_PAGES } from "./types"
 
 const STYLES: Style[] = [
@@ -335,8 +336,12 @@ test("READY/MISSING correctement identifié", () => {
   assert.ok(bp.stats.byStatus.READY >= 1)
   assert.ok(bp.stats.byStatus.MISSING >= 1)
   assert.ok(bp.pages.some((p) => p.gameId === "QUIZ_THEME" && p.implementationStatus === "READY"))
+  assert.ok(
+    READY_THEME_ARCHETYPE_IDS.includes("THEME_TRUE_FALSE"),
+    "TRUE_FALSE_THEME doit être READY dans le blueprint",
+  )
   assert.ok(bp.pages.some((p) => p.implementationStatus === "MISSING"))
-  // Do not flood with only 3 ready engines
+  // Do not flood with only ready engines
   assert.ok(bp.stats.readyThemeGamePages <= 15)
   assert.ok(bp.stats.missingMechanicPages >= 1)
 })
