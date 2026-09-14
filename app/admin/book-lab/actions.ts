@@ -14,6 +14,7 @@ import {
   generateQuizThemeContent,
   generateWordSearchThemeContent,
   isContentGenerationConfigured,
+  createDefaultContentGenerationProvider,
 } from "@/lib/content-generation"
 import { calculateProfileRichness } from "@/lib/questionnaire/richness"
 import { resolveBookVisualIdentity } from "@/lib/mini-book/visual-identity"
@@ -22,8 +23,7 @@ import { getStyles } from "@/lib/data/reference"
 import type { MiniBookVisualIdentity } from "@/lib/mini-book/types"
 import { buildMemoryPage, buildPhotoMemoryPage } from "@/lib/memory-pages"
 import {
-  collectPersonalBlocks,
-  composePersonalEditorialPages,
+  composePersonalEditorialWithAi,
   pageProvenance,
   type PersonalEditorialPageV1,
 } from "@/lib/personal-editorial"
@@ -607,12 +607,20 @@ export type BookLabPersonalEditorialResult =
       ok: true
       blockCount: number
       pageCount: number
+      overallMode: "AI" | "FALLBACK" | "MIXED"
+      aiConfigured: boolean
+      aiCallCount: number
+      fallbackBanner: boolean
+      /** Packed pages before AI — for regenerate copy without re-packing. */
+      packedPages: PersonalEditorialPageV1[]
       pages: Array<{
         pageKey: string
         layoutId: PersonalEditorialPageV1["layoutId"]
         visualRole: PersonalEditorialPageV1["visualRole"]
         weight: number
         isHero: boolean
+        editorialMode: "AI" | "FALLBACK"
+        validationOk: boolean
         sourceMemoryIds: string[]
         sourcePhotoIds: string[]
         page: PersonalEditorialPageV1
@@ -621,24 +629,21 @@ export type BookLabPersonalEditorialResult =
     }
   | { ok: false; message: string }
 
-/**
- * Compose PERSONAL_EDITORIAL pages from profile blocks (no extra IA for composition).
- */
-export async function prepareBookLabPersonalEditorialAction(input: {
+async function loadBookLabPersonalContext(input: {
   bookProjectId: string
   seed: string
-}): Promise<BookLabPersonalEditorialResult> {
+}) {
   const { user, profile: authProfile } = await getCurrentUser()
   if (!user || authProfile?.role !== "admin") {
-    return { ok: false, message: "Accès admin requis." }
+    return { ok: false as const, message: "Accès admin requis." }
   }
 
   const project = await getBookProject(input.bookProjectId)
-  if (!project) return { ok: false, message: "Projet introuvable." }
+  if (!project) return { ok: false as const, message: "Projet introuvable." }
 
   const parsed = parseQuestionnairePayload(project.questionnaire_data)
   if (!parsed.profile) {
-    return { ok: false, message: "BookProfileV1 manquant sur ce projet." }
+    return { ok: false as const, message: "BookProfileV1 manquant sur ce projet." }
   }
 
   let richnessLevel = parsed.richnessLevel
@@ -652,7 +657,7 @@ export async function prepareBookLabPersonalEditorialAction(input: {
       richnessLevel: richnessLevel ?? null,
     })
   ) {
-    return { ok: false, message: "Projet non éligible au Book Lab." }
+    return { ok: false as const, message: "Projet non éligible au Book Lab." }
   }
 
   const [palettes, styles] = await Promise.all([getActivePalettes(), getStyles()])
@@ -677,31 +682,124 @@ export async function prepareBookLabPersonalEditorialAction(input: {
     }
   }
 
-  const blocks = collectPersonalBlocks({
+  // OTHER_PERSON: creator display name from auth metadata when available
+  const meta = user.user_metadata as Record<string, unknown> | undefined
+  const metaFirst =
+    (typeof meta?.first_name === "string" && meta.first_name.trim()) ||
+    (typeof meta?.full_name === "string" && meta.full_name.trim().split(/\s+/)[0]) ||
+    null
+  const creatorName =
+    parsed.profile.audience === "OTHER_PERSON" ? metaFirst : null
+
+  return {
+    ok: true as const,
     profile: parsed.profile,
+    seed,
+    visualIdentity,
     photoSignedUrls,
-    creatorName: null,
+    creatorName,
+  }
+}
+
+/**
+ * Compose + éditorialisation IA des pages personnelles (voie principale si API key).
+ */
+export async function prepareBookLabPersonalEditorialAction(input: {
+  bookProjectId: string
+  seed: string
+}): Promise<BookLabPersonalEditorialResult> {
+  const ctx = await loadBookLabPersonalContext(input)
+  if (!ctx.ok) return { ok: false, message: ctx.message }
+
+  const provider = createDefaultContentGenerationProvider()
+  const composed = await composePersonalEditorialWithAi({
+    profile: ctx.profile,
+    seed: `${ctx.seed}:personal-editorial-lab`,
+    photoSignedUrls: ctx.photoSignedUrls,
+    creatorName: ctx.creatorName,
+    provider,
   })
-  const pages = composePersonalEditorialPages(blocks, `${seed}:personal-editorial-lab`)
 
   return {
     ok: true,
-    blockCount: blocks.length,
-    pageCount: pages.length,
-    pages: pages.map((page) => {
+    blockCount: composed.blockCount,
+    pageCount: composed.pageCount,
+    overallMode: composed.overallMode,
+    aiConfigured: composed.aiConfigured,
+    aiCallCount: composed.aiCallCount,
+    fallbackBanner: composed.fallbackBanner,
+    packedPages: composed.packedPages,
+    pages: composed.pages.map((page, i) => {
       const prov = pageProvenance(page)
+      const result = composed.results[i]
       return {
         pageKey: page.pageKey,
         layoutId: page.layoutId,
         visualRole: page.visualRole,
         weight: page.weight,
         isHero: page.isHero,
+        editorialMode: (page.editorialMode ?? result?.mode ?? "FALLBACK") as
+          | "AI"
+          | "FALLBACK",
+        validationOk: result?.validationOk ?? true,
         sourceMemoryIds: prov.sourceMemoryIds,
         sourcePhotoIds: prov.sourcePhotoIds,
         page,
       }
     }),
-    visualIdentity,
+    visualIdentity: ctx.visualIdentity,
+  }
+}
+
+/**
+ * Régénère uniquement la rédaction IA — packing / sources inchangés.
+ */
+export async function regenerateBookLabPersonalEditorialCopyAction(input: {
+  bookProjectId: string
+  seed: string
+  packedPages: PersonalEditorialPageV1[]
+}): Promise<BookLabPersonalEditorialResult> {
+  const ctx = await loadBookLabPersonalContext(input)
+  if (!ctx.ok) return { ok: false, message: ctx.message }
+
+  const provider = createDefaultContentGenerationProvider()
+  const composed = await composePersonalEditorialWithAi({
+    profile: ctx.profile,
+    seed: `${ctx.seed}:personal-editorial-regen:${Date.now()}`,
+    photoSignedUrls: ctx.photoSignedUrls,
+    creatorName: ctx.creatorName,
+    provider,
+    packedPages: input.packedPages,
+  })
+
+  return {
+    ok: true,
+    blockCount: composed.blockCount,
+    pageCount: composed.pageCount,
+    overallMode: composed.overallMode,
+    aiConfigured: composed.aiConfigured,
+    aiCallCount: composed.aiCallCount,
+    fallbackBanner: composed.fallbackBanner,
+    packedPages: input.packedPages,
+    pages: composed.pages.map((page, i) => {
+      const prov = pageProvenance(page)
+      const result = composed.results[i]
+      return {
+        pageKey: page.pageKey,
+        layoutId: page.layoutId,
+        visualRole: page.visualRole,
+        weight: page.weight,
+        isHero: page.isHero,
+        editorialMode: (page.editorialMode ?? result?.mode ?? "FALLBACK") as
+          | "AI"
+          | "FALLBACK",
+        validationOk: result?.validationOk ?? true,
+        sourceMemoryIds: prov.sourceMemoryIds,
+        sourcePhotoIds: prov.sourcePhotoIds,
+        page,
+      }
+    }),
+    visualIdentity: ctx.visualIdentity,
   }
 }
 

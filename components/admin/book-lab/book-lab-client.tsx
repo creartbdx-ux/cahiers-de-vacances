@@ -32,6 +32,7 @@ import {
   prepareBookLabMemoryPageAction,
   prepareBookLabPersonalEditorialAction,
   prepareBookLabPhotoMemoryPageAction,
+  regenerateBookLabPersonalEditorialCopyAction,
   type BookLabCrosswordContent,
   type BookLabMemoryPageResult,
   type BookLabPersonalEditorialResult,
@@ -372,6 +373,23 @@ export function BookLabClient({
       }
       setPersonalEditorial(result)
       setPersonalPageIndex(0)
+    })
+  }
+
+  function regeneratePersonalEditorialCopy() {
+    if (!selected || !personalEditorial?.packedPages?.length) return
+    setPersonalEditorialError(null)
+    startPersonalEditorialTransition(async () => {
+      const result = await regenerateBookLabPersonalEditorialCopyAction({
+        bookProjectId: selected.id,
+        seed: seed.trim() || "lab-seed-1",
+        packedPages: personalEditorial.packedPages,
+      })
+      if (!result.ok) {
+        setPersonalEditorialError(result.message)
+        return
+      }
+      setPersonalEditorial(result)
     })
   }
 
@@ -816,8 +834,8 @@ export function BookLabClient({
         <section className="rounded-2xl border border-border bg-card p-5">
           <h2 className="mb-1 text-base font-semibold">PERSONAL EDITORIAL PAGE LAB</h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            Compose automatiquement des pages à partir des MemoryBlocks et PhotoMemoryBlocks —
-            sans inventer de contenu ni appeler l&apos;IA pour remplir.
+            Packing déterministe + éditorialisation IA de page (voie principale si API key).
+            Le fallback fact-model n&apos;est utilisé qu&apos;en secours technique.
           </p>
 
           <div className="mb-4 flex flex-wrap gap-2">
@@ -826,19 +844,46 @@ export function BookLabClient({
               onClick={() => preparePersonalEditorial()}
               disabled={personalEditorialPending}
             >
-              Composer les pages personnelles
+              {personalEditorialPending
+                ? aiConfigured
+                  ? "Éditorialisation IA…"
+                  : "Composition…"
+                : "Composer les pages personnelles"}
             </Button>
+            {personalEditorial?.packedPages?.length ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => regeneratePersonalEditorialCopy()}
+                disabled={personalEditorialPending || !aiConfigured}
+              >
+                Régénérer la rédaction
+              </Button>
+            ) : null}
           </div>
 
           {personalEditorialError && (
             <p className="mb-3 text-sm text-destructive">{personalEditorialError}</p>
           )}
 
+          {personalEditorial?.fallbackBanner ? (
+            <p className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+              Éditorialisation IA indisponible — aperçu fallback
+              {!personalEditorial.aiConfigured
+                ? " (CONTENT_GENERATION_API_KEY manquante)."
+                : " (échec / validation)."}
+            </p>
+          ) : null}
+
           {personalEditorial && (
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-3 text-sm">
                 <p className="text-muted-foreground">
-                  {personalEditorial.blockCount} bloc(s) → {personalEditorial.pageCount} page(s)
+                  {personalEditorial.blockCount} bloc(s) → {personalEditorial.pageCount}{" "}
+                  page(s) · Mode global : {personalEditorial.overallMode}
+                  {personalEditorial.aiConfigured
+                    ? ` · ${personalEditorial.aiCallCount} appel(s) IA`
+                    : " · IA non configurée"}
                 </p>
                 <ul className="space-y-2">
                   {personalEditorial.pages.map((p, i) => (
@@ -855,11 +900,15 @@ export function BookLabClient({
                       >
                         <span className="font-medium">Page personnelle {i + 1}</span>
                         <span className="mt-1 block text-xs text-muted-foreground">
+                          Editorial mode : {p.editorialMode}
+                          {p.validationOk ? "" : " · validation partielle"}
+                          <br />
                           Layout : {p.layoutId}
                           {p.page.editorialFamily ? ` · ${p.page.editorialFamily}` : ""}
                           {p.page.layoutVariant ? ` · variante ${p.page.layoutVariant}` : ""}
                           <br />
                           Page theme : {p.page.theme?.title ?? "—"}
+                          {p.page.pageKicker ? ` · kicker ${p.page.pageKicker}` : ""}
                           <br />
                           Compatibility :{" "}
                           {Math.round((p.page.compatibilityScore ?? 0) * 100)} %
@@ -917,10 +966,11 @@ export function BookLabClient({
                                   .slice(0, 3)
                                   .join(" · ") || "—"}
                                 <br />
-                                CLAIMS : {(b.claimsUsed ?? []).join(" · ") || "—"}
+                                AI COPY / ÉDITO : {(b.displayText || b.body || "").slice(0, 140)}
+                                {(b.displayText || b.body || "").length > 140 ? "…" : ""}
                                 <br />
-                                → ÉDITO : {(b.displayText || b.body || "").slice(0, 120)}
-                                {(b.displayText || b.body || "").length > 120 ? "…" : ""}
+                                VALIDATION : usedAi={b.usedAi ? "1" : "0"} · claims :{" "}
+                                {(b.claimsUsed ?? []).join(" · ") || "—"}
                                 {b.type === "PHOTO_MEMORY" ? (
                                   <>
                                     <br />

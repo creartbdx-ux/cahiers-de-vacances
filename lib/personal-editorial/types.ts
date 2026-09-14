@@ -110,6 +110,10 @@ export interface PersonalEditorialPageV1 {
   heroReason: string | null
   layoutVariant?: PhotoPlusMemoryVariant | null
   compatibilityScore: number
+  /** AI page copy vs deterministic fallback. */
+  editorialMode?: "AI" | "FALLBACK"
+  pageKicker?: string | null
+  pageIntro?: string | null
 }
 
 export const PERSONAL_PAGE_CAPACITY = 4

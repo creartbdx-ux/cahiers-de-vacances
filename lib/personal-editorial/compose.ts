@@ -129,6 +129,9 @@ function makePage(
     heroReason,
     layoutVariant,
     compatibilityScore: groupCompatibilityScore(ordered),
+    editorialMode: "FALLBACK",
+    pageKicker: null,
+    pageIntro: null,
   }
 }
 

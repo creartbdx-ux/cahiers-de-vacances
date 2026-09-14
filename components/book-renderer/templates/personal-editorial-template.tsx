@@ -60,6 +60,14 @@ export function PersonalEditorialTemplate({
               {page.theme.subtitle}
             </p>
           ) : null}
+          {page.pageIntro ? (
+            <p
+              className={style.instructionClassName}
+              style={{ fontSize: 13, margin: "8px 0 0", opacity: 0.85, lineHeight: 1.4 }}
+            >
+              {page.pageIntro}
+            </p>
+          ) : null}
         </header>
       ) : null}
 
