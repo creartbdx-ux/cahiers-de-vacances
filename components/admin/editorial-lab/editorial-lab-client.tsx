@@ -257,6 +257,13 @@ export function EditorialLabClient({
                     {isQuizPersonal && sourcePreview && (
                       <div className="mt-4 rounded-lg border border-border bg-card/60 p-3">
                         <h3 className="text-sm font-semibold">QUIZ PERSONNALISÉ</h3>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Audience / lecteur : {sourcePreview.audience} →{" "}
+                          {sourcePreview.targetParticipantNames.join(", ") || "—"}
+                          {sourcePreview.creatorIsParticipant
+                            ? " · créateur participant"
+                            : " · créateur non participant"}
+                        </p>
                         <p className="mt-2 text-sm text-muted-foreground">Sources autorisées :</p>
                         <ul className="mt-1 list-disc pl-5 text-sm">
                           <li>

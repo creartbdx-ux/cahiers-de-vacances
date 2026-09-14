@@ -38,6 +38,9 @@ export type GenerateQuizPersonalLabResult =
         memoryCount: number
         jokeCount: number
         participantNames: string[]
+        audience: string
+        targetParticipantNames: string[]
+        creatorIsParticipant: boolean
       }
       usedSourceIds: {
         factIds: string[]

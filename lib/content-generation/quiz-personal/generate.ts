@@ -44,6 +44,9 @@ export interface GenerateQuizPersonalSuccess {
     jokeCount: number
     participantNames: string[]
     questionRange: { min: number; max: number }
+    audience: string
+    targetParticipantNames: string[]
+    creatorIsParticipant: boolean
   }
   durationMs: number
   repaired: boolean
@@ -296,6 +299,9 @@ export async function generateQuizPersonalContent(
       jokeCount: context.jokes.length,
       participantNames: context.participantNames,
       questionRange,
+      audience: context.audience,
+      targetParticipantNames: context.targetParticipantNames,
+      creatorIsParticipant: context.creatorIsParticipant,
     },
     durationMs,
     repaired,

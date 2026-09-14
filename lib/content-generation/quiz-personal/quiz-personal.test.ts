@@ -12,7 +12,8 @@ import {
 import { toQuizEngineInput } from "./adapter"
 import { generateQuizPersonalContent } from "./generate"
 import { validateQuizPersonalGeneration } from "./validate"
-import { buildQuizPersonalUserPayload } from "./prompt"
+import { buildQuizPersonalSystemPrompt, buildQuizPersonalUserPayload } from "./prompt"
+import { questionLeaksCorrectAnswer } from "./quality"
 import type { GeneratedQuizPersonalQuestion } from "./types"
 
 function baseProfile(over: Partial<BookProfileV1> = {}): BookProfileV1 {
@@ -354,4 +355,295 @@ test("aucune donnée privée typique dans le payload user du prompt", () => {
   assert.ok(!payload.includes("email"))
   assert.ok(!payload.includes("storage"))
   assert.ok(!payload.includes("FAIT NON AUTORISÉ"))
+})
+
+test("OTHER_PERSON : destinataire traité comme lecteur dans le contexte", () => {
+  const profile = baseProfile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "p_emma", firstName: "Emma" }],
+    personalFacts: [
+      { id: "f1", category: "MUSIC", value: "Justin Bieber", participantIds: ["p_emma"] },
+      { id: "f2", category: "OTHER", value: "Rose", participantIds: ["p_emma"] },
+      { id: "f3", category: "MOVIE_SERIES", value: "Gossip Girl", participantIds: ["p_emma"] },
+      { id: "f4", category: "HABIT", value: "Café le matin avant toute conversation", participantIds: ["p_emma"] },
+    ],
+    memories: [
+      {
+        id: "m_rich",
+        title: "Australie",
+        place: "Tokyo",
+        text: "Road trip en Australie avec escale à Tokyo et expérience d'un onsen japonais avant de repartir.",
+        participantIds: ["p_emma"],
+      },
+      {
+        id: "m_anecdote",
+        text: "Elle m'a poursuivie dans le jardin chez ma mère et elle s'est cassé la figure comme une crêpe en glissant dans de la boue.",
+        participantIds: ["p_emma"],
+      },
+    ],
+    insideJokes: [],
+  })
+  const slot = quizSlot({
+    sourceParticipantIds: ["p_emma"],
+    sourceFactIds: ["f1", "f2", "f3", "f4"],
+    sourceMemoryIds: ["m_rich", "m_anecdote"],
+    sourceJokeIds: [],
+  })
+  const ctx = buildQuizPersonalSourceContext({ profile, slot })
+  assert.equal(ctx.audience, "OTHER_PERSON")
+  assert.equal(ctx.creatorIsParticipant, false)
+  assert.deepEqual(ctx.targetParticipantNames, ["Emma"])
+  const payload = buildQuizPersonalUserPayload(ctx) as {
+    targetParticipantNames: string[]
+    audience: string
+  }
+  assert.deepEqual(payload.targetParticipantNames, ["Emma"])
+  assert.equal(payload.audience, "OTHER_PERSON")
+  const system = buildQuizPersonalSystemPrompt(ctx)
+  assert.ok(/lecteur/i.test(system))
+  assert.ok(/vouvoiement/i.test(system))
+  assert.ok(/Évitez la 3e personne/i.test(system))
+})
+
+test("OTHER_PERSON : formulation 3e personne sur le destinataire rejetée", () => {
+  const profile = baseProfile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "p_emma", firstName: "Emma" }],
+  })
+  const slot = quizSlot({
+    sourceParticipantIds: ["p_emma"],
+    sourceFactIds: ["f1", "f2", "f3"],
+    sourceMemoryIds: ["m1", "m2"],
+    sourceJokeIds: ["j1"],
+  })
+  // Rebind facts to emma for context resolution — keep ids from base
+  profile.personalFacts = profile.personalFacts.map((f) => ({
+    ...f,
+    participantIds: ["p_emma"],
+  }))
+  profile.memories = profile.memories.map((m) => ({ ...m, participantIds: ["p_emma"] }))
+  profile.insideJokes = profile.insideJokes.map((j) => ({ ...j, participantIds: ["p_emma"] }))
+
+  const ctx = buildQuizPersonalSourceContext({ profile, slot })
+  const allowed = buildAllowedSourceIds(slot)
+  const questions = validSixQuestions().map((q, i) => ({
+    ...q,
+    question:
+      i === 0
+        ? "Quelle série Emma pourrait-elle reconnaître entre mille ?"
+        : `Énoncé amusant direct ${i + 1} pour vous ?`,
+    sourceRefs: q.sourceRefs.map((r) =>
+      r.type === "PARTICIPANT" ? { type: "PARTICIPANT" as const, id: "p_emma" } : r,
+    ),
+  }))
+  const result = validateQuizPersonalGeneration({ questions, context: ctx, allowed })
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.ok(result.errors.some((e) => /3e personne|perspective/i.test(e)))
+})
+
+test("source autorisée peut rester inutilisée", () => {
+  const slot = quizSlot()
+  const allowed = buildAllowedSourceIds(slot)
+  const profileRich = baseProfile({
+    memories: [
+      {
+        id: "m1",
+        title: "Bretagne",
+        place: "Saint-Malo",
+        text: "Orage mémorable à Saint-Malo pendant les vacances d'été avec toute la famille réunie sur le rempart.",
+        participantIds: ["p1", "p2"],
+      },
+      { id: "m2", text: "Premier concert ensemble sous la pluie", participantIds: ["p1", "p2"] },
+    ],
+  })
+  const ctx2 = buildQuizPersonalSourceContext({ profile: profileRich, slot })
+  const refs = [
+    { type: "FACT" as const, id: "f1" },
+    { type: "FACT" as const, id: "f2" },
+    { type: "MEMORY" as const, id: "m1" },
+    { type: "MEMORY" as const, id: "m2" },
+    { type: "JOKE" as const, id: "j1" },
+  ]
+  const questions = validSixQuestions().map((q, i) =>
+    makeQuestion({
+      id: q.id,
+      question: `Situation ludique numéro ${i + 1} sans spoiler ?`,
+      choices: [`Opt${i}A`, `Opt${i}B`, `Opt${i}C`, `Opt${i}D`],
+      correctIndex: 1,
+      sourceRefs: [
+        i < 5 ? refs[i]! : { type: "MEMORY" as const, id: "m1" },
+        { type: "PARTICIPANT", id: "p1" },
+      ],
+    }),
+  )
+  const result = validateQuizPersonalGeneration({
+    questions,
+    context: ctx2,
+    allowed,
+  })
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.ok(result.unusedSourceIds.factIds.includes("f3"))
+    assert.ok(result.usedSourceIds.memoryIds.includes("m1"))
+  }
+})
+test("mémoire riche peut justifier deux questions distinctes", () => {
+  const profile = baseProfile({
+    memories: [
+      {
+        id: "m1",
+        title: "Australie",
+        place: "Tokyo",
+        text: "Road trip en Australie avec escale à Tokyo et expérience d'un onsen avant de poursuivre le voyage.",
+        participantIds: ["p1"],
+      },
+      { id: "m2", text: "Premier concert", participantIds: ["p1"] },
+    ],
+  })
+  const slot = quizSlot()
+  const ctx = buildQuizPersonalSourceContext({ profile, slot })
+  assert.equal(ctx.memories.find((m) => m.id === "m1")?.quizValue, "HIGH")
+  const allowed = buildAllowedSourceIds(slot)
+  const questions = [
+    makeQuestion({
+      id: "q1",
+      question: "Pendant votre escale asiatique, quelle expérience avez-vous tentée ?",
+      choices: ["Un onsen", "Un safari", "Un cours de sushi", "Un marathon"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "MEMORY", id: "m1" }],
+    }),
+    makeQuestion({
+      id: "q2",
+      question: "Quel était le grand voyage principal avant cette escale ?",
+      choices: ["Australie", "Canada", "Islande", "Maroc"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "MEMORY", id: "m1" }],
+    }),
+    makeQuestion({
+      id: "q3",
+      question: "Quel rituel matinal revient souvent avant toute conversation ?",
+      choices: ["Café", "Thé", "Sport", "Méditation"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "FACT", id: "f1" }],
+    }),
+    makeQuestion({
+      id: "q4",
+      question: "Pour un goûter improvisé, quelle gourmandise a le plus de chances d'arriver ?",
+      choices: ["Crêpes", "Sushi", "Salade", "Soup"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "FACT", id: "f2" }],
+    }),
+    makeQuestion({
+      id: "q5",
+      question: "Quel genre musical illumine souvent les dimanches ?",
+      choices: ["Jazz", "Métal", "Opéra", "Techno"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "FACT", id: "f3" }],
+    }),
+    makeQuestion({
+      id: "q6",
+      question: "Quelle private joke pourrait refaire surface au détour d'un repas ?",
+      choices: ["La blague du poulpe", "Le code secret", "Le surnom du chat", "Le mime"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "JOKE", id: "j1" }],
+    }),
+  ]
+  const result = validateQuizPersonalGeneration({ questions, context: ctx, allowed })
+  assert.equal(result.ok, true)
+})
+
+test("plusieurs sourceRefs sur une question restent valides", () => {
+  const profile = baseProfile()
+  const slot = quizSlot()
+  const ctx = buildQuizPersonalSourceContext({ profile, slot })
+  const allowed = buildAllowedSourceIds(slot)
+  const questions = [
+    makeQuestion({
+      id: "q1",
+      question: "Quelle combinaison pourrait résumer un dimanche matin tranquille ?",
+      choices: ["Café puis crêpes", "Thé seul", "Rien du tout", "Smoothie vert"],
+      correctIndex: 0,
+      sourceRefs: [
+        { type: "FACT", id: "f1" },
+        { type: "FACT", id: "f2" },
+        { type: "PARTICIPANT", id: "p1" },
+      ],
+    }),
+    makeQuestion({
+      id: "q2",
+      question: "Quel genre musical illumine souvent les dimanches ?",
+      choices: ["Jazz", "Métal", "Opéra", "Techno"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "FACT", id: "f3" }],
+    }),
+    makeQuestion({
+      id: "q3",
+      question: "Quel souvenir d'orage reste associé à Saint-Malo ?",
+      choices: ["Orage mémorable", "Neige", "Éclipse", "Carnival"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "MEMORY", id: "m1" }],
+    }),
+    makeQuestion({
+      id: "q4",
+      question: "Quel premier événement musical partagé reste dans les annales ?",
+      choices: ["Premier concert ensemble", "Karaoké", "Opéra", "Festival"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "MEMORY", id: "m2" }],
+    }),
+    makeQuestion({
+      id: "q5",
+      question: "Quelle private joke pourrait refaire surface au détour d'un repas ?",
+      choices: ["La blague du poulpe", "Le code secret", "Le surnom du chat", "Le mime"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "JOKE", id: "j1" }],
+    }),
+    makeQuestion({
+      id: "q6",
+      question: "Pour une soirée canapé, quel rythme a le plus de chances de passer ?",
+      choices: ["Jazz du dimanche", "Silence radio", "Sirènes", "Fanfare"],
+      correctIndex: 0,
+      sourceRefs: [{ type: "FACT", id: "f3" }, { type: "PARTICIPANT", id: "p1" }],
+    }),
+  ]
+  // f3 used twice — MUSIC is LOW → would fail. Fix q6 to only use participant+memory already used? 
+  // Use only once each — drop second f3
+  questions[5] = makeQuestion({
+    id: "q6",
+    question: "Quel clin d'œil pourrait rappeler une blague déjà partagée ?",
+    choices: ["Poulpe", "Pingouin", "Panda", "Perroquet"],
+    correctIndex: 0,
+    sourceRefs: [{ type: "JOKE", id: "j1" }, { type: "PARTICIPANT", id: "p1" }],
+  })
+  // j1 twice - jokes are HIGH, max 2 — OK
+  const result = validateQuizPersonalGeneration({ questions, context: ctx, allowed })
+  assert.equal(result.ok, true)
+})
+test("réponse révélée dans la question détectée", () => {
+  assert.equal(
+    questionLeaksCorrectAnswer(
+      "Lors d'un voyage, dans quel pays avez-vous découvert l'expérience du onsen japonais ?",
+      "Japon",
+    ),
+    true,
+  )
+  assert.equal(
+    questionLeaksCorrectAnswer(
+      "Pendant votre escale à Tokyo, quelle expérience avez-vous tentée ?",
+      "Un onsen",
+    ),
+    false,
+  )
+})
+
+test("fait hors slot toujours rejeté (provenance stricte)", () => {
+  const profile = baseProfile()
+  const slot = quizSlot()
+  const ctx = buildQuizPersonalSourceContext({ profile, slot })
+  const allowed = buildAllowedSourceIds(slot)
+  const questions = validSixQuestions()
+  questions[0]!.sourceRefs = [{ type: "FACT", id: "f_secret" }]
+  const result = validateQuizPersonalGeneration({ questions, context: ctx, allowed })
+  assert.equal(result.ok, false)
 })

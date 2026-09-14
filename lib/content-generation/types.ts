@@ -16,6 +16,9 @@ export interface SourceContextFact {
   id: string
   text: string
   subjectParticipantIds: string[]
+  category?: string
+  /** Editorial quiz potential — metadata for the model, not a personal fact. */
+  quizValue: "HIGH" | "MEDIUM" | "LOW"
 }
 
 export interface SourceContextMemory {
@@ -24,12 +27,14 @@ export interface SourceContextMemory {
   title?: string
   place?: string
   participantIds: string[]
+  quizValue: "HIGH" | "MEDIUM" | "LOW"
 }
 
 export interface SourceContextJoke {
   id: string
   text: string
   participantIds: string[]
+  quizValue: "HIGH" | "MEDIUM" | "LOW"
 }
 
 export interface SourceContextParticipant {
@@ -44,6 +49,12 @@ export interface SourceContextInterest {
 /** Minimal editorial context sent to the model — never a full BookProfile. */
 export interface QuizPersonalSourceContext {
   audience: AudienceType
+  creatorIsParticipant: boolean
+  /** Who the printed book is primarily written for / who reads it. */
+  targetParticipantIds: string[]
+  targetParticipantNames: string[]
+  /** Slot difficulty (1–4), shapes distractors / detail — never invents facts. */
+  difficulty: 1 | 2 | 3 | 4
   participantNames: string[]
   participants: SourceContextParticipant[]
   facts: SourceContextFact[]

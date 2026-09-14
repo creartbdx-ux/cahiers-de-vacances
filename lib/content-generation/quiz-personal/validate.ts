@@ -1,6 +1,11 @@
 import type { AllowedSourceIds, QuizPersonalSourceContext, SourceRef } from "../types"
 import { choicesAreSufficientlyDistinct, textMentionsForbidden } from "../validators"
 import { quizPersonalQuestionRange } from "../source-context"
+import {
+  lookupSourceQuizValue,
+  maxPrimaryUsesForValue,
+} from "./editorial-value"
+import { collectEditorialQualityErrors } from "./quality"
 import { QUIZ_PERSONAL_CHOICE_COUNT } from "./schema"
 import type {
   GeneratedQuizPersonalQuestion,
@@ -24,13 +29,15 @@ function refExistsInContext(ref: SourceRef, ctx: QuizPersonalSourceContext): boo
   return false
 }
 
-function primaryContentRef(q: GeneratedQuizPersonalQuestion): string | null {
-  const content = q.sourceRefs.find((r) => r.type === "FACT" || r.type === "MEMORY" || r.type === "JOKE")
-  return content ? `${content.type}:${content.id}` : null
+function primaryContentRefs(q: GeneratedQuizPersonalQuestion): string[] {
+  return q.sourceRefs
+    .filter((r) => r.type === "FACT" || r.type === "MEMORY" || r.type === "JOKE")
+    .map((r) => `${r.type}:${r.id}`)
 }
 
 /**
- * Independent business validator — does not trust the LLM.
+ * Independent business + editorial quality validator — does not trust the LLM.
+ * Unused sources are allowed. Rich HIGH sources may appear at most twice.
  */
 export function validateQuizPersonalGeneration(input: {
   questions: GeneratedQuizPersonalQuestion[]
@@ -54,11 +61,6 @@ export function validateQuizPersonalGeneration(input: {
   }
 
   const seenPrimary = new Map<string, number>()
-  const availablePrimaries = [
-    ...context.facts.map((f) => `FACT:${f.id}`),
-    ...context.memories.map((m) => `MEMORY:${m.id}`),
-    ...context.jokes.map((j) => `JOKE:${j.id}`),
-  ]
 
   questions.forEach((q, i) => {
     const n = i + 1
@@ -118,24 +120,33 @@ export function validateQuizPersonalGeneration(input: {
       }
     }
 
-    const primary = primaryContentRef(q)
-    if (primary) {
-      seenPrimary.set(primary, (seenPrimary.get(primary) ?? 0) + 1)
+    for (const key of primaryContentRefs(q)) {
+      seenPrimary.set(key, (seenPrimary.get(key) ?? 0) + 1)
     }
   })
 
-  const overused = [...seenPrimary.entries()].filter(([, count]) => count > 1)
-  if (overused.length && availablePrimaries.length > overused.length) {
-    const alternativesExist = availablePrimaries.some((id) => !seenPrimary.has(id))
-    if (alternativesExist) {
-      for (const [id, count] of overused) {
-        errors.push(
-          `La source ${id} est utilisée ${count} fois alors que d'autres sources sont disponibles.`,
-        )
-      }
-    } else {
-      warnings.push("Certaines sources sont réutilisées faute d'alternatives.")
+  for (const [key, count] of seenPrimary.entries()) {
+    const [type, id] = key.split(":") as ["FACT" | "MEMORY" | "JOKE", string]
+    const value = lookupSourceQuizValue(context, type, id)
+    const maxUses = maxPrimaryUsesForValue(value)
+    if (count > maxUses) {
+      errors.push(
+        `La source ${key} (valeur ${value}) est utilisée ${count} fois (max ${maxUses}).`,
+      )
     }
+  }
+
+  errors.push(...collectEditorialQualityErrors(questions, context))
+
+  const unusedPrimaries =
+    context.facts.length +
+    context.memories.length +
+    context.jokes.length -
+    seenPrimary.size
+  if (unusedPrimaries > 0) {
+    warnings.push(
+      `${unusedPrimaries} source(s) autorisée(s) non utilisée(s) — c'est acceptable si la qualité du quiz est meilleure.`,
+    )
   }
 
   if (errors.length) {
