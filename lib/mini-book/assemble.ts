@@ -25,41 +25,53 @@ export interface AssembleMiniBookInput {
 }
 
 /**
- * Assemble the fixed 8-page Mini Book structure.
- * Does not call IA — only wires already-generated game refs into pages.
+ * Assemble Mini Book V2 — 6 pages, compact corrections.
+ * Does not call IA.
  */
 export function assembleMiniBookPreview(input: AssembleMiniBookInput): MiniBookPreviewV1 {
-  const quizGame = gamePage(2, "QUIZ", "GAME", "Quiz", input.quiz)
-  const wsGame = gamePage(3, "WORDSEARCH", "GAME", "Mots mêlés", input.wordsearch)
-  const cwGame = gamePage(4, "CROSSWORD", "GAME", "Mots croisés", input.crossword)
-
-  const quizCorr = gamePage(6, "QUIZ", "CORRECTION", "Corr. Quiz", input.quiz)
-  const wsCorr = gamePage(7, "WORDSEARCH", "CORRECTION", "Corr. Mots mêlés", input.wordsearch)
-  const cwCorr = gamePage(8, "CROSSWORD", "CORRECTION", "Corr. Mots croisés", input.crossword)
-
   const pages: MiniBookPreviewV1["pages"] = [
     {
       pageNumber: 1,
       kind: "COVER",
+      colorKey: "COVER",
       label: "Couverture",
       showPageNumber: false,
       displayName: resolveCoverDisplayName(input.profile),
       subtitle: resolveCoverSubtitle(input.profile),
     },
-    quizGame,
-    wsGame,
-    cwGame,
+    gamePage(2, "QUIZ", "Quiz", input.quiz),
+    gamePage(3, "WORDSEARCH", "Mots mêlés", input.wordsearch),
+    gamePage(4, "CROSSWORD", "Mots croisés", input.crossword),
     {
       pageNumber: 5,
-      kind: "CORRECTIONS_DIVIDER",
-      label: "Corrections",
+      kind: "QUIZ_CORRECTION",
+      colorKey: "QUIZ_CORRECTION",
+      label: "Réponses Quiz",
       showPageNumber: true,
-      title: "CORRECTIONS",
-      body: "Les réponses sont juste après.\nPromis, on ne dira rien.",
+      slotId: input.quiz.slotId,
+      universeId: input.quiz.universeId,
+      universeName: input.quiz.universeName,
+      title: input.quiz.title,
     },
-    quizCorr,
-    wsCorr,
-    cwCorr,
+    {
+      pageNumber: 6,
+      kind: "LETTERS_CORRECTION",
+      colorKey: "LETTERS_CORRECTION",
+      label: "Réponses lettres",
+      showPageNumber: true,
+      wordsearch: {
+        slotId: input.wordsearch.slotId,
+        universeId: input.wordsearch.universeId,
+        universeName: input.wordsearch.universeName,
+        title: input.wordsearch.title,
+      },
+      crossword: {
+        slotId: input.crossword.slotId,
+        universeId: input.crossword.universeId,
+        universeName: input.crossword.universeName,
+        title: input.crossword.title,
+      },
+    },
   ]
 
   if (pages.length !== MINI_BOOK_PAGE_COUNT) {
@@ -76,16 +88,16 @@ export function assembleMiniBookPreview(input: AssembleMiniBookInput): MiniBookP
 }
 
 function gamePage(
-  pageNumber: 2 | 3 | 4 | 6 | 7 | 8,
+  pageNumber: number,
   kind: MiniBookGamePage["kind"],
-  mode: MiniBookGamePage["mode"],
   label: string,
   ref: MiniBookGameSlotRef,
 ): MiniBookGamePage {
   return {
     pageNumber,
     kind,
-    mode,
+    colorKey: kind,
+    mode: "GAME",
     label,
     showPageNumber: true,
     slotId: ref.slotId,
@@ -95,32 +107,27 @@ function gamePage(
   }
 }
 
-/** Assert correction pages point to the same slots as game pages (no regen). */
+/** Corrections reuse the same slot ids / titles as game pages. */
 export function miniBookCorrectionSharesGameContent(book: MiniBookPreviewV1): boolean {
   const quizGame = book.pages.find(
     (p): p is MiniBookGamePage => p.kind === "QUIZ" && p.mode === "GAME",
   )
-  const quizCorr = book.pages.find(
-    (p): p is MiniBookGamePage => p.kind === "QUIZ" && p.mode === "CORRECTION",
-  )
+  const quizCorr = book.pages.find((p) => p.kind === "QUIZ_CORRECTION")
   const wsGame = book.pages.find(
     (p): p is MiniBookGamePage => p.kind === "WORDSEARCH" && p.mode === "GAME",
-  )
-  const wsCorr = book.pages.find(
-    (p): p is MiniBookGamePage => p.kind === "WORDSEARCH" && p.mode === "CORRECTION",
   )
   const cwGame = book.pages.find(
     (p): p is MiniBookGamePage => p.kind === "CROSSWORD" && p.mode === "GAME",
   )
-  const cwCorr = book.pages.find(
-    (p): p is MiniBookGamePage => p.kind === "CROSSWORD" && p.mode === "CORRECTION",
-  )
+  const letters = book.pages.find((p) => p.kind === "LETTERS_CORRECTION")
 
-  if (!quizGame || !quizCorr || !wsGame || !wsCorr || !cwGame || !cwCorr) return false
+  if (!quizGame || !quizCorr || !wsGame || !cwGame || !letters) return false
+  if (quizCorr.kind !== "QUIZ_CORRECTION" || letters.kind !== "LETTERS_CORRECTION") return false
+
   return (
     quizGame.slotId === quizCorr.slotId &&
     quizGame.title === quizCorr.title &&
-    wsGame.slotId === wsCorr.slotId &&
-    cwGame.slotId === cwCorr.slotId
+    wsGame.slotId === letters.wordsearch.slotId &&
+    cwGame.slotId === letters.crossword.slotId
   )
 }

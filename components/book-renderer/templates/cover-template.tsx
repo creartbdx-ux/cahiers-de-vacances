@@ -47,13 +47,13 @@ export function CoverTemplate({
         />
       </div>
 
-      <div className="flex flex-1 flex-col items-center justify-center text-center" style={{ gap: 20 }}>
+      <div className="flex flex-1 flex-col items-center justify-center text-center" style={{ gap: 22 }}>
         <p
           className={style.gameLabelClassName}
           style={{
-            fontSize: 13,
-            letterSpacing: "0.28em",
-            color: bookColor.primary,
+            fontSize: 12,
+            letterSpacing: "0.32em",
+            color: "var(--book-page-band, var(--book-primary))",
           }}
         >
           CAHIER DE VACANCES
@@ -61,9 +61,9 @@ export function CoverTemplate({
         <h1
           className={style.titleClassName}
           style={{
-            fontSize: 52,
+            fontSize: 54,
             color: bookColor.primary,
-            maxWidth: 420,
+            maxWidth: 440,
             lineHeight: 0.95,
           }}
         >
@@ -71,9 +71,15 @@ export function CoverTemplate({
         </h1>
         <p
           className={style.instructionClassName}
-          style={{ fontSize: 16, color: bookColor.dark, opacity: 0.8 }}
+          style={{ fontSize: 16, color: bookColor.dark, opacity: 0.8, maxWidth: 360 }}
         >
           {subtitle}
+        </p>
+        <p
+          className={style.instructionClassName}
+          style={{ fontSize: 13, color: bookColor.dark, opacity: 0.55, marginTop: 4 }}
+        >
+          Jeux · défis · réponses à la fin
         </p>
       </div>
 

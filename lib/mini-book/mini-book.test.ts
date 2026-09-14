@@ -2,11 +2,13 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import type { BookProfileV1 } from "@/lib/questionnaire/types"
 import type { Palette, Style } from "@/lib/supabase/types"
+import { resolveCrosswordPageLayout } from "@/lib/book-renderer/crossword-layout"
 import {
   assembleMiniBookPreview,
   miniBookCorrectionSharesGameContent,
 } from "./assemble"
 import { resolveCoverDisplayName, resolveCoverSubtitle } from "./cover-name"
+import { resolveMiniBookPageColors } from "./page-colors"
 import { MINI_BOOK_PAGE_COUNT } from "./types"
 import { hashSeed, resolveBookVisualIdentity } from "./visual-identity"
 
@@ -114,7 +116,7 @@ function assembleFixture(seed = "mini-seed") {
   })
 }
 
-test("mini-cahier : exactement 8 pages dans le bon ordre", () => {
+test("mini-cahier V2 : exactement 6 pages dans le bon ordre", () => {
   const book = assembleFixture()
   assert.equal(book.pages.length, MINI_BOOK_PAGE_COUNT)
   assert.equal(book.version, 1)
@@ -124,22 +126,32 @@ test("mini-cahier : exactement 8 pages dans le bon ordre", () => {
     "QUIZ",
     "WORDSEARCH",
     "CROSSWORD",
-    "CORRECTIONS_DIVIDER",
-    "QUIZ",
-    "WORDSEARCH",
-    "CROSSWORD",
+    "QUIZ_CORRECTION",
+    "LETTERS_CORRECTION",
   ])
-  const modes = book.pages
-    .filter((p) => p.kind === "QUIZ" || p.kind === "WORDSEARCH" || p.kind === "CROSSWORD")
-    .map((p) => ("mode" in p ? p.mode : null))
-  assert.deepEqual(modes, ["GAME", "GAME", "GAME", "CORRECTION", "CORRECTION", "CORRECTION"])
+  assert.ok(!kinds.includes("CORRECTIONS_DIVIDER" as never))
 })
 
-test("une seule identité visuelle globale", () => {
+test("pas de pages de correction en template jeu complet", () => {
+  const book = assembleFixture()
+  const gameModes = book.pages.filter(
+    (p) => p.kind === "QUIZ" || p.kind === "WORDSEARCH" || p.kind === "CROSSWORD",
+  )
+  assert.equal(gameModes.length, 3)
+  for (const p of gameModes) {
+    assert.equal("mode" in p && p.mode, "GAME")
+  }
+  assert.ok(book.pages.some((p) => p.kind === "QUIZ_CORRECTION"))
+  assert.ok(book.pages.some((p) => p.kind === "LETTERS_CORRECTION"))
+})
+
+test("une seule identité visuelle globale (style + palette)", () => {
   const book = assembleFixture("id-seed")
   assert.ok(book.visualIdentity.styleId)
   assert.ok(book.visualIdentity.paletteId)
-  assert.equal(book.pages.length, 8)
+  assert.equal(book.pages.length, 6)
+  const ids = new Set([book.visualIdentity.styleId, book.visualIdentity.paletteId])
+  assert.equal(ids.size, 2)
 })
 
 test("AUTO résolu une seule fois — même seed = même identité", () => {
@@ -158,17 +170,8 @@ test("AUTO résolu une seule fois — même seed = même identité", () => {
   assert.equal(a.styleFromAuto, true)
   assert.equal(a.paletteFromAuto, true)
   assert.deepEqual(a, b)
-
-  const c = resolveBookVisualIdentity({
-    profile: profile({ visualPreferences: { styleId: "AUTO", paletteId: "AUTO" } }),
-    seed: "other-seed",
-    styles: STYLES,
-    palettes: PALETTES,
-  })
-  // Different seed may differ — hash must at least be stable for same seed
   assert.equal(hashSeed("stable-auto"), hashSeed("stable-auto"))
   assert.notEqual(hashSeed("stable-auto"), hashSeed("other-seed"))
-  void c
 })
 
 test("préférence explicite non-AUTO respectée", () => {
@@ -186,9 +189,9 @@ test("préférence explicite non-AUTO respectée", () => {
 
 test("univers différents possibles par jeu", () => {
   const book = assembleFixture()
-  const quiz = book.pages.find((p) => p.kind === "QUIZ" && "mode" in p && p.mode === "GAME")
-  const ws = book.pages.find((p) => p.kind === "WORDSEARCH" && "mode" in p && p.mode === "GAME")
-  const cw = book.pages.find((p) => p.kind === "CROSSWORD" && "mode" in p && p.mode === "GAME")
+  const quiz = book.pages.find((p) => p.kind === "QUIZ")
+  const ws = book.pages.find((p) => p.kind === "WORDSEARCH")
+  const cw = book.pages.find((p) => p.kind === "CROSSWORD")
   assert.ok(quiz && "universeId" in quiz)
   assert.ok(ws && "universeId" in ws)
   assert.ok(cw && "universeId" in cw)
@@ -200,6 +203,48 @@ test("univers différents possibles par jeu", () => {
 test("correction réutilise exactement le contenu Jeu (mêmes slots/titres)", () => {
   const book = assembleFixture()
   assert.equal(miniBookCorrectionSharesGameContent(book), true)
+})
+
+test("palette distribuée entre les pages — déterministe, distincte, unique palette", () => {
+  const palette = PALETTES[0]!
+  const cover = resolveMiniBookPageColors(palette, "COVER")
+  const quiz = resolveMiniBookPageColors(palette, "QUIZ")
+  const ws = resolveMiniBookPageColors(palette, "WORDSEARCH")
+  const cw = resolveMiniBookPageColors(palette, "CROSSWORD")
+  const qCorr = resolveMiniBookPageColors(palette, "QUIZ_CORRECTION")
+  const letters = resolveMiniBookPageColors(palette, "LETTERS_CORRECTION")
+
+  assert.equal(cover.background, resolveMiniBookPageColors(palette, "COVER").background)
+  assert.notEqual(cover.background, quiz.background)
+  assert.notEqual(quiz.background, ws.background)
+  assert.notEqual(ws.background, cw.background)
+  assert.notEqual(qCorr.background, letters.background)
+  assert.equal(cw.background, palette.background_color)
+})
+
+test("crossword privilégie la lisibilité de la grille (layout adaptatif)", () => {
+  assert.equal(
+    resolveCrosswordPageLayout({ acrossCount: 3, downCount: 3, width: 8, height: 8 }),
+    "side-by-side",
+  )
+  assert.equal(
+    resolveCrosswordPageLayout({ acrossCount: 8, downCount: 7, width: 12, height: 12 }),
+    "grid-top",
+  )
+  assert.equal(
+    resolveCrosswordPageLayout({ acrossCount: 5, downCount: 4, width: 9, height: 9 }),
+    "side-by-side",
+  )
+})
+
+test("structure compacte : page 5 quiz, page 6 lettres combinées", () => {
+  const book = assembleFixture()
+  assert.equal(book.pages[4]?.kind, "QUIZ_CORRECTION")
+  assert.equal(book.pages[5]?.kind, "LETTERS_CORRECTION")
+  const letters = book.pages[5]
+  assert.ok(letters && letters.kind === "LETTERS_CORRECTION")
+  assert.equal(letters.wordsearch.slotId, "slot_ws")
+  assert.equal(letters.crossword.slotId, "slot_cw")
 })
 
 test("couverture adaptée ME", () => {
@@ -250,11 +295,23 @@ test("couverture adaptée GROUP", () => {
   assert.equal(resolveCoverDisplayName(without), "A, B, C")
 })
 
-test("navigation pages ne change pas l'identité ni les slots (structure figée)", () => {
+test("navigation pages ne change pas l'identité ni les slots", () => {
   const book = assembleFixture()
-  const page1 = book.pages[0]
-  const page8 = book.pages[7]
-  assert.equal(page1?.kind, "COVER")
-  assert.equal(page8?.kind, "CROSSWORD")
+  assert.equal(book.pages[0]?.kind, "COVER")
+  assert.equal(book.pages[5]?.kind, "LETTERS_CORRECTION")
   assert.equal(book.visualIdentity.styleId, assembleFixture().visualIdentity.styleId)
+})
+
+test("jeu absent : structure reste exploitable (corrections pointent toujours vers les slots)", () => {
+  const book = assembleFixture()
+  const quizCorr = book.pages.find((p) => p.kind === "QUIZ_CORRECTION")
+  const letters = book.pages.find((p) => p.kind === "LETTERS_CORRECTION")
+  assert.ok(quizCorr && quizCorr.kind === "QUIZ_CORRECTION")
+  assert.ok(letters && letters.kind === "LETTERS_CORRECTION")
+  // Structure does not require live content blobs — pages remain addressable.
+  assert.equal(quizCorr.slotId, "slot_quiz")
+  assert.equal(letters.wordsearch.slotId, "slot_ws")
+  assert.equal(letters.crossword.slotId, "slot_cw")
+  assert.equal(book.pages.filter((p) => p.kind === "WORDSEARCH").length, 1)
+  assert.equal(book.pages.filter((p) => p.kind === "CROSSWORD").length, 1)
 })

@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react"
 import { PAGE_HEIGHT, PAGE_WIDTH, SAFE_MARGIN } from "@/lib/book-renderer/constants"
 import { bookColor, paletteToVars } from "@/lib/book-renderer/palette"
+import type { MiniBookPageSurface } from "@/lib/mini-book/page-colors"
 import type { Palette } from "@/lib/supabase/types"
 
 /**
@@ -12,18 +13,27 @@ import type { Palette } from "@/lib/supabase/types"
 export function BookPage({
   palette,
   showSafeArea = false,
+  surface,
   children,
 }: {
   palette: Palette
   showSafeArea?: boolean
+  /** Optional per-page surface from resolveMiniBookPageColors. */
+  surface?: MiniBookPageSurface
   children: ReactNode
 }) {
   const pageStyle: CSSProperties = {
     width: PAGE_WIDTH,
     height: PAGE_HEIGHT,
-    backgroundColor: bookColor.light,
+    backgroundColor: surface?.background ?? bookColor.light,
     color: bookColor.dark,
     ...paletteToVars(palette),
+    ...(surface
+      ? ({
+          ["--book-page-panel" as string]: surface.panel,
+          ["--book-page-band" as string]: surface.band,
+        } as CSSProperties)
+      : {}),
   }
 
   return (

@@ -6,8 +6,9 @@ import { BookPage } from "@/components/book-renderer/book-page"
 import { BookPageNumber } from "@/components/book-renderer/book-page-number"
 import { PagePreview } from "@/components/book-renderer/page-preview"
 import { CoverTemplate } from "@/components/book-renderer/templates/cover-template"
-import { CorrectionsDividerTemplate } from "@/components/book-renderer/templates/corrections-divider-template"
 import { CrosswordTemplate } from "@/components/book-renderer/templates/crossword-template"
+import { LettersCorrectionTemplate } from "@/components/book-renderer/templates/letters-correction-template"
+import { QuizCorrectionTemplate } from "@/components/book-renderer/templates/quiz-correction-template"
 import { QuizTemplate } from "@/components/book-renderer/templates/quiz-template"
 import { WordsearchTemplate } from "@/components/book-renderer/templates/wordsearch-template"
 import {
@@ -19,7 +20,9 @@ import {
 import { getStyleTokens } from "@/lib/book-renderer/styles"
 import { cn } from "@/lib/utils"
 import { assembleMiniBookPreview } from "@/lib/mini-book/assemble"
+import { resolveMiniBookPageColors } from "@/lib/mini-book/page-colors"
 import type { MiniBookPage, MiniBookPreviewV1, MiniBookVisualIdentity } from "@/lib/mini-book/types"
+import { MINI_BOOK_PAGE_COUNT } from "@/lib/mini-book/types"
 import { buildQuizThemePreview } from "@/lib/content-generation/quiz-theme/preview"
 import { buildWordSearchThemePreview } from "@/lib/content-generation/wordsearch-theme/preview"
 import { buildCrosswordThemePreview } from "@/lib/content-generation/crossword-theme/preview"
@@ -184,6 +187,7 @@ export function BookLabClient({
     })
   }
 
+  /** Rebuild structure only — never regenerates IA content. */
   function rebuildMiniBook() {
     if (!selected || !visualIdentity || !quiz || !wordsearch || !crossword) {
       setError("Les trois jeux doivent être générés avant de reconstruire le mini-cahier.")
@@ -221,9 +225,8 @@ export function BookLabClient({
   const allOk =
     status.quiz === "ok" && status.wordsearch === "ok" && status.crossword === "ok"
 
-  // Assemble is explicit via "Afficher / Reconstruire le mini-cahier" — never on navigation.
-
   const page = miniBook?.pages[pageIndex] ?? null
+  const pageSurface = page ? resolveMiniBookPageColors(palette, page.colorKey) : undefined
 
   return (
     <div className="flex flex-col gap-6">
@@ -236,7 +239,7 @@ export function BookLabClient({
         )}
       >
         {aiConfigured
-          ? "Book Lab — mini-cahier 8 pages (couverture + 3 jeux + corrections). Aucune persistence."
+          ? `Book Lab V2 — mini-cahier ${MINI_BOOK_PAGE_COUNT} pages (jeux + corrections compactes). Aucune persistence.`
           : "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY puis redéployez."}
       </div>
 
@@ -361,7 +364,7 @@ export function BookLabClient({
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold">
-              Mini-cahier · Page {page.pageNumber} / 8 — {page.label}
+              Mini-cahier · Page {page.pageNumber} / {MINI_BOOK_PAGE_COUNT} — {page.label}
             </h2>
             <div className="flex items-center gap-2">
               <Button
@@ -405,7 +408,7 @@ export function BookLabClient({
 
           <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-8">
             <PagePreview>
-              <BookPage palette={palette} showSafeArea={false}>
+              <BookPage palette={palette} showSafeArea={false} surface={pageSurface}>
                 <MiniBookPageView
                   page={page}
                   style={styleTokens}
@@ -506,18 +509,33 @@ function MiniBookPageView({
     )
   }
 
-  if (page.kind === "CORRECTIONS_DIVIDER") {
+  if (page.kind === "QUIZ_CORRECTION") {
+    if (!quizPreview?.ok || !quiz) {
+      return <p className="text-sm text-destructive">Quiz indisponible.</p>
+    }
     return (
-      <CorrectionsDividerTemplate
-        title={page.title}
-        body={page.body}
+      <QuizCorrectionTemplate
+        title={quiz.title}
+        universeName={quiz.universeName}
         style={style}
         palette={palette}
+        quiz={quizPreview.quiz}
       />
     )
   }
 
-  const mode = page.mode === "CORRECTION" ? "solution" : "game"
+  if (page.kind === "LETTERS_CORRECTION") {
+    return (
+      <LettersCorrectionTemplate
+        style={style}
+        palette={palette}
+        wordsearchTitle={page.wordsearch.title}
+        wordsearch={wordsearchPreview?.ok ? wordsearchPreview.wordsearch : null}
+        crosswordTitle={page.crossword.title}
+        crossword={crosswordPreview?.ok ? crosswordPreview.crossword : null}
+      />
+    )
+  }
 
   if (page.kind === "QUIZ") {
     if (!quizPreview?.ok || !quiz) {
@@ -530,7 +548,7 @@ function MiniBookPageView({
         palette={palette}
         assets={[]}
         quiz={quizPreview.quiz}
-        mode={mode}
+        mode="game"
       />
     )
   }
@@ -546,7 +564,7 @@ function MiniBookPageView({
         palette={palette}
         assets={[]}
         wordsearch={wordsearchPreview.wordsearch}
-        mode={mode}
+        mode="game"
       />
     )
   }
@@ -566,7 +584,7 @@ function MiniBookPageView({
         palette={palette}
         assets={[]}
         crossword={crosswordPreview.crossword}
-        mode={mode}
+        mode="game"
       />
     )
   }
