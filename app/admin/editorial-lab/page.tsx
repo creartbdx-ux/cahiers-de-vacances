@@ -5,8 +5,10 @@ import {
   type EditorialLabProject,
 } from "@/components/admin/editorial-lab/editorial-lab-client"
 import { canUseInEditorialLab, parseQuestionnairePayload } from "@/lib/books/lifecycle"
+import { getActivePalettes } from "@/lib/data/assets"
 import { getCompletedBookProjects } from "@/lib/data/books"
-import { getGames, getUniverses } from "@/lib/data/reference"
+import { getGames, getStyles, getUniverses } from "@/lib/data/reference"
+import { isContentGenerationConfigured } from "@/lib/content-generation/provider"
 import { calculateProfileRichness } from "@/lib/questionnaire/richness"
 
 export const metadata: Metadata = {
@@ -14,10 +16,12 @@ export const metadata: Metadata = {
 }
 
 export default async function AdminEditorialLabPage() {
-  const [projects, games, universes] = await Promise.all([
+  const [projects, games, universes, palettes, styles] = await Promise.all([
     getCompletedBookProjects(),
     getGames(),
     getUniverses(),
+    getActivePalettes(),
+    getStyles(),
   ])
 
   const labProjects: EditorialLabProject[] = []
@@ -47,9 +51,16 @@ export default async function AdminEditorialLabPage() {
     <div className="flex flex-col gap-8">
       <AdminPageHeader
         title="Editorial Lab"
-        description="Uniquement les projets QUESTIONNAIRE_COMPLETED avec BookProfile valide. Aucune génération de contenu ni d'IA."
+        description="Plans éditoriaux + génération de contenu QUIZ_PERSONAL (sans persistence)."
       />
-      <EditorialLabClient projects={labProjects} games={games} universes={universes} />
+      <EditorialLabClient
+        projects={labProjects}
+        games={games}
+        universes={universes}
+        palettes={palettes}
+        styles={styles}
+        aiConfigured={isContentGenerationConfigured()}
+      />
     </div>
   )
 }
