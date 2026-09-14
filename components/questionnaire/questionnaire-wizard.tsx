@@ -36,6 +36,10 @@ import {
   createEmptyQuestionnaire,
   difficultyLabel,
   getStepCopy,
+  hasPhotosUploading,
+  allPhotosSaved,
+  photoUploadBannerCopy,
+  photoUploadBannerMessage,
   isPhotoPersisted,
   listGroupParticularities,
   memorySuggestions,
@@ -100,10 +104,18 @@ export function QuestionnaireWizard({
   const [pending, startTransition] = useTransition()
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [manualSaveFlash, setManualSaveFlash] = useState(false)
+  const [manualSaving, setManualSaving] = useState(false)
+  const [photoSavedFlash, setPhotoSavedFlash] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedJson = useRef<string>("")
   const projectEnsurePromise = useRef<Promise<string | null> | null>(null)
   const draftProjectIdRef = useRef<string | null>(initialQuestionnaire?.draftProjectId ?? null)
+  /** True while manual draft save is running or showing its success flash. */
+  const manualSaveActiveRef = useRef(false)
+  const wasPhotosUploadingRef = useRef(false)
+  const manualSaveFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const photoSavedFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const completed = projectStatus === "QUESTIONNAIRE_COMPLETED" || readOnly
 
   useEffect(() => {
@@ -163,9 +175,22 @@ export function QuestionnaireWizard({
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       void (async () => {
+        // Don't start autosave UI while a manual save is in progress / flashing.
+        if (manualSaveActiveRef.current) return
         setSaveState("saving")
         setSaveMessage(null)
         const result = await saveQuestionnaireDraftAction(q)
+        // Re-read after await (avoid TS narrowing on ref.current across the gap).
+        const manualTookOver = manualSaveActiveRef.current
+        if (manualTookOver) {
+          if (result.ok) {
+            lastSavedJson.current = json
+            if (!q.draftProjectId || q.draftProjectId !== result.projectId) {
+              setQ((prev) => ({ ...prev, draftProjectId: result.projectId }))
+            }
+          }
+          return
+        }
         if (!result.ok) {
           if (result.code === "AUTH_REQUIRED") {
             setSaveState("idle")
@@ -180,12 +205,45 @@ export function QuestionnaireWizard({
           setQ((prev) => ({ ...prev, draftProjectId: result.projectId }))
         }
         setSaveState("saved")
+        setSaveMessage(null)
       })()
     }, 1600)
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
   }, [q, hydrated, isAuthenticated, completed])
+
+  const photosUploading = hasPhotosUploading(q.photos)
+  const photosAllSaved = allPhotosSaved(q.photos)
+  const photoBannerKind = photoUploadBannerMessage({
+    uploading: photosUploading,
+    allSaved: photosAllSaved,
+    showSavedFlash: photoSavedFlash,
+  })
+
+  useEffect(() => {
+    if (photosUploading) {
+      wasPhotosUploadingRef.current = true
+      setPhotoSavedFlash(false)
+      if (photoSavedFlashTimer.current) clearTimeout(photoSavedFlashTimer.current)
+      // Clear any stale red validation leftovers from older builds.
+      setErrors((prev) => prev.filter((e) => !/patientez|enregistrement des photos/i.test(e)))
+      return
+    }
+    if (wasPhotosUploadingRef.current && photosAllSaved) {
+      wasPhotosUploadingRef.current = false
+      setPhotoSavedFlash(true)
+      if (photoSavedFlashTimer.current) clearTimeout(photoSavedFlashTimer.current)
+      photoSavedFlashTimer.current = setTimeout(() => setPhotoSavedFlash(false), 3000)
+    }
+  }, [photosUploading, photosAllSaved])
+
+  useEffect(() => {
+    return () => {
+      if (manualSaveFlashTimer.current) clearTimeout(manualSaveFlashTimer.current)
+      if (photoSavedFlashTimer.current) clearTimeout(photoSavedFlashTimer.current)
+    }
+  }, [])
 
   const steps = useMemo(
     () => buildJourneySteps(q.audience, q.creatorIsParticipant),
@@ -215,9 +273,15 @@ export function QuestionnaireWizard({
       return
     }
     startTransition(async () => {
+      manualSaveActiveRef.current = true
+      setManualSaving(true)
       setSaveState("saving")
+      setSaveMessage(null)
+      setManualSaveFlash(false)
       const result = await saveQuestionnaireDraftAction(q)
       if (!result.ok) {
+        manualSaveActiveRef.current = false
+        setManualSaving(false)
         setSaveState("error")
         setSaveMessage(result.error)
         return
@@ -228,8 +292,15 @@ export function QuestionnaireWizard({
         draftProjectId: result.projectId,
         photos: q.photos.map(({ previewDataUrl: _, ...rest }) => rest),
       })
+      setManualSaving(false)
       setSaveState("saved")
-      setSaveMessage("Brouillon enregistré.")
+      setSaveMessage("Brouillon enregistré")
+      setManualSaveFlash(true)
+      if (manualSaveFlashTimer.current) clearTimeout(manualSaveFlashTimer.current)
+      manualSaveFlashTimer.current = setTimeout(() => {
+        setManualSaveFlash(false)
+        manualSaveActiveRef.current = false
+      }, 3500)
     })
   }
 
@@ -242,6 +313,9 @@ export function QuestionnaireWizard({
   }
 
   function goNext() {
+    if (step === "photos" && hasPhotosUploading(q.photos)) {
+      return
+    }
     const errs = validateStep(step, q)
     if (errs.length) {
       setErrors(errs)
@@ -537,11 +611,19 @@ export function QuestionnaireWizard({
             Étape {safeIndex + 1} / {steps.length} — {copy.navLabel}
           </span>
           <span className="flex items-center gap-3">
-            {saveState === "saving" && <span>Enregistrement…</span>}
-            {saveState === "saved" && <span className="text-foreground">Enregistré</span>}
-            {saveState === "error" && (
-              <span className="text-destructive">{saveMessage ?? "Erreur d'enregistrement"}</span>
-            )}
+            <span aria-live="polite" className="flex items-center gap-2">
+              {saveState === "saving" && !manualSaveFlash && (
+                <span>Enregistrement…</span>
+              )}
+              {saveState === "saved" && !manualSaveFlash && (
+                <span className="text-foreground">Enregistré</span>
+              )}
+              {saveState === "error" && (
+                <span className="text-destructive">
+                  {saveMessage ?? "Erreur lors de l'enregistrement"}
+                </span>
+              )}
+            </span>
             <span>{Math.round(progress)} %</span>
           </span>
         </div>
@@ -611,8 +693,33 @@ export function QuestionnaireWizard({
           />
         )}
 
+        {photoBannerKind && (
+          <div
+            role="status"
+            aria-live="polite"
+            className={cn(
+              "mt-4 flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm",
+              photoBannerKind === "uploading"
+                ? "border-border bg-muted/50 text-foreground"
+                : "border-border bg-muted/40 text-foreground",
+            )}
+          >
+            {photoBannerKind === "uploading" && (
+              <span
+                aria-hidden
+                className="inline-block size-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground"
+              />
+            )}
+            <span>{photoUploadBannerCopy(photoBannerKind)}</span>
+          </div>
+        )}
+
         {errors.length > 0 && (
-          <ul className="mt-4 list-disc space-y-1 rounded-lg border border-destructive/40 bg-destructive/10 p-3 pl-6 text-sm text-destructive">
+          <ul
+            role="alert"
+            aria-live="assertive"
+            className="mt-4 list-disc space-y-1 rounded-lg border border-destructive/40 bg-destructive/10 p-3 pl-6 text-sm text-destructive"
+          >
             {errors.map((e) => (
               <li key={e}>{e}</li>
             ))}
@@ -625,18 +732,38 @@ export function QuestionnaireWizard({
           <ChevronLeft className="size-4" />
           Précédent
         </Button>
-        <div className="flex flex-wrap gap-2">
-          {!completed && (
-            <Button type="button" variant="outline" onClick={saveDraftNow} disabled={pending}>
-              Enregistrer mon brouillon
-            </Button>
+        <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
+          {manualSaveFlash && (
+            <span
+              role="status"
+              aria-live="polite"
+              className="rounded-md border border-border bg-muted/50 px-2.5 py-1 text-sm text-foreground"
+            >
+              Brouillon enregistré
+            </span>
           )}
-          {step !== "recap" && !completed ? (
-            <Button type="button" onClick={goNext}>
-              Suivant
-              <ChevronRight className="size-4" />
-            </Button>
-          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {!completed && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={saveDraftNow}
+                disabled={pending || manualSaving}
+              >
+                {manualSaving ? "Enregistrement…" : "Enregistrer mon brouillon"}
+              </Button>
+            )}
+            {step !== "recap" && !completed ? (
+              <Button
+                type="button"
+                onClick={goNext}
+                disabled={step === "photos" && photosUploading}
+              >
+                Suivant
+                <ChevronRight className="size-4" />
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
       {!isAuthenticated && !completed && (

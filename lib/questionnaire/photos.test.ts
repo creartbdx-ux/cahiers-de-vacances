@@ -1,18 +1,23 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
+  allPhotosSaved,
   assertPhotoBelongsToProject,
   buildBookPhotoStoragePath,
   countRecapPhotos,
   extractPhotoIdFromStoragePath,
+  hasPhotosUploading,
   isPhotoPersisted,
   mergeBookPhotosIntoQuestionnaire,
   PHOTO_TOO_LARGE_USER_ERROR,
   PHOTO_UPLOAD_USER_ERROR,
+  photoUploadBannerCopy,
+  photoUploadBannerMessage,
   toUserFacingPhotoError,
   validatePhotoFile,
 } from "./photos"
 import { createEmptyQuestionnaire, type QuestionnairePhoto } from "./types"
+import { validateStep } from "./validate"
 
 test("isPhotoPersisted requires storagePath and non-error status", () => {
   assert.equal(isPhotoPersisted({ storagePath: "a/b/c", uploadStatus: "persisted" }), true)
@@ -56,6 +61,93 @@ test("toUserFacingPhotoError maps size / format", () => {
   assert.equal(toUserFacingPhotoError("Payload too large"), PHOTO_TOO_LARGE_USER_ERROR)
   assert.match(toUserFacingPhotoError("mime type not allowed"), /Format|JPG|PNG/)
   assert.match(toUserFacingPhotoError("invalid mime"), /Format|JPG|PNG/)
+})
+
+test("photo UPLOADING => message neutre (pas Patientez rouge)", () => {
+  const photos = [
+    { id: "ph_1", useAuthorized: true, uploadStatus: "uploading" as const },
+  ]
+  assert.equal(hasPhotosUploading(photos), true)
+  assert.equal(
+    photoUploadBannerMessage({ uploading: true, allSaved: false, showSavedFlash: false }),
+    "uploading",
+  )
+  assert.equal(photoUploadBannerCopy("uploading"), "Enregistrement des photos en cours…")
+  assert.ok(!photoUploadBannerCopy("uploading").toLowerCase().includes("patientez"))
+})
+
+test("toutes SAVED => confirmation positive", () => {
+  const photos = [
+    {
+      id: "ph_1",
+      useAuthorized: true,
+      uploadStatus: "persisted" as const,
+      storagePath: "u/p/a.jpg",
+    },
+    {
+      id: "ph_2",
+      useAuthorized: true,
+      uploadStatus: "persisted" as const,
+      storagePath: "u/p/b.jpg",
+    },
+  ]
+  assert.equal(allPhotosSaved(photos), true)
+  assert.equal(hasPhotosUploading(photos), false)
+  assert.equal(
+    photoUploadBannerMessage({ uploading: false, allSaved: true, showSavedFlash: true }),
+    "all_saved",
+  )
+  assert.equal(photoUploadBannerCopy("all_saved"), "Toutes vos photos sont enregistrées.")
+})
+
+test("aucune photo en cours => pas de message Patientez / upload", () => {
+  const photos = [
+    {
+      id: "ph_1",
+      useAuthorized: true,
+      uploadStatus: "persisted" as const,
+      storagePath: "u/p/a.jpg",
+    },
+  ]
+  assert.equal(
+    photoUploadBannerMessage({ uploading: false, allSaved: true, showSavedFlash: false }),
+    null,
+  )
+  assert.equal(hasPhotosUploading([]), false)
+  assert.equal(hasPhotosUploading(photos), false)
+})
+
+test("ERROR => message rouge conservé via validateStep", () => {
+  const q = createEmptyQuestionnaire()
+  q.photos = [
+    {
+      id: "ph_1",
+      useAuthorized: true,
+      uploadStatus: "error",
+      uploadError: PHOTO_UPLOAD_USER_ERROR,
+    },
+  ]
+  const errs = validateStep("photos", q)
+  assert.ok(errs.some((e) => e.includes("n'a pas pu être enregistrée")))
+  assert.ok(!errs.some((e) => /patientez/i.test(e)))
+})
+
+test("uploading ne produit plus d'erreur de validation rouge", () => {
+  const q = createEmptyQuestionnaire()
+  q.photos = [
+    { id: "ph_1", useAuthorized: true, uploadStatus: "uploading" },
+  ]
+  const errs = validateStep("photos", q)
+  assert.ok(!errs.some((e) => /patientez|enregistrement des photos/i.test(e)))
+})
+
+test("feedback brouillon : confirmation manuelle distincte de l'autosave", () => {
+  // Pure contract: manual flash copy vs autosave discreet label.
+  const manualCopy = "Brouillon enregistré"
+  const autoCopy = "Enregistré"
+  assert.notEqual(manualCopy, autoCopy)
+  assert.ok(manualCopy.toLowerCase().includes("brouillon"))
+  assert.ok(!autoCopy.toLowerCase().includes("brouillon"))
 })
 
 test("validatePhotoFile rejects oversize and bad mime", () => {

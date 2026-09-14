@@ -21,6 +21,38 @@ export const PHOTO_TOO_LARGE_USER_ERROR =
 export const PHOTO_FORMAT_USER_ERROR =
   "Format non supporté. Utilisez JPG, PNG, WebP ou GIF."
 
+/** Photos currently mid-upload (blocks Next with a neutral banner, not a red error). */
+export function hasPhotosUploading(photos: QuestionnairePhoto[]): boolean {
+  return photos.some((p) => p.uploadStatus === "uploading")
+}
+
+/** True when there is at least one photo and every photo is persisted/saved. */
+export function allPhotosSaved(photos: QuestionnairePhoto[]): boolean {
+  return photos.length > 0 && photos.every((p) => p.uploadStatus === "persisted" || isPhotoPersisted(p))
+}
+
+export function hasPhotoUploadErrors(photos: QuestionnairePhoto[]): boolean {
+  return photos.some((p) => p.uploadStatus === "error")
+}
+
+/** User-facing copy for photo upload status banners (testable). */
+export function photoUploadBannerMessage(input: {
+  uploading: boolean
+  allSaved: boolean
+  showSavedFlash: boolean
+}): "uploading" | "all_saved" | null {
+  if (input.uploading) return "uploading"
+  if (input.showSavedFlash && input.allSaved) return "all_saved"
+  return null
+}
+
+export function photoUploadBannerCopy(
+  kind: "uploading" | "all_saved",
+): string {
+  if (kind === "uploading") return "Enregistrement des photos en cours…"
+  return "Toutes vos photos sont enregistrées."
+}
+
 /** True when the photo exists in Storage + is linked via storagePath. */
 export function isPhotoPersisted(photo: Pick<QuestionnairePhoto, "storagePath" | "uploadStatus">): boolean {
   return Boolean(photo.storagePath) && photo.uploadStatus !== "error"

@@ -125,10 +125,7 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
           )
           break
         }
-        if (photo.uploadStatus === "uploading") {
-          errors.push("Patientez pendant l'enregistrement des photos.")
-          break
-        }
+        // "uploading" is not a validation error — UI shows a neutral banner and blocks Next.
         if (!photo.useAuthorized) {
           errors.push("Chaque photo doit être autorisée pour usage dans le cahier.")
           break
