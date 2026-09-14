@@ -855,9 +855,18 @@ export function BookLabClient({
                         <span className="font-medium">Page personnelle {i + 1}</span>
                         <span className="mt-1 block text-xs text-muted-foreground">
                           Layout : {p.layoutId}
-                          {p.isHero ? " · HERO" : ""} · poids {p.weight}
                           <br />
-                          Sources :{" "}
+                          Poids : {p.weight} / 4 · Fill :{" "}
+                          {Math.round(p.page.pageFillScore * 100)} %
+                          {p.isHero ? (
+                            <>
+                              <br />
+                              HERO
+                              {p.page.heroReason ? ` — ${p.page.heroReason}` : ""}
+                            </>
+                          ) : null}
+                          <br />
+                          Blocks : {p.page.blocks.length} · Sources :{" "}
                           {[
                             ...p.sourcePhotoIds.map((id) => `photo ${id}`),
                             ...p.sourceMemoryIds.map((id) => `souvenir ${id}`),

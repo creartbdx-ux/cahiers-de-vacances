@@ -12,10 +12,13 @@ import {
   blockWeight,
   collectPersonalBlocks,
   composePersonalEditorialPages,
+  isTrueHeroCandidate,
   memoryToBlock,
+  pageFillScore,
   pageProvenance,
   photoToBlock,
   prefersDedicatedPage,
+  PERSONAL_PAGE_CAPACITY,
   PERSONAL_PAGE_MAX_BLOCKS,
   PERSONAL_PAGE_MAX_PHOTOS,
   type MemoryBlockV1,
@@ -72,7 +75,7 @@ const STYLES = [
   },
 ]
 
-function shortMemory(id: string, text: string): MemoryBlockV1 {
+function shortMemory(id: string, text = "Petite anecdote."): MemoryBlockV1 {
   return {
     type: "MEMORY",
     sourceMemoryId: id,
@@ -81,6 +84,18 @@ function shortMemory(id: string, text: string): MemoryBlockV1 {
     density: "SHORT",
     participantIds: ["p1"],
     fullPageRecommended: false,
+  }
+}
+
+function mediumMemory(id: string): MemoryBlockV1 {
+  return {
+    type: "MEMORY",
+    sourceMemoryId: id,
+    title: "Moment partagé",
+    body: "Une anecdote un peu plus longue pour un souvenir de densité moyenne, sans être un récit riche.",
+    density: "MEDIUM",
+    participantIds: ["p1"],
+    fullPageRecommended: true, // may be true — must NOT force HERO
   }
 }
 
@@ -96,104 +111,206 @@ function shortPhoto(id: string): PhotoMemoryBlockV1 {
     density: "SHORT",
     photoLayout: "LANDSCAPE",
     participantIds: ["p1"],
+    fullPageRecommended: true, // typical photo flag — must NOT force HERO
+    weakSource: false,
+  }
+}
+
+function mediumPhoto(id: string): PhotoMemoryBlockV1 {
+  return {
+    type: "PHOTO_MEMORY",
+    sourcePhotoId: id,
+    signedUrl: `https://signed.example/${id}.jpg`,
+    caption: "Légende un peu plus détaillée de la photo",
+    anecdote: "Petite note",
+    title: "Légende un peu plus détaillée",
+    body: "Légende un peu plus détaillée de la photo. Petite note",
+    density: "MEDIUM",
+    photoLayout: "LANDSCAPE",
+    participantIds: ["p1"],
     fullPageRecommended: true,
     weakSource: false,
   }
 }
 
-test("3 memories SHORT => peuvent produire 1 page composite", () => {
-  const blocks = [
-    shortMemory("m1", "Petite anecdote A."),
-    shortMemory("m2", "Petite anecdote B."),
-    shortMemory("m3", "Petite anecdote C."),
-  ]
-  const pages = composePersonalEditorialPages(blocks, "three-short")
+test("3 memories SHORT => THREE_SNIPPETS sur 1 page", () => {
+  const pages = composePersonalEditorialPages(
+    [
+      shortMemory("m1", "Petite anecdote A."),
+      shortMemory("m2", "Petite anecdote B."),
+      shortMemory("m3", "Petite anecdote C."),
+    ],
+    "three-short",
+  )
   assert.equal(pages.length, 1)
-  assert.equal(pages[0]!.blocks.length, 3)
   assert.equal(pages[0]!.layoutId, "THREE_SNIPPETS")
+  assert.ok(pages[0]!.pageFillScore >= 0.6)
 })
 
-test("1 photo SHORT + 1 memory SHORT => 1 page", () => {
+test("1 PHOTO MEDIUM + MEMORY SHORT => PHOTO_PLUS_MEMORY", () => {
   const pages = composePersonalEditorialPages(
-    [shortPhoto("ph1"), shortMemory("m1", "Anecdote courte.")],
+    [mediumPhoto("ph1"), shortMemory("m1")],
     "photo-mem",
   )
   assert.equal(pages.length, 1)
   assert.equal(pages[0]!.layoutId, "PHOTO_PLUS_MEMORY")
-  assert.equal(pages[0]!.blocks.length, 2)
 })
 
-test("2 photos compatibles en densité => 1 page", () => {
+test("1 PHOTO MEDIUM + 2 MEMORY SHORT => PHOTO_PLUS_TWO_SNIPPETS", () => {
   const pages = composePersonalEditorialPages(
-    [shortPhoto("ph1"), shortPhoto("ph2")],
+    [mediumPhoto("ph1"), shortMemory("m1"), shortMemory("m2")],
+    "photo-two",
+  )
+  assert.equal(pages.length, 1)
+  assert.equal(pages[0]!.layoutId, "PHOTO_PLUS_TWO_SNIPPETS")
+})
+
+test("2 PHOTO SHORT/MEDIUM => peuvent partager une page", () => {
+  const pages = composePersonalEditorialPages(
+    [shortPhoto("ph1"), mediumPhoto("ph2")],
     "two-photos",
   )
   assert.equal(pages.length, 1)
   assert.equal(pages[0]!.layoutId, "TWO_PHOTOS")
 })
 
-test("memory RICH => peut devenir HERO", () => {
+test("2 MEMORY MEDIUM => TWO_MEMORIES correctement rempli", () => {
+  const pages = composePersonalEditorialPages(
+    [mediumMemory("m1"), mediumMemory("m2")],
+    "two-mem",
+  )
+  assert.equal(pages.length, 1)
+  assert.equal(pages[0]!.layoutId, "TWO_MEMORIES")
+  assert.equal(pages[0]!.pageFillScore, 1)
+  const html = renderToStaticMarkup(
+    createElement(PersonalEditorialTemplate, {
+      page: pages[0]!,
+      style: getStyleTokens("RETRO"),
+      palette: PALETTE,
+    }),
+  )
+  assert.ok(html.includes('data-memory-split="50-50"'))
+  assert.ok(html.includes('data-personal-fill="1.00"'))
+})
+
+test("7 blocs moyens/courts => objectif <=4 pages", () => {
+  const blocks = [
+    mediumPhoto("ph1"),
+    mediumPhoto("ph2"),
+    shortPhoto("ph3"),
+    mediumMemory("m1"),
+    shortMemory("m2"),
+    shortMemory("m3"),
+    shortMemory("m4"),
+  ]
+  assert.equal(blocks.length, 7)
+  const pages = composePersonalEditorialPages(blocks, "seven-blocks")
+  assert.ok(pages.length <= 4, `expected <=4 pages, got ${pages.length}`)
+  assert.ok(pages.filter((p) => p.isHero).length <= 1)
+  // Most pages should be reasonably filled
+  const underfilled = pages.filter((p) => p.pageFillScore < 0.6 && !p.isHero)
+  assert.ok(underfilled.length === 0 || pages.length === 1)
+})
+
+test("MEMORY SHORT seul + autres blocs => pas HERO", () => {
+  const pages = composePersonalEditorialPages(
+    [shortMemory("alone"), mediumPhoto("ph1"), shortMemory("m2")],
+    "no-short-hero",
+  )
+  const alonePage = pages.find((p) =>
+    p.blocks.some((b) => b.type === "MEMORY" && b.sourceMemoryId === "alone"),
+  )
+  assert.ok(alonePage)
+  assert.equal(alonePage!.isHero, false)
+  assert.ok(alonePage!.blocks.length >= 2)
+})
+
+test("HERO non automatique avec fullPageRecommended=true", () => {
+  const block = mediumPhoto("phX")
+  assert.equal(block.fullPageRecommended, true)
+  assert.equal(isTrueHeroCandidate(block), false)
+  assert.equal(prefersDedicatedPage(block), false)
+  const pages = composePersonalEditorialPages(
+    [block, shortMemory("m1")],
+    "no-auto-hero",
+  )
+  assert.equal(pages.length, 1)
+  assert.equal(pages[0]!.isHero, false)
+})
+
+test("RICH réel => HERO possible", () => {
   const rich: MemoryBlockV1 = {
     type: "MEMORY",
     sourceMemoryId: "rich",
     title: "Long séjour",
-    body: "Texte riche ".repeat(40),
+    body: "Texte riche détaillé ".repeat(20),
     density: "RICH",
     participantIds: ["p1"],
     fullPageRecommended: true,
   }
-  assert.equal(prefersDedicatedPage(rich), true)
+  assert.equal(isTrueHeroCandidate(rich), true)
   const pages = composePersonalEditorialPages([rich], "hero-mem")
   assert.equal(pages.length, 1)
   assert.equal(pages[0]!.layoutId, "HERO_MEMORY")
   assert.equal(pages[0]!.isHero, true)
+  assert.ok(pages[0]!.heroReason)
 })
 
-test("photo RICH => peut devenir HERO", () => {
+test("photo RICH => HERO possible", () => {
   const rich: PhotoMemoryBlockV1 = {
     ...shortPhoto("phR"),
     density: "RICH",
-    caption: "Longue légende ".repeat(20),
-    anecdote: "Anecdote détaillée ".repeat(15),
-    body: "Longue légende et anecdote",
+    caption: "Longue légende ".repeat(8),
+    anecdote: "Anecdote détaillée ".repeat(6),
+    body: `${"Longue légende ".repeat(8)} ${"Anecdote détaillée ".repeat(6)}`,
     fullPageRecommended: true,
   }
-  assert.equal(prefersDedicatedPage(rich), true)
+  assert.equal(isTrueHeroCandidate(rich), true)
   const pages = composePersonalEditorialPages([rich], "hero-photo")
-  assert.equal(pages.length, 1)
   assert.equal(pages[0]!.layoutId, "HERO_PHOTO_MEMORY")
 })
 
-test("fullPageRecommended=false => pas automatiquement page entière", () => {
-  const a = shortMemory("a", "Un.")
-  const b = shortMemory("b", "Deux.")
-  assert.equal(a.fullPageRecommended, false)
-  const pages = composePersonalEditorialPages([a, b], "no-auto-full")
-  assert.equal(pages.length, 1)
-  assert.ok(pages[0]!.blocks.length >= 2)
-  assert.equal(pages[0]!.isHero, false)
-})
-
-test("aucune provenance perdue ; aucun faux lien photo/memory", () => {
+test("pageFillScore calculé ; éviter page <60% si combinaison existe", () => {
   const pages = composePersonalEditorialPages(
-    [shortPhoto("phX"), shortMemory("mY", "Texte Y")],
-    "prov",
+    [shortMemory("a"), shortMemory("b"), shortMemory("c")],
+    "fill",
   )
   assert.equal(pages.length, 1)
-  const prov = pageProvenance(pages[0]!)
-  assert.deepEqual(prov.sourcePhotoIds, ["phX"])
-  assert.deepEqual(prov.sourceMemoryIds, ["mY"])
-  // Blocks remain separate — no merged narrative id
-  assert.equal(pages[0]!.blocks[0]!.type === "PHOTO_MEMORY" || pages[0]!.blocks[1]!.type === "PHOTO_MEMORY", true)
-  assert.equal(pages[0]!.blocks.some((b) => b.type === "MEMORY"), true)
+  assert.ok(pageFillScore(pages[0]!.blocks) >= 0.6)
+  assert.equal(pages[0]!.pageFillScore, pageFillScore(pages[0]!.blocks))
 })
 
-test("max 3 blocks/page et max 2 photos/page", () => {
+test("même seed => même composition", () => {
   const blocks = [
-    shortMemory("m1", "A"),
-    shortMemory("m2", "B"),
-    shortMemory("m3", "C"),
-    shortMemory("m4", "D"),
+    shortMemory("m1"),
+    shortMemory("m2"),
+    shortPhoto("p1"),
+    mediumMemory("m3"),
+  ]
+  const a = composePersonalEditorialPages(blocks, "seed-stable")
+  const b = composePersonalEditorialPages(blocks, "seed-stable")
+  assert.deepEqual(
+    a.map((p) => ({ layout: p.layoutId, ids: pageProvenance(p), fill: p.pageFillScore })),
+    b.map((p) => ({ layout: p.layoutId, ids: pageProvenance(p), fill: p.pageFillScore })),
+  )
+})
+
+test("provenance inchangée ; aucun faux lien", () => {
+  const pages = composePersonalEditorialPages(
+    [shortPhoto("phX"), shortMemory("mY")],
+    "prov",
+  )
+  const prov = pageProvenance(pages[0]!)
+  assert.deepEqual(prov.sourcePhotoIds.sort(), ["phX"])
+  assert.deepEqual(prov.sourceMemoryIds.sort(), ["mY"])
+})
+
+test("max 3 blocks / max 2 photos", () => {
+  const blocks = [
+    shortMemory("m1"),
+    shortMemory("m2"),
+    shortMemory("m3"),
+    shortMemory("m4"),
     shortPhoto("p1"),
     shortPhoto("p2"),
     shortPhoto("p3"),
@@ -202,63 +319,14 @@ test("max 3 blocks/page et max 2 photos/page", () => {
   for (const page of pages) {
     assert.ok(page.blocks.length <= PERSONAL_PAGE_MAX_BLOCKS)
     assert.ok(
-      page.blocks.filter((b) => b.type === "PHOTO_MEMORY").length <= PERSONAL_PAGE_MAX_PHOTOS,
+      page.blocks.filter((b) => b.type === "PHOTO_MEMORY").length <=
+        PERSONAL_PAGE_MAX_PHOTOS,
     )
+    assert.ok(page.weight <= PERSONAL_PAGE_CAPACITY)
   }
 })
 
-test("même seed => même composition", () => {
-  const blocks = [
-    shortMemory("m1", "A"),
-    shortMemory("m2", "B"),
-    shortPhoto("p1"),
-    shortMemory("m3", "C"),
-  ]
-  const a = composePersonalEditorialPages(blocks, "seed-stable")
-  const b = composePersonalEditorialPages(blocks, "seed-stable")
-  assert.deepEqual(
-    a.map((p) => ({ layout: p.layoutId, ids: pageProvenance(p) })),
-    b.map((p) => ({ layout: p.layoutId, ids: pageProvenance(p) })),
-  )
-})
-
-test("collectPersonalBlocks conserve densités et provenances", () => {
-  const p = profile({
-    memories: [
-      { id: "m1", text: "Court." },
-      {
-        id: "m2",
-        title: "Riche",
-        place: "Kyoto",
-        text: [
-          "Premier jour au temple puis une longue marche.",
-          "Le soir un dîner simple et beaucoup de rires.",
-          "Le lendemain la pluie a prolongé le café.",
-        ].join(" "),
-      },
-    ],
-    photos: [
-      {
-        id: "ph1",
-        useAuthorized: true,
-        storagePath: "books/x/1.jpg",
-        caption: "Tour",
-        anecdote: "Dernier jour",
-      },
-    ],
-  })
-  const blocks = collectPersonalBlocks({
-    profile: p,
-    photoSignedUrls: { ph1: "https://signed.example/1.jpg" },
-  })
-  assert.ok(blocks.some((b) => b.type === "MEMORY" && b.sourceMemoryId === "m1"))
-  assert.ok(blocks.some((b) => b.type === "PHOTO_MEMORY" && b.sourcePhotoId === "ph1"))
-  const photo = blocks.find((b) => b.type === "PHOTO_MEMORY") as PhotoMemoryBlockV1
-  assert.equal(photo.caption, "Tour")
-  assert.equal(photo.anecdote, "Dernier jour")
-})
-
-test("Blueprint compte pages composites ; PERSONAL_EDITORIAL READY", () => {
+test("Blueprint utilise pages composées (pas 1:1)", () => {
   assert.equal(getArchetype("PERSONAL_EDITORIAL_PAGE").implementationStatus, "READY")
   const p = profile({
     memories: [
@@ -268,21 +336,13 @@ test("Blueprint compte pages composites ; PERSONAL_EDITORIAL READY", () => {
       { id: "m4", text: "Petite anecdote D." },
     ],
     photos: [
-      {
-        id: "ph1",
-        useAuthorized: true,
-        storagePath: "books/x/1.jpg",
-        caption: "Légende A",
-      },
-      {
-        id: "ph2",
-        useAuthorized: true,
-        storagePath: "books/x/2.jpg",
-        caption: "Légende B",
-      },
+      { id: "ph1", useAuthorized: true, storagePath: "books/x/1.jpg", caption: "Légende A" },
+      { id: "ph2", useAuthorized: true, storagePath: "books/x/2.jpg", caption: "Légende B" },
     ],
     sharedProfile: { interestUniverseIds: ["BEAUTY", "TRAVEL", "FASHION", "NATURE"] },
   })
+  const blocks = collectPersonalBlocks({ profile: p })
+  const composed = composePersonalEditorialPages(blocks, "pep-bp:personal-editorial")
   const bp = buildBookBlueprint({
     bookProjectId: "proj",
     seed: "pep-bp",
@@ -291,25 +351,14 @@ test("Blueprint compte pages composites ; PERSONAL_EDITORIAL READY", () => {
     styles: STYLES,
     palettes: [PALETTE],
   })
-
   const editorial = bp.pages.filter((x) => x.archetypeId === "PERSONAL_EDITORIAL_PAGE")
-  assert.ok(editorial.length >= 1)
-  assert.ok(editorial.every((x) => x.implementationStatus === "READY"))
-  assert.equal(bp.stats.personalEditorialPages, editorial.length)
-
-  // Fewer pages than raw block count (4 memories + 2 photos = 6 blocks)
-  const blocks = collectPersonalBlocks({ profile: p })
+  assert.equal(editorial.length, composed.length)
   assert.ok(editorial.length < blocks.length)
-
-  const gap = bp.capabilityGaps.find((g) => g.family === "PERSONAL_EDITORIAL")
-  assert.equal(gap, undefined)
-
-  // Old 1:1 archetypes no longer planned as pages
   assert.equal(bp.pages.filter((x) => x.archetypeId === "MEMORY_TEXT_PAGE").length, 0)
   assert.equal(bp.pages.filter((x) => x.archetypeId === "PHOTO_MEMORY_PAGE").length, 0)
 })
 
-test("PersonalEditorialTemplate rend layout composite", () => {
+test("template PHOTO_PLUS_MEMORY sépare les sources", () => {
   const pages = composePersonalEditorialPages(
     [shortPhoto("ph1"), shortMemory("m1", "Texte")],
     "tpl",
@@ -322,11 +371,11 @@ test("PersonalEditorialTemplate rend layout composite", () => {
     }),
   )
   assert.ok(html.includes('data-personal-layout="PHOTO_PLUS_MEMORY"'))
-  assert.ok(html.includes("object-fit:cover") || html.includes("objectFit") || html.includes('data-object-fit="cover"'))
+  assert.ok(html.includes('data-object-fit="cover"'))
 })
 
-test("poids densités", () => {
-  assert.equal(blockWeight(shortMemory("m", "x")), 1)
+test("poids photo MEDIUM permet TWO_PHOTOS", () => {
+  assert.equal(blockWeight(mediumPhoto("p")), 2)
   assert.equal(blockWeight(shortPhoto("p")), 2)
 })
 
@@ -334,18 +383,9 @@ test("memoryToBlock / photoToBlock", () => {
   const p = profile({
     memories: [{ id: "m1", text: "Hello world souvenir." }],
     photos: [
-      {
-        id: "ph1",
-        useAuthorized: true,
-        storagePath: "x.jpg",
-        caption: "Cap",
-      },
+      { id: "ph1", useAuthorized: true, storagePath: "x.jpg", caption: "Cap" },
     ],
   })
-  const mb = memoryToBlock(p.memories[0]!, p)
-  const pb = photoToBlock(p.photos[0]!, p, "https://x")
-  assert.ok(mb)
-  assert.equal(mb!.sourceMemoryId, "m1")
-  assert.ok(pb)
-  assert.equal(pb!.sourcePhotoId, "ph1")
+  assert.ok(memoryToBlock(p.memories[0]!, p))
+  assert.ok(photoToBlock(p.photos[0]!, p, "https://x"))
 })

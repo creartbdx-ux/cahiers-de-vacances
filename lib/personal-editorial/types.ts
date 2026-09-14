@@ -54,8 +54,12 @@ export interface PersonalEditorialPageV1 {
   visualRole: VisualRole
   /** Sum of block weights. */
   weight: number
-  /** True when a single RICH / high-weight block occupies the page. */
+  /** 0–1 fill vs PERSONAL_PAGE_CAPACITY. */
+  pageFillScore: number
+  /** True when a single true-HERO block occupies the page. */
   isHero: boolean
+  /** Why this page is HERO, if applicable. */
+  heroReason: string | null
 }
 
 export const PERSONAL_PAGE_CAPACITY = 4

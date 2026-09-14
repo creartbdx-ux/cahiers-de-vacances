@@ -10,22 +10,42 @@ export function pickPersonalEditorialLayout(
   const photos = blocks.filter((b) => b.type === "PHOTO_MEMORY")
   const memories = blocks.filter((b) => b.type === "MEMORY")
 
-  if (blocks.length === 1 && memories.length === 1) return "HERO_MEMORY"
-  if (blocks.length === 1 && photos.length === 1) return "HERO_PHOTO_MEMORY"
-
+  // Prefer composite layouts — HERO only for true singletons
+  if (photos.length === 1 && memories.length === 2) return "PHOTO_PLUS_TWO_SNIPPETS"
   if (photos.length === 1 && memories.length === 1) return "PHOTO_PLUS_MEMORY"
   if (photos.length === 2 && memories.length === 0) return "TWO_PHOTOS"
   if (photos.length === 0 && memories.length === 2) return "TWO_MEMORIES"
   if (photos.length === 0 && memories.length === 3) return "THREE_SNIPPETS"
-  if (photos.length === 1 && memories.length === 2) return "PHOTO_PLUS_TWO_SNIPPETS"
 
-  // Fallbacks for edge packs (still within max 3 / max 2 photos)
+  // Fallbacks (still within max 3 / max 2 photos)
   if (photos.length === 2 && memories.length === 1) return "PHOTO_PLUS_TWO_SNIPPETS"
   if (photos.length === 1 && memories.length === 0) return "HERO_PHOTO_MEMORY"
+  if (photos.length === 0 && memories.length === 1) return "HERO_MEMORY"
   if (memories.length >= 2) return memories.length >= 3 ? "THREE_SNIPPETS" : "TWO_MEMORIES"
   return "HERO_MEMORY"
 }
 
 export function isHeroLayout(layoutId: PersonalEditorialLayoutId): boolean {
   return layoutId === "HERO_MEMORY" || layoutId === "HERO_PHOTO_MEMORY"
+}
+
+/** Layout preference rank (lower = better product priority). */
+export function layoutPreferenceRank(layoutId: PersonalEditorialLayoutId): number {
+  switch (layoutId) {
+    case "PHOTO_PLUS_MEMORY":
+      return 1
+    case "PHOTO_PLUS_TWO_SNIPPETS":
+      return 2
+    case "TWO_PHOTOS":
+      return 3
+    case "TWO_MEMORIES":
+      return 4
+    case "THREE_SNIPPETS":
+      return 5
+    case "HERO_MEMORY":
+    case "HERO_PHOTO_MEMORY":
+      return 9
+    default:
+      return 8
+  }
 }
