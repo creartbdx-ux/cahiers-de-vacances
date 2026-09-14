@@ -144,9 +144,9 @@ function recommendationFor(
     case "QUICK_GAME":
       return `Besoin de ${gap} pages de jeux rapides, particulièrement pour ${audience}.`
     case "MEMORY":
-      return `Besoin de ${gap} pages souvenirs (renderer manquant)${data.memories ? ` — ${data.memories} souvenir(s) disponibles` : ""}.`
+      return `Besoin de ${gap} pages souvenirs encore non READY${data.memories ? ` — ${data.memories} souvenir(s) disponibles` : ""}.`
     case "PHOTO":
-      return `Besoin de ${gap} pages photo/mémoire (layout manquant)${data.photos ? ` — ${data.photos} photo(s) disponibles` : ""}.`
+      return `Besoin de ${gap} pages photo/mémoire (layout multi-photos encore partiel)${data.photos ? ` — ${data.photos} photo(s) disponibles` : ""}.`
     case "PERSONAL_GAME":
       return `Besoin de ${gap} pages personnelles ludiques adaptées à ${audience}.`
     case "BREATHER":

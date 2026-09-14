@@ -29,12 +29,16 @@ import { buildCrosswordThemePreview } from "@/lib/content-generation/crossword-t
 import {
   generateBookLabGameAction,
   getBookLabPlanAction,
+  prepareBookLabMemoryPageAction,
   type BookLabCrosswordContent,
+  type BookLabMemoryPageResult,
   type BookLabQuizContent,
   type BookLabWordsearchContent,
 } from "@/app/admin/book-lab/actions"
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
 import type { Palette, Style } from "@/lib/supabase/types"
+import { MemoryTemplate } from "@/components/book-renderer/templates/memory-template"
+import { resolveMemoryPageSurface } from "@/lib/memory-pages"
 
 export type BookLabProject = {
   id: string
@@ -81,9 +85,21 @@ export function BookLabClient({
   const [pageIndex, setPageIndex] = useState(0)
   const [pending, startTransition] = useTransition()
 
+  const [memoryId, setMemoryId] = useState("")
+  const [memoryPage, setMemoryPage] = useState<Extract<BookLabMemoryPageResult, { ok: true }> | null>(
+    null,
+  )
+  const [memoryError, setMemoryError] = useState<string | null>(null)
+  const [memoryPending, startMemoryTransition] = useTransition()
+
   const selected = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
+  )
+
+  const availableMemories = useMemo(
+    () => (selected?.profile.memories ?? []).filter((m) => m.text?.trim()),
+    [selected],
   )
 
   const palette = useMemo(() => {
@@ -111,6 +127,23 @@ export function BookLabClient({
     return buildCrosswordThemePreview(crossword.entries, crossword.seed)
   }, [crossword])
 
+  const memoryPalette = useMemo(() => {
+    const id = memoryPage?.visualIdentity.paletteId ?? visualIdentity?.paletteId
+    return palettes.find((p) => p.id === id) ?? palettes[0] ?? FALLBACK_PALETTE
+  }, [palettes, memoryPage, visualIdentity])
+
+  const memoryStyle = useMemo(
+    () =>
+      getStyleTokens(
+        memoryPage?.visualIdentity.styleId ?? visualIdentity?.styleId ?? styles[0]?.id ?? "RETRO",
+      ),
+    [memoryPage, visualIdentity, styles],
+  )
+
+  const memorySurface = memoryPage
+    ? resolveMemoryPageSurface(memoryPalette, memoryPage.visualRole)
+    : undefined
+
   function resetContents() {
     setQuiz(null)
     setWordsearch(null)
@@ -122,6 +155,8 @@ export function BookLabClient({
     setPlanReady(false)
     setVisualIdentity(null)
     setMissing([])
+    setMemoryPage(null)
+    setMemoryError(null)
   }
 
   function loadPlan() {
@@ -222,6 +257,34 @@ export function BookLabClient({
     setPageIndex(0)
   }
 
+  function prepareMemoryPage(opts: { useAi: boolean; reformulate?: boolean }) {
+    if (!selected) return
+    const id = memoryId || availableMemories[0]?.id
+    if (!id) {
+      setMemoryError("Aucun souvenir disponible sur ce projet.")
+      return
+    }
+    setMemoryError(null)
+    startMemoryTransition(async () => {
+      const reformSeed = opts.reformulate
+        ? `${seed.trim() || "lab-seed-1"}:reform:${Date.now()}`
+        : seed.trim() || "lab-seed-1"
+      const result = await prepareBookLabMemoryPageAction({
+        bookProjectId: selected.id,
+        seed: reformSeed,
+        memoryId: id,
+        useAi: opts.useAi,
+      })
+      if (!result.ok) {
+        setMemoryPage(null)
+        setMemoryError(result.message)
+        return
+      }
+      setMemoryId(result.memoryId)
+      setMemoryPage(result)
+    })
+  }
+
   const allOk =
     status.quiz === "ok" && status.wordsearch === "ok" && status.crossword === "ok"
 
@@ -253,6 +316,7 @@ export function BookLabClient({
               onChange={(e) => {
                 setProjectId(e.target.value)
                 resetContents()
+                setMemoryId("")
               }}
             >
               {projects.length === 0 && <option value="">Aucun projet</option>}
@@ -424,6 +488,115 @@ export function BookLabClient({
               </BookPage>
             </PagePreview>
           </div>
+        </section>
+      )}
+
+      {selected && (
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <h2 className="mb-1 text-base font-semibold">MEMORY_PAGE V1</h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Page éditoriale à partir d&apos;un souvenir réel du profil — pas un jeu. Aucune
+            génération automatique au chargement.
+          </p>
+
+          {availableMemories.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Aucun souvenir dans ce BookProfile.
+            </p>
+          ) : (
+            <>
+              <label className="mb-3 flex flex-col gap-1 text-sm">
+                Souvenir
+                <select
+                  className="h-10 rounded-lg border border-input bg-background px-3"
+                  value={memoryId || availableMemories[0]?.id || ""}
+                  onChange={(e) => {
+                    setMemoryId(e.target.value)
+                    setMemoryPage(null)
+                    setMemoryError(null)
+                  }}
+                >
+                  {availableMemories.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {(m.title?.trim() || m.text.trim().slice(0, 48)) +
+                        (m.place ? ` · ${m.place}` : "")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="mb-4 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  onClick={() => prepareMemoryPage({ useAi: false })}
+                  disabled={memoryPending}
+                >
+                  Préparer la page (sans IA)
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => prepareMemoryPage({ useAi: true })}
+                  disabled={memoryPending || !aiConfigured}
+                >
+                  Préparer avec reformulation IA
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => prepareMemoryPage({ useAi: aiConfigured, reformulate: true })}
+                  disabled={memoryPending || !memoryPage}
+                >
+                  Reformuler la mise en page
+                </Button>
+              </div>
+
+              {memoryError && <p className="mb-3 text-sm text-destructive">{memoryError}</p>}
+
+              {memoryPage && (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm">
+                    <p className="mb-2 font-medium">Source originale</p>
+                    <p className="text-muted-foreground">
+                      id {memoryPage.memoryId}
+                      {memoryPage.originalTitle ? ` · ${memoryPage.originalTitle}` : ""}
+                      {memoryPage.originalPlace ? ` · ${memoryPage.originalPlace}` : ""}
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap">{memoryPage.originalText}</p>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Variante {memoryPage.variant}
+                      {memoryPage.usedAi ? " · IA" : " · fallback"}
+                      {memoryPage.sourcePhotoIds.length
+                        ? ` · photo ${memoryPage.sourcePhotoIds.join(", ")}`
+                        : " · sans photo"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-6">
+                    <PagePreview>
+                      <BookPage
+                        palette={memoryPalette}
+                        showSafeArea={false}
+                        surface={memorySurface}
+                      >
+                        <MemoryTemplate
+                          title={memoryPage.title}
+                          body={memoryPage.body}
+                          eyebrow={memoryPage.eyebrow}
+                          place={memoryPage.place}
+                          style={memoryStyle}
+                          palette={memoryPalette}
+                          visualRole={memoryPage.visualRole}
+                          variant={memoryPage.variant}
+                          photoUrl={memoryPage.photoUrl}
+                          photoCaption={memoryPage.photoCaption}
+                        />
+                      </BookPage>
+                    </PagePreview>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </section>
       )}
     </div>

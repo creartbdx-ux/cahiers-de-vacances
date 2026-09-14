@@ -158,7 +158,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     estimatedDensity: "LIGHT",
     correctionRequired: false,
     correctionWeight: 0,
-    implementationStatus: "MISSING",
+    implementationStatus: "READY",
     supportedAudiences: ["*"],
     minimumProfileRequirements: { minMemories: 1 },
     tags: ["memory", "personal"],
@@ -171,7 +171,8 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     estimatedDensity: "LIGHT",
     correctionRequired: false,
     correctionWeight: 0,
-    implementationStatus: "MISSING",
+    /** V1 MEMORY_PAGE covers single photo; multi-photo layouts still partial. */
+    implementationStatus: "PARTIAL",
     supportedAudiences: ["*"],
     minimumProfileRequirements: { minPhotos: 1 },
     tags: ["photo", "memory", "personal"],

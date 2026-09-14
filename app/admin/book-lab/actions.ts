@@ -2,7 +2,7 @@
 
 import { getCurrentUser } from "@/lib/auth"
 import { canUseInEditorialLab, parseQuestionnairePayload } from "@/lib/books/lifecycle"
-import { getBookProject } from "@/lib/data/books"
+import { createBookPhotoSignedUrls, getBookProject } from "@/lib/data/books"
 import { getGames, getUniverses } from "@/lib/data/reference"
 import { buildEditorialPlan } from "@/lib/editorial-engine"
 import type { EditorialGameSlot } from "@/lib/editorial-engine/types"
@@ -20,6 +20,7 @@ import { resolveBookVisualIdentity } from "@/lib/mini-book/visual-identity"
 import { getActivePalettes } from "@/lib/data/assets"
 import { getStyles } from "@/lib/data/reference"
 import type { MiniBookVisualIdentity } from "@/lib/mini-book/types"
+import { buildMemoryPage } from "@/lib/memory-pages"
 
 export type BookLabSlotSummary = {
   slotId: string
@@ -370,4 +371,132 @@ export async function generateBookLabGameAction(input: {
 
 export async function getBookLabAiStatusAction(): Promise<{ configured: boolean }> {
   return { configured: isContentGenerationConfigured() }
+}
+
+export type BookLabMemoryPageResult =
+  | {
+      ok: true
+      memoryId: string
+      originalText: string
+      originalTitle: string | null
+      originalPlace: string | null
+      participantIds: string[]
+      variant: "PHOTO" | "TEXT_ONLY"
+      usedAi: boolean
+      title: string
+      eyebrow: string | null
+      body: string
+      place: string | null
+      photoUrl: string | null
+      photoCaption: string | null
+      sourcePhotoIds: string[]
+      visualIdentity: MiniBookVisualIdentity
+      visualRole: "LIGHT" | "SECONDARY" | "ACCENT"
+    }
+  | { ok: false; message: string; details?: string[] }
+
+/**
+ * Prepare a MEMORY_PAGE preview for Book Lab.
+ * Does not persist. IA only when useAi=true and provider configured.
+ */
+export async function prepareBookLabMemoryPageAction(input: {
+  bookProjectId: string
+  seed: string
+  memoryId?: string
+  /** When false, never call the LLM (default for first paint). */
+  useAi?: boolean
+}): Promise<BookLabMemoryPageResult> {
+  const { user, profile: authProfile } = await getCurrentUser()
+  if (!user || authProfile?.role !== "admin") {
+    return { ok: false, message: "Accès admin requis." }
+  }
+
+  const project = await getBookProject(input.bookProjectId)
+  if (!project) return { ok: false, message: "Projet introuvable." }
+
+  const parsed = parseQuestionnairePayload(project.questionnaire_data)
+  if (!parsed.profile) {
+    return { ok: false, message: "BookProfileV1 manquant sur ce projet." }
+  }
+
+  let richnessLevel = parsed.richnessLevel
+  if (!richnessLevel && parsed.questionnaire) {
+    richnessLevel = calculateProfileRichness(parsed.questionnaire, parsed.profile).level
+  }
+  if (
+    !canUseInEditorialLab({
+      status: project.status,
+      profile: parsed.profile,
+      richnessLevel: richnessLevel ?? null,
+    })
+  ) {
+    return { ok: false, message: "Projet non éligible au Book Lab." }
+  }
+
+  const [palettes, styles] = await Promise.all([getActivePalettes(), getStyles()])
+  const seed = input.seed.trim() || "lab-seed-1"
+  const visualIdentity = resolveBookVisualIdentity({
+    profile: parsed.profile,
+    seed,
+    styles,
+    palettes,
+  })
+
+  const photoSignedUrls: Record<string, string> = {}
+  const paths = (parsed.profile.photos ?? [])
+    .filter((p) => p.useAuthorized && p.storagePath)
+    .map((p) => p.storagePath as string)
+  if (paths.length) {
+    const byPath = await createBookPhotoSignedUrls(paths)
+    for (const p of parsed.profile.photos ?? []) {
+      if (p.storagePath && byPath[p.storagePath]) {
+        photoSignedUrls[p.id] = byPath[p.storagePath]!
+      }
+    }
+  }
+
+  const useAi = Boolean(input.useAi) && isContentGenerationConfigured()
+  const result = await buildMemoryPage({
+    profile: parsed.profile,
+    seed: `${seed}:memory-page`,
+    memoryId: input.memoryId,
+    photoSignedUrls,
+    forceFallback: !useAi,
+  })
+
+  if (!result.ok) {
+    return { ok: false, message: result.message, details: result.details }
+  }
+
+  const roles = ["LIGHT", "SECONDARY", "ACCENT"] as const
+  const roleIndex = Math.abs(hashSeed(`${seed}:${result.source.memoryId}`)) % roles.length
+
+  return {
+    ok: true,
+    memoryId: result.source.memoryId,
+    originalText: result.source.originalText,
+    originalTitle: result.source.title ?? null,
+    originalPlace: result.source.place ?? null,
+    participantIds: result.source.participantIds,
+    variant: result.editorial.variant,
+    usedAi: result.editorial.usedAi,
+    title: result.editorial.title,
+    eyebrow: result.editorial.eyebrow,
+    body: result.editorial.body,
+    place: result.editorial.place,
+    photoUrl: result.photo?.signedUrl ?? null,
+    photoCaption: result.photo?.caption ?? null,
+    sourcePhotoIds: result.editorial.sourcePhotoIds,
+    visualIdentity,
+    visualRole: roles[roleIndex]!,
+  }
+}
+
+function hashSeed(s: string): number {
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
 }
