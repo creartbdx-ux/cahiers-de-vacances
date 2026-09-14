@@ -30,9 +30,11 @@ import {
   generateBookLabGameAction,
   getBookLabPlanAction,
   prepareBookLabMemoryPageAction,
+  prepareBookLabPersonalEditorialAction,
   prepareBookLabPhotoMemoryPageAction,
   type BookLabCrosswordContent,
   type BookLabMemoryPageResult,
+  type BookLabPersonalEditorialResult,
   type BookLabPhotoMemoryPageResult,
   type BookLabQuizContent,
   type BookLabWordsearchContent,
@@ -41,6 +43,7 @@ import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
 import type { Palette, Style } from "@/lib/supabase/types"
 import { MemoryTemplate } from "@/components/book-renderer/templates/memory-template"
 import { PhotoMemoryTemplate } from "@/components/book-renderer/templates/photo-memory-template"
+import { PersonalEditorialTemplate } from "@/components/book-renderer/templates/personal-editorial-template"
 import { resolveMemoryPageSurface } from "@/lib/memory-pages"
 
 export type BookLabProject = {
@@ -102,6 +105,13 @@ export function BookLabClient({
   const [photoMemoryError, setPhotoMemoryError] = useState<string | null>(null)
   const [photoMemoryPending, startPhotoMemoryTransition] = useTransition()
 
+  const [personalEditorial, setPersonalEditorial] = useState<
+    Extract<BookLabPersonalEditorialResult, { ok: true }> | null
+  >(null)
+  const [personalEditorialError, setPersonalEditorialError] = useState<string | null>(null)
+  const [personalEditorialPending, startPersonalEditorialTransition] = useTransition()
+  const [personalPageIndex, setPersonalPageIndex] = useState(0)
+
   const selected = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
@@ -149,20 +159,22 @@ export function BookLabClient({
     const id =
       memoryPage?.visualIdentity.paletteId ??
       photoMemoryPage?.visualIdentity.paletteId ??
+      personalEditorial?.visualIdentity.paletteId ??
       visualIdentity?.paletteId
     return palettes.find((p) => p.id === id) ?? palettes[0] ?? FALLBACK_PALETTE
-  }, [palettes, memoryPage, photoMemoryPage, visualIdentity])
+  }, [palettes, memoryPage, photoMemoryPage, personalEditorial, visualIdentity])
 
   const memoryStyle = useMemo(
     () =>
       getStyleTokens(
         memoryPage?.visualIdentity.styleId ??
           photoMemoryPage?.visualIdentity.styleId ??
+          personalEditorial?.visualIdentity.styleId ??
           visualIdentity?.styleId ??
           styles[0]?.id ??
           "RETRO",
       ),
-    [memoryPage, photoMemoryPage, visualIdentity, styles],
+    [memoryPage, photoMemoryPage, personalEditorial, visualIdentity, styles],
   )
 
   const memorySurface = memoryPage
@@ -188,6 +200,9 @@ export function BookLabClient({
     setMemoryError(null)
     setPhotoMemoryPage(null)
     setPhotoMemoryError(null)
+    setPersonalEditorial(null)
+    setPersonalEditorialError(null)
+    setPersonalPageIndex(0)
   }
 
   function loadPlan() {
@@ -338,6 +353,24 @@ export function BookLabClient({
       }
       setPhotoId(result.photoId)
       setPhotoMemoryPage(result)
+    })
+  }
+
+  function preparePersonalEditorial() {
+    if (!selected) return
+    setPersonalEditorialError(null)
+    startPersonalEditorialTransition(async () => {
+      const result = await prepareBookLabPersonalEditorialAction({
+        bookProjectId: selected.id,
+        seed: seed.trim() || "lab-seed-1",
+      })
+      if (!result.ok) {
+        setPersonalEditorial(null)
+        setPersonalEditorialError(result.message)
+        return
+      }
+      setPersonalEditorial(result)
+      setPersonalPageIndex(0)
     })
   }
 
@@ -774,6 +807,90 @@ export function BookLabClient({
                 </div>
               )}
             </>
+          )}
+        </section>
+      )}
+
+      {selected && (
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <h2 className="mb-1 text-base font-semibold">PERSONAL EDITORIAL PAGE LAB</h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Compose automatiquement des pages à partir des MemoryBlocks et PhotoMemoryBlocks —
+            sans inventer de contenu ni appeler l&apos;IA pour remplir.
+          </p>
+
+          <div className="mb-4 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => preparePersonalEditorial()}
+              disabled={personalEditorialPending}
+            >
+              Composer les pages personnelles
+            </Button>
+          </div>
+
+          {personalEditorialError && (
+            <p className="mb-3 text-sm text-destructive">{personalEditorialError}</p>
+          )}
+
+          {personalEditorial && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-3 text-sm">
+                <p className="text-muted-foreground">
+                  {personalEditorial.blockCount} bloc(s) → {personalEditorial.pageCount} page(s)
+                </p>
+                <ul className="space-y-2">
+                  {personalEditorial.pages.map((p, i) => (
+                    <li key={p.pageKey}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-full rounded-lg border px-3 py-2 text-left",
+                          i === personalPageIndex
+                            ? "border-foreground bg-muted/50"
+                            : "border-border bg-background",
+                        )}
+                        onClick={() => setPersonalPageIndex(i)}
+                      >
+                        <span className="font-medium">Page personnelle {i + 1}</span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Layout : {p.layoutId}
+                          {p.isHero ? " · HERO" : ""} · poids {p.weight}
+                          <br />
+                          Sources :{" "}
+                          {[
+                            ...p.sourcePhotoIds.map((id) => `photo ${id}`),
+                            ...p.sourceMemoryIds.map((id) => `souvenir ${id}`),
+                          ].join(" · ") || "—"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-6">
+                {personalEditorial.pages[personalPageIndex] ? (
+                  <PagePreview>
+                    <BookPage
+                      palette={memoryPalette}
+                      showSafeArea={false}
+                      surface={resolveMemoryPageSurface(
+                        memoryPalette,
+                        personalEditorial.pages[personalPageIndex]!.visualRole,
+                      )}
+                    >
+                      <PersonalEditorialTemplate
+                        page={personalEditorial.pages[personalPageIndex]!.page}
+                        style={memoryStyle}
+                        palette={memoryPalette}
+                      />
+                    </BookPage>
+                  </PagePreview>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Aucune page à afficher.</p>
+                )}
+              </div>
+            </div>
           )}
         </section>
       )}

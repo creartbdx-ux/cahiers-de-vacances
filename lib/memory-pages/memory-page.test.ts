@@ -419,9 +419,10 @@ test("aucune correction générée — correctionRequired false", () => {
   assert.equal(arch.implementationStatus, "READY")
 })
 
-test("Blueprint MEMORY_TEXT_PAGE READY ; PHOTO_MEMORY_PAGE READY si chaîne complète", () => {
+test("Blueprint MEMORY_TEXT_PAGE READY ; PERSONAL_EDITORIAL_PAGE READY", () => {
   assert.equal(getArchetype("MEMORY_TEXT_PAGE").implementationStatus, "READY")
   assert.equal(getArchetype("PHOTO_MEMORY_PAGE").implementationStatus, "READY")
+  assert.equal(getArchetype("PERSONAL_EDITORIAL_PAGE").implementationStatus, "READY")
 
   const bp = buildBookBlueprint({
     bookProjectId: "proj",
@@ -466,27 +467,26 @@ test("Blueprint MEMORY_TEXT_PAGE READY ; PHOTO_MEMORY_PAGE READY si chaîne comp
     palettes: [PALETTE],
   })
 
-  const memoryPages = bp.pages.filter((p) => p.archetypeId === "MEMORY_TEXT_PAGE")
-  assert.ok(memoryPages.length >= 1)
-  assert.ok(memoryPages.every((p) => p.implementationStatus === "READY"))
-
-  const photoPages = bp.pages.filter((p) => p.archetypeId === "PHOTO_MEMORY_PAGE")
-  assert.ok(photoPages.length >= 1)
-  assert.ok(photoPages.every((p) => p.implementationStatus === "READY"))
+  const editorial = bp.pages.filter((p) => p.archetypeId === "PERSONAL_EDITORIAL_PAGE")
+  assert.ok(editorial.length >= 1)
+  assert.ok(editorial.every((p) => p.implementationStatus === "READY"))
 
   const memoryGap = bp.capabilityGaps.find((g) => g.family === "MEMORY")
-  assert.equal(memoryGap, undefined, "MEMORY READY => plus de gap MEMORY")
+  assert.equal(memoryGap, undefined)
 
   const photoGap = bp.capabilityGaps.find((g) => g.family === "PHOTO")
-  assert.equal(photoGap, undefined, "PHOTO READY => plus de gap PHOTO")
+  assert.equal(photoGap, undefined)
+
+  const editorialGap = bp.capabilityGaps.find((g) => g.family === "PERSONAL_EDITORIAL")
+  assert.equal(editorialGap, undefined)
 })
 
-test("Blueprint PHOTO_MEMORY_PAGE PARTIAL si photo sans texte", () => {
+test("Blueprint PHOTO weak-only pages restent PARTIAL", () => {
   const bp = buildBookBlueprint({
     bookProjectId: "proj-weak",
     seed: "bp-weak",
     profile: profile({
-      memories: [{ id: "m1", text: "Souvenir long pour le blueprint testing." }],
+      memories: [],
       photos: [
         {
           id: "ph-empty",
@@ -505,8 +505,8 @@ test("Blueprint PHOTO_MEMORY_PAGE PARTIAL si photo sans texte", () => {
     styles: STYLES,
     palettes: [PALETTE],
   })
-  const photoPages = bp.pages.filter((p) => p.archetypeId === "PHOTO_MEMORY_PAGE")
-  assert.ok(photoPages.every((p) => p.implementationStatus === "PARTIAL"))
+  const editorial = bp.pages.filter((p) => p.archetypeId === "PERSONAL_EDITORIAL_PAGE")
+  assert.ok(editorial.every((p) => p.implementationStatus === "PARTIAL"))
 })
 
 test("memory inexistant => échec sans invention", async () => {

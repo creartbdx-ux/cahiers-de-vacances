@@ -259,7 +259,12 @@ function StatsCard({ blueprint }: { blueprint: BookBlueprintV1 }) {
         <Stat label="Jeux principaux" value={String(s.mainGamePages)} />
         <Stat
           label="Pages personnelles"
-          value={String(s.byFamily.PERSONAL_GAME + s.photoPages + s.memoryPages)}
+          value={String(
+            s.byFamily.PERSONAL_GAME +
+              s.personalEditorialPages +
+              s.byFamily.MEMORY +
+              s.byFamily.PHOTO,
+          )}
         />
         <Stat label="Photos" value={String(s.photoPages)} />
         <Stat label="Souvenirs" value={String(s.memoryPages)} />
@@ -360,6 +365,7 @@ function familyLabel(family: PageFamily): string {
     PERSONAL_GAME: "Jeu / page personnelle",
     MEMORY: "Souvenir",
     PHOTO: "Photo",
+    PERSONAL_EDITORIAL: "Page personnelle",
     QUICK_GAME: "Jeu rapide",
     BREATHER: "Respiration",
     CORRECTION: "Correction",

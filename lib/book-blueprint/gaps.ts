@@ -16,6 +16,7 @@ export function computeCapabilityGaps(
 ): CapabilityGap[] {
   const familiesOfInterest: PageFamily[] = [
     "QUICK_GAME",
+    "PERSONAL_EDITORIAL",
     "MEMORY",
     "PHOTO",
     "PERSONAL_GAME",
@@ -87,9 +88,11 @@ function familyLabel(family: PageFamily): string {
     case "QUICK_GAME":
       return "Jeux rapides / activités légères"
     case "MEMORY":
-      return "Pages souvenirs"
+      return "Blocs souvenirs (HERO)"
     case "PHOTO":
-      return "Pages photo"
+      return "Blocs photo (HERO)"
+    case "PERSONAL_EDITORIAL":
+      return "Pages personnelles composites"
     case "PERSONAL_GAME":
       return "Pages personnelles ludiques"
     case "BREATHER":
@@ -108,9 +111,11 @@ function tagsForFamily(family: PageFamily): string[] {
     case "QUICK_GAME":
       return ["quick", "light", "activity"]
     case "MEMORY":
-      return ["memory", "narrative"]
+      return ["memory", "block"]
     case "PHOTO":
-      return ["photo", "layout"]
+      return ["photo", "block"]
+    case "PERSONAL_EDITORIAL":
+      return ["personal", "editorial", "composite"]
     case "PERSONAL_GAME":
       return ["personal", "interaction"]
     case "BREATHER":
@@ -125,8 +130,12 @@ function dataHints(
   family?: PageFamily,
 ): string[] {
   const hints: string[] = []
-  if (!family || family === "PHOTO") hints.push(`${data.photos} photo(s)`)
-  if (!family || family === "MEMORY") hints.push(`${data.memories} souvenir(s)`)
+  if (!family || family === "PHOTO" || family === "PERSONAL_EDITORIAL") {
+    hints.push(`${data.photos} photo(s)`)
+  }
+  if (!family || family === "MEMORY" || family === "PERSONAL_EDITORIAL") {
+    hints.push(`${data.memories} souvenir(s)`)
+  }
   if (!family || family === "PERSONAL_GAME" || family === "QUICK_GAME") {
     hints.push(`${data.personalFacts} fait(s) personnel(s)`)
   }
@@ -144,9 +153,11 @@ function recommendationFor(
     case "QUICK_GAME":
       return `Besoin de ${gap} pages de jeux rapides, particulièrement pour ${audience}.`
     case "MEMORY":
-      return `Besoin de ${gap} pages souvenirs encore non READY${data.memories ? ` — ${data.memories} souvenir(s) disponibles` : ""}.`
+      return `Besoin de ${gap} pages HERO souvenir encore non READY${data.memories ? ` — ${data.memories} souvenir(s) disponibles` : ""}.`
     case "PHOTO":
-      return `Besoin de ${gap} pages photo/mémoire (layout multi-photos encore partiel)${data.photos ? ` — ${data.photos} photo(s) disponibles` : ""}.`
+      return `Besoin de ${gap} pages HERO photo encore non READY${data.photos ? ` — ${data.photos} photo(s) disponibles` : ""}.`
+    case "PERSONAL_EDITORIAL":
+      return `Besoin de ${gap} pages personnelles composites encore non READY (${data.memories} souvenir(s), ${data.photos} photo(s)).`
     case "PERSONAL_GAME":
       return `Besoin de ${gap} pages personnelles ludiques adaptées à ${audience}.`
     case "BREATHER":

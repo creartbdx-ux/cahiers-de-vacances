@@ -1,4 +1,8 @@
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
+import {
+  collectPersonalBlocks,
+  composePersonalEditorialPages,
+} from "@/lib/personal-editorial"
 import type { CompositionTargets } from "./types"
 
 function clamp(n: number, min: number, max: number): number {
@@ -15,12 +19,14 @@ function countMemories(profile: BookProfileV1): number {
 
 /**
  * Soft composition targets for ~50 interior pages.
- * Always returns integers that can be reconciled to an exact total later.
+ * Photo/memory slots = block budgets; personalEditorialSlots = real pages after packing.
  */
 export function resolveCompositionTargets(input: {
   profile: BookProfileV1
   richnessLevel: RichnessLevel
   targetInteriorPages: number
+  /** Seed used to estimate packed personal pages deterministically. */
+  seed?: string
 }): CompositionTargets {
   const { profile, richnessLevel, targetInteriorPages: N } = input
   const scale = N / 50
@@ -29,7 +35,6 @@ export function resolveCompositionTargets(input: {
   const memories = countMemories(profile)
   const facts = profile.personalFacts?.length ?? 0
 
-  // Soft midpoints for N=50, then scaled.
   let mainGames = Math.round(25 * scale)
   let personalBlock = Math.round(10 * scale)
   let quickLight = Math.round(5 * scale)
@@ -38,7 +43,6 @@ export function resolveCompositionTargets(input: {
   const closing = 1
   let estimatedCorrectionPages = Math.round(5 * scale)
 
-  // Audience bias
   if (audience === "ME" || audience === "OTHER_PERSON") {
     mainGames = Math.round(26 * scale)
     personalBlock = Math.round(9 * scale)
@@ -53,7 +57,6 @@ export function resolveCompositionTargets(input: {
     quickLight = Math.round(6 * scale)
   }
 
-  // Richness — bump personal only when data supports it
   if (richnessLevel === "RICH") {
     personalBlock += Math.round(2 * scale)
     mainGames -= Math.round(1 * scale)
@@ -62,13 +65,12 @@ export function resolveCompositionTargets(input: {
     mainGames += Math.round(2 * scale)
   }
 
-  // Photos
+  // Block budgets (not pages)
   let photoSlots = 0
   if (photos === 0) photoSlots = 0
   else if (photos <= 3) photoSlots = clamp(photos, 1, Math.round(3 * scale))
   else photoSlots = clamp(Math.min(photos, Math.round(6 * scale)), 2, Math.round(7 * scale))
 
-  // Memories
   let memorySlots = 0
   if (memories === 0) memorySlots = 0
   else if (memories <= 2) memorySlots = memories
@@ -78,7 +80,6 @@ export function resolveCompositionTargets(input: {
     memorySlots = clamp(memorySlots + 1, 0, Math.round(7 * scale))
   }
 
-  // Personal games (ludic) — moderate for ME/OTHER
   let personalGameSlots = 0
   if (audience === "ME" || audience === "OTHER_PERSON") {
     personalGameSlots = richnessLevel === "RICH" ? Math.round(2 * scale) : Math.round(1 * scale)
@@ -88,23 +89,35 @@ export function resolveCompositionTargets(input: {
     personalGameSlots = Math.round(5 * scale)
   }
 
-  // Cap ready theme games — do NOT fill the book with 3 engines only
   const maxReadyThemeGames = clamp(Math.round(12 * scale), 8, 15)
 
-  // Reconcile personal block = photos + memories + personal games (+ leftover reflection)
-  const personalCore = photoSlots + memorySlots + personalGameSlots
+  // Compose blocks → real personal editorial page count
+  const blocks = collectPersonalBlocks({
+    profile,
+    maxMemories: memorySlots || memories,
+    maxPhotos: photoSlots || photos,
+  })
+  const composed = composePersonalEditorialPages(
+    blocks,
+    input.seed ?? "composition-targets",
+  )
+  const personalEditorialSlots = composed.length
+
+  const personalCore = personalEditorialSlots + personalGameSlots
   if (personalCore > personalBlock) {
     personalBlock = personalCore
   }
 
-  // Ensure soft ranges roughly hold when scaled to 50
   mainGames = clamp(mainGames, Math.round(20 * scale), Math.round(28 * scale))
   personalBlock = clamp(personalBlock, Math.round(6 * scale), Math.round(14 * scale))
   quickLight = clamp(quickLight, Math.round(4 * scale), Math.round(7 * scale))
   breathers = clamp(breathers, Math.round(1 * scale), Math.round(3 * scale))
-  estimatedCorrectionPages = clamp(estimatedCorrectionPages, Math.round(4 * scale), Math.round(7 * scale))
+  estimatedCorrectionPages = clamp(
+    estimatedCorrectionPages,
+    Math.round(4 * scale),
+    Math.round(7 * scale),
+  )
 
-  // Fit into N - opening - closing (corrections estimated separately)
   const fixed = opening + closing
   let content = mainGames + personalBlock + quickLight + breathers
   const room = N - fixed - estimatedCorrectionPages
@@ -113,7 +126,6 @@ export function resolveCompositionTargets(input: {
     if (delta > 0) {
       mainGames += delta
     } else {
-      // Prefer trimming missing variety / main first, then quick
       let need = -delta
       const trimMain = Math.min(need, Math.max(0, mainGames - Math.round(20 * scale)))
       mainGames -= trimMain
@@ -124,6 +136,8 @@ export function resolveCompositionTargets(input: {
       if (need > 0) breathers = Math.max(1, breathers - need)
     }
   }
+
+  void facts
 
   return {
     opening,
@@ -136,6 +150,7 @@ export function resolveCompositionTargets(input: {
     maxReadyThemeGames,
     photoSlots,
     memorySlots,
+    personalEditorialSlots,
     personalGameSlots,
   }
 }

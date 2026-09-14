@@ -15,8 +15,11 @@ export type ScoredIntent = {
   reason: string
   /** Temporary id before final slotId assignment. */
   tempId: string
-  /** Optional override (e.g. PHOTO_MEMORY weak source => PARTIAL). */
+  /** Optional override (e.g. weak photo chain => PARTIAL). */
   implementationStatusOverride?: ImplementationStatus
+  personalLayoutId?: string
+  sourceMemoryIds?: string[]
+  sourcePhotoIds?: string[]
 }
 
 /**
@@ -34,6 +37,7 @@ export function scoreIntentPlacement(
 
   if (prev?.family === "PHOTO" && a.family === "PHOTO") score -= 120
   if (prev?.family === "MEMORY" && a.family === "MEMORY") score -= 120
+  if (prev?.family === "PERSONAL_EDITORIAL" && a.family === "PERSONAL_EDITORIAL") score -= 50
   if (prev?.archetypeId === a.id) score -= 40
   if (prev?.technicalEngine && a.technicalEngine && prev.technicalEngine === a.technicalEngine) {
     score -= 55

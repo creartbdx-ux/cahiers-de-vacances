@@ -13,6 +13,7 @@ export type PageFamily =
   | "PERSONAL_GAME"
   | "MEMORY"
   | "PHOTO"
+  | "PERSONAL_EDITORIAL"
   | "QUICK_GAME"
   | "BREATHER"
   | "CORRECTION"
@@ -79,6 +80,10 @@ export interface BlueprintPageSlot {
   density: PageDensity
   section: BlueprintSectionKind
   reason: string
+  /** PERSONAL_EDITORIAL_PAGE layout when composed. */
+  personalLayoutId?: string
+  sourceMemoryIds?: string[]
+  sourcePhotoIds?: string[]
 }
 
 export interface BlueprintCover {
@@ -114,6 +119,7 @@ export interface BlueprintStats {
   missingPercent: number
   photoPages: number
   memoryPages: number
+  personalEditorialPages: number
   mainGamePages: number
   quickGamePages: number
   correctionPages: number
@@ -149,8 +155,7 @@ export interface BookBlueprintV1 {
   stats: BlueprintStats
   capabilityGaps: CapabilityGap[]
   /**
-   * Per-memory full-page fitness (no regrouping yet).
-   * WEAK = SHORT without photo — better later as multi-snippet / photo page.
+   * Per-memory full-page fitness (blocks may still be grouped on PERSONAL_EDITORIAL pages).
    */
   memoryContentHints: MemoryContentHint[]
 }
@@ -165,7 +170,11 @@ export interface CompositionTargets {
   /** Soft estimate before packing. */
   estimatedCorrectionPages: number
   maxReadyThemeGames: number
+  /** Max memory blocks to collect (not pages). */
   photoSlots: number
+  /** Max photo blocks to collect (not pages). */
   memorySlots: number
+  /** Composed PERSONAL_EDITORIAL pages (real page count). */
+  personalEditorialSlots: number
   personalGameSlots: number
 }

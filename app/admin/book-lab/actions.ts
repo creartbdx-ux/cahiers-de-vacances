@@ -21,6 +21,12 @@ import { getActivePalettes } from "@/lib/data/assets"
 import { getStyles } from "@/lib/data/reference"
 import type { MiniBookVisualIdentity } from "@/lib/mini-book/types"
 import { buildMemoryPage, buildPhotoMemoryPage } from "@/lib/memory-pages"
+import {
+  collectPersonalBlocks,
+  composePersonalEditorialPages,
+  pageProvenance,
+  type PersonalEditorialPageV1,
+} from "@/lib/personal-editorial"
 
 export type BookLabSlotSummary = {
   slotId: string
@@ -593,6 +599,108 @@ export async function prepareBookLabPhotoMemoryPageAction(input: {
     photoUrl: result.source.signedUrl,
     visualIdentity,
     visualRole: roles[roleIndex]!,
+  }
+}
+
+export type BookLabPersonalEditorialResult =
+  | {
+      ok: true
+      blockCount: number
+      pageCount: number
+      pages: Array<{
+        pageKey: string
+        layoutId: PersonalEditorialPageV1["layoutId"]
+        visualRole: PersonalEditorialPageV1["visualRole"]
+        weight: number
+        isHero: boolean
+        sourceMemoryIds: string[]
+        sourcePhotoIds: string[]
+        page: PersonalEditorialPageV1
+      }>
+      visualIdentity: MiniBookVisualIdentity
+    }
+  | { ok: false; message: string }
+
+/**
+ * Compose PERSONAL_EDITORIAL pages from profile blocks (no extra IA for composition).
+ */
+export async function prepareBookLabPersonalEditorialAction(input: {
+  bookProjectId: string
+  seed: string
+}): Promise<BookLabPersonalEditorialResult> {
+  const { user, profile: authProfile } = await getCurrentUser()
+  if (!user || authProfile?.role !== "admin") {
+    return { ok: false, message: "Accès admin requis." }
+  }
+
+  const project = await getBookProject(input.bookProjectId)
+  if (!project) return { ok: false, message: "Projet introuvable." }
+
+  const parsed = parseQuestionnairePayload(project.questionnaire_data)
+  if (!parsed.profile) {
+    return { ok: false, message: "BookProfileV1 manquant sur ce projet." }
+  }
+
+  let richnessLevel = parsed.richnessLevel
+  if (!richnessLevel && parsed.questionnaire) {
+    richnessLevel = calculateProfileRichness(parsed.questionnaire, parsed.profile).level
+  }
+  if (
+    !canUseInEditorialLab({
+      status: project.status,
+      profile: parsed.profile,
+      richnessLevel: richnessLevel ?? null,
+    })
+  ) {
+    return { ok: false, message: "Projet non éligible au Book Lab." }
+  }
+
+  const [palettes, styles] = await Promise.all([getActivePalettes(), getStyles()])
+  const seed = input.seed.trim() || "lab-seed-1"
+  const visualIdentity = resolveBookVisualIdentity({
+    profile: parsed.profile,
+    seed,
+    styles,
+    palettes,
+  })
+
+  const photoSignedUrls: Record<string, string> = {}
+  const paths = (parsed.profile.photos ?? [])
+    .filter((p) => p.useAuthorized && p.storagePath)
+    .map((p) => p.storagePath as string)
+  if (paths.length) {
+    const byPath = await createBookPhotoSignedUrls(paths)
+    for (const p of parsed.profile.photos ?? []) {
+      if (p.storagePath && byPath[p.storagePath]) {
+        photoSignedUrls[p.id] = byPath[p.storagePath]!
+      }
+    }
+  }
+
+  const blocks = collectPersonalBlocks({
+    profile: parsed.profile,
+    photoSignedUrls,
+  })
+  const pages = composePersonalEditorialPages(blocks, `${seed}:personal-editorial-lab`)
+
+  return {
+    ok: true,
+    blockCount: blocks.length,
+    pageCount: pages.length,
+    pages: pages.map((page) => {
+      const prov = pageProvenance(page)
+      return {
+        pageKey: page.pageKey,
+        layoutId: page.layoutId,
+        visualRole: page.visualRole,
+        weight: page.weight,
+        isHero: page.isHero,
+        sourceMemoryIds: prov.sourceMemoryIds,
+        sourcePhotoIds: prov.sourcePhotoIds,
+        page,
+      }
+    }),
+    visualIdentity,
   }
 }
 

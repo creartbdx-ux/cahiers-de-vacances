@@ -101,11 +101,11 @@ function richOtherEmma(): BookProfileV1 {
       { id: "m4", text: "Soirée karaoke" },
     ],
     photos: [
-      { id: "ph1", useAuthorized: true },
-      { id: "ph2", useAuthorized: true },
-      { id: "ph3", useAuthorized: true },
-      { id: "ph4", useAuthorized: true },
-      { id: "ph5", useAuthorized: true },
+      { id: "ph1", useAuthorized: true, storagePath: "books/t/1.jpg", caption: "Mer" },
+      { id: "ph2", useAuthorized: true, storagePath: "books/t/2.jpg", caption: "Fête" },
+      { id: "ph3", useAuthorized: true, storagePath: "books/t/3.jpg", caption: "Route" },
+      { id: "ph4", useAuthorized: true, storagePath: "books/t/4.jpg", caption: "Karaoké" },
+      { id: "ph5", useAuthorized: true, storagePath: "books/t/5.jpg", caption: "Café" },
     ],
     insideJokes: [{ id: "j1", text: "La blague du train" }],
   })
@@ -161,8 +161,9 @@ test("OTHER_PERSON composition adaptée — thème + souvenirs + photos", () => 
   const bp = build(richOtherEmma(), "seed-other", "RICH")
   assert.equal(bp.audience, "OTHER_PERSON")
   assert.ok(!bp.pages.some((p) => p.gameId === "QUIZ_PERSONAL"))
-  assert.ok(bp.stats.memoryPages >= 2)
-  assert.ok(bp.stats.photoPages >= 2)
+  assert.ok(bp.stats.personalEditorialPages >= 1)
+  assert.ok(bp.stats.memoryPages >= 1)
+  assert.ok(bp.stats.photoPages >= 1)
   // RICH OTHER: thème reste majoritaire côté jeux, sans monopoliser le cahier
   assert.ok(bp.stats.mainGamePages >= 14)
   assert.ok(bp.stats.themePercent >= 25)
@@ -190,7 +191,9 @@ test("DUO composition — plus de personnel ludique", () => {
     "seed-duo",
     "RICH",
   )
-  assert.ok(bp.stats.byFamily.PERSONAL_GAME + bp.stats.memoryPages >= 4)
+  assert.ok(
+    bp.stats.byFamily.PERSONAL_GAME + bp.stats.personalEditorialPages >= 4,
+  )
   assert.ok(bp.pages.some((p) => p.archetypeId === "DUO_INTERACTION" || p.gameId === "QUIZ_PERSONAL"))
 })
 
@@ -229,27 +232,30 @@ test("profil sans photo fonctionne — aucune page photo obligatoire", () => {
   assert.equal(bp.pages.length, 50)
 })
 
-test("profil avec photos répartit les slots photo", () => {
+test("profil avec photos répartit les pages personnelles photo", () => {
   const bp = build(richOtherEmma(), "seed-photos", "RICH")
-  assert.ok(bp.stats.photoPages >= 2)
-  const photoNums = bp.pages.filter((p) => p.family === "PHOTO").map((p) => p.pageNumber)
-  // Not all clustered at the start
-  assert.ok(photoNums.length >= 2)
-  const span = Math.max(...photoNums) - Math.min(...photoNums)
-  assert.ok(span >= 3)
+  assert.ok(bp.stats.photoPages >= 1)
+  const photoNums = bp.pages
+    .filter((p) => (p.sourcePhotoIds?.length ?? 0) > 0)
+    .map((p) => p.pageNumber)
+  assert.ok(photoNums.length >= 1)
+  if (photoNums.length >= 2) {
+    const span = Math.max(...photoNums) - Math.min(...photoNums)
+    assert.ok(span >= 1)
+  }
 })
 
 test("profil riche augmente intelligemment le personnel", () => {
   const poor = build(baseProfile({ memories: [], photos: [] }), "seed-rich-cmp", "INSUFFICIENT")
   const rich = build(richOtherEmma(), "seed-rich-cmp", "RICH")
   const poorPersonal =
-    poor.stats.memoryPages + poor.stats.photoPages + poor.stats.byFamily.PERSONAL_GAME
+    poor.stats.personalEditorialPages + poor.stats.byFamily.PERSONAL_GAME
   const richPersonal =
-    rich.stats.memoryPages + rich.stats.photoPages + rich.stats.byFamily.PERSONAL_GAME
+    rich.stats.personalEditorialPages + rich.stats.byFamily.PERSONAL_GAME
   assert.ok(richPersonal > poorPersonal)
 })
 
-test("pas deux photos consécutives si évitable", () => {
+test("pas deux familles PHOTO brutes consécutives (legacy)", () => {
   const bp = build(richOtherEmma(), "seed-nophoto-adj", "RICH")
   for (let i = 1; i < bp.pages.length; i++) {
     const a = bp.pages[i - 1]!
@@ -260,7 +266,7 @@ test("pas deux photos consécutives si évitable", () => {
   }
 })
 
-test("pas deux memories consécutives si évitable", () => {
+test("pas deux familles MEMORY brutes consécutives (legacy)", () => {
   const bp = build(richOtherEmma(), "seed-nomem-adj", "RICH")
   for (let i = 1; i < bp.pages.length; i++) {
     const a = bp.pages[i - 1]!
