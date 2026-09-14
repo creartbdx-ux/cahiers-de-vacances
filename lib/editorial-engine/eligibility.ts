@@ -5,6 +5,13 @@ import { PERSONAL_THRESHOLDS } from "./requirements"
 import type { SourceInventory } from "./types"
 import { EDITORIAL_V1_GAME_IDS, type EditorialV1GameId, type PersonalizationType } from "./types"
 
+/** Editorial: QUIZ_PERSONAL is a poor fit when the reader plays about themselves. */
+export const QUIZ_PERSONAL_REJECT_ME =
+  "Un quiz sur soi-même apporte peu de valeur ludique."
+
+export const QUIZ_PERSONAL_REJECT_OTHER_PERSON =
+  "Le destinataire étant également le joueur, privilégier un quiz thématique et utiliser les données personnelles dans des jeux plus adaptés."
+
 export interface EligibilityResult {
   gameId: EditorialV1GameId
   eligible: boolean
@@ -94,13 +101,23 @@ export function evaluateEligibility(
         ? `Assez de mots personnels normalisables (${n}).`
         : `Données insuffisantes pour mots mêlés personnalisés (${n}/${min}).`
     } else if (gameId === "QUIZ_PERSONAL") {
-      const n = inventory.quizFacts.length
-      const { min, ideal } = PERSONAL_THRESHOLDS.QUIZ_PERSONAL
-      ok = n >= min
-      strength = Math.min(1, n / ideal)
-      reason = ok
-        ? `Assez de faits personnels distincts (${n}).`
-        : `Faits personnels insuffisants pour un quiz (${n}/${min}).`
+      // ME / OTHER_PERSON: reader would quiz themselves — poor ludic value.
+      // DUO / GROUP: cross-person / collective quiz remains fun.
+      if (profile.audience === "ME") {
+        ok = false
+        reason = QUIZ_PERSONAL_REJECT_ME
+      } else if (profile.audience === "OTHER_PERSON") {
+        ok = false
+        reason = QUIZ_PERSONAL_REJECT_OTHER_PERSON
+      } else {
+        const n = inventory.quizFacts.length
+        const { min, ideal } = PERSONAL_THRESHOLDS.QUIZ_PERSONAL
+        ok = n >= min
+        strength = Math.min(1, n / ideal)
+        reason = ok
+          ? `Assez de faits personnels / collectifs pour un quiz (${n}).`
+          : `Faits personnels insuffisants pour un quiz (${n}/${min}).`
+      }
     } else if (gameId === "TRUE_FALSE_PERSONAL") {
       const n = inventory.trueFalseFacts.length
       const { min, ideal } = PERSONAL_THRESHOLDS.TRUE_FALSE_PERSONAL
@@ -120,6 +137,16 @@ export function evaluateEligibility(
       reason = ok
         ? `Univers thématiques disponibles (${n}).`
         : "Aucun intérêt/univers pour un jeu thématique."
+
+      // Fallback: when QUIZ_PERSONAL is editorially unsuitable, prefer QUIZ_THEME.
+      if (
+        ok &&
+        gameId === "QUIZ_THEME" &&
+        (profile.audience === "ME" || profile.audience === "OTHER_PERSON")
+      ) {
+        strength = Math.min(1, strength + 0.35)
+        reason = `Univers thématiques disponibles (${n}) — favorisé car un quiz personnel est peu adapté à cette audience.`
+      }
     }
 
     if (!ok) {

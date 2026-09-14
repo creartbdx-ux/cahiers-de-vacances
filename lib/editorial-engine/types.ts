@@ -22,6 +22,13 @@ export type EditorialV1GameId = (typeof EDITORIAL_V1_GAME_IDS)[number]
 
 export type PersonalizationType = "PERSONAL" | "THEME"
 
+/**
+ * PERSONAL — game content is driven directly by personal facts / memories / jokes.
+ * THEME — game content tests general knowledge, but the theme/universe is chosen
+ * from the recipient's structured interests (still a form of personalization,
+ * without asking them to quiz themselves on their own preferences).
+ */
+
 export type ContentRequirementType =
   | "CROSSWORD_CONTENT"
   | "WORDSEARCH_CONTENT"

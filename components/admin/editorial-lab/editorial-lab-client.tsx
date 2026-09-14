@@ -426,8 +426,15 @@ export function EditorialLabClient({
                 <ul className="space-y-2 text-sm">
                   {plan.rejectedGames.map((r) => (
                     <li key={r.gameId} className="rounded-lg border border-border p-3">
-                      <p className="font-medium">{r.gameId}</p>
-                      <p className="text-muted-foreground">{r.reason}</p>
+                      <p className="font-medium">
+                        {r.gameId === "QUIZ_PERSONAL" ? "Quiz personnalisé" : r.gameId}
+                      </p>
+                      <p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">
+                        Non éligible
+                      </p>
+                      <p className="mt-1 text-muted-foreground">
+                        <span className="text-foreground">Raison :</span> {r.reason}
+                      </p>
                     </li>
                   ))}
                 </ul>

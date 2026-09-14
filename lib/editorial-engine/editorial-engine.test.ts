@@ -356,3 +356,116 @@ test("plan V1 borné et versionné", () => {
   assert.ok(plan.selectedGames.length <= 8)
   assert.ok(plan.selectedGames.every((s) => s.templateId && s.seed && s.contentRequirements))
 })
+
+test("ME -> QUIZ_PERSONAL rejeté pour raison éditoriale", () => {
+  const profile = baseProfile({
+    audience: "ME",
+    personalFacts: richFacts("me", 10),
+    memories: [{ id: "m1", text: "Souvenir détaillé d'un voyage" }],
+  })
+  const inv = buildSourceInventory(profile)
+  const { eligible, rejected } = evaluateEligibility(profile, inv, CATALOG)
+  assert.ok(!eligible.some((e) => e.gameId === "QUIZ_PERSONAL"))
+  const rej = rejected.find((r) => r.gameId === "QUIZ_PERSONAL")
+  assert.ok(rej)
+  assert.match(rej!.reason, /soi-même|valeur ludique/i)
+})
+
+test("OTHER_PERSON -> QUIZ_PERSONAL rejeté ; QUIZ_THEME reste éligible", () => {
+  const profile = baseProfile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "p_emma", firstName: "Emma", ageBracket: "18-25" }],
+    personalFacts: richFacts("emma", 8),
+    sharedProfile: { interestUniverseIds: ["CULTURE_POP", "MUSIC", "FOOD"] },
+  })
+  const inv = buildSourceInventory(profile)
+  const { eligible, rejected } = evaluateEligibility(profile, inv, CATALOG)
+  assert.ok(!eligible.some((e) => e.gameId === "QUIZ_PERSONAL"))
+  const rej = rejected.find((r) => r.gameId === "QUIZ_PERSONAL")
+  assert.ok(rej)
+  assert.match(rej!.reason, /destinataire|thématique/i)
+  assert.ok(eligible.some((e) => e.gameId === "QUIZ_THEME"))
+
+  const plan = buildEditorialPlan({
+    profile,
+    seed: "emma-theme-1",
+    games: CATALOG,
+    richnessLevel: "RICH",
+  })
+  assert.ok(!plan.selectedGames.some((s) => s.gameId === "QUIZ_PERSONAL"))
+  assert.ok(plan.selectedGames.some((s) => s.gameId === "QUIZ_THEME"))
+  assert.ok(plan.rejectedGames.some((r) => r.gameId === "QUIZ_PERSONAL"))
+})
+
+test("DUO riche -> QUIZ_PERSONAL peut être éligible", () => {
+  const profile = baseProfile({
+    audience: "DUO",
+    creatorIsParticipant: true,
+    duoType: "COUPLE",
+    participants: [
+      { id: "p1", firstName: "Alex", ageBracket: "26-35" },
+      { id: "p2", firstName: "Sam", ageBracket: "26-35" },
+    ],
+    individualProfiles: [
+      { participantId: "p1", traits: ["curieux"] },
+      { participantId: "p2", traits: ["taquin"] },
+    ],
+    personalFacts: richFacts("duo", 8).map((f, i) => ({
+      ...f,
+      participantIds: [i % 2 === 0 ? "p1" : "p2"],
+    })),
+    memories: [
+      { id: "m1", text: "Premier voyage ensemble à Lisbonne", participantIds: ["p1", "p2"] },
+      { id: "m2", text: "Soirée improvisée sous la pluie", participantIds: ["p1", "p2"] },
+    ],
+  })
+  const inv = buildSourceInventory(profile)
+  const { eligible } = evaluateEligibility(profile, inv, CATALOG)
+  assert.ok(eligible.some((e) => e.gameId === "QUIZ_PERSONAL"))
+})
+
+test("GROUP riche -> QUIZ_PERSONAL peut être éligible", () => {
+  const ids = ["p1", "p2", "p3"]
+  const profile = baseProfile({
+    audience: "GROUP",
+    creatorIsParticipant: true,
+    participants: ids.map((id, i) => ({
+      id,
+      firstName: `P${i + 1}`,
+      ageBracket: "26-35",
+    })),
+    individualProfiles: ids.map((id) => ({ participantId: id, traits: ["complice"] })),
+    personalFacts: richFacts("grp", 8).map((f, i) => ({
+      ...f,
+      participantIds: [ids[i % ids.length]!],
+    })),
+    memories: [
+      { id: "m1", text: "Week-end de la bande à la mer", participantIds: ids },
+    ],
+    insideJokes: [{ id: "j1", text: "La blague du poulpe", participantIds: ids }],
+  })
+  const inv = buildSourceInventory(profile)
+  const { eligible } = evaluateEligibility(profile, inv, CATALOG)
+  assert.ok(eligible.some((e) => e.gameId === "QUIZ_PERSONAL"))
+})
+
+test("rejet QUIZ_PERSONAL ME/OTHER ne réduit pas inutilement les slots si THEME existe", () => {
+  const profile = baseProfile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "p_emma", firstName: "Emma" }],
+    personalFacts: richFacts("slots", 10),
+    sharedProfile: { interestUniverseIds: ["MOUNTAIN", "FOOD", "MUSIC"] },
+  })
+  const plan = buildEditorialPlan({
+    profile,
+    seed: "slots-other",
+    games: CATALOG,
+    richnessLevel: "RICH",
+    maxSlots: 8,
+  })
+  assert.ok(plan.selectedGames.length >= 5)
+  assert.ok(plan.selectedGames.some((s) => s.gameId === "QUIZ_THEME"))
+  assert.ok(!plan.selectedGames.some((s) => s.gameId === "QUIZ_PERSONAL"))
+})

@@ -14,5 +14,5 @@ export {
 } from "./types"
 export { buildEditorialPlan } from "./planner"
 export { buildSourceInventory, filterForbiddenText, isShortAnswer } from "./sources"
-export { evaluateEligibility } from "./eligibility"
+export { evaluateEligibility, QUIZ_PERSONAL_REJECT_ME, QUIZ_PERSONAL_REJECT_OTHER_PERSON } from "./eligibility"
 export { buildContentRequirements, targetPersonalRatio } from "./requirements"
