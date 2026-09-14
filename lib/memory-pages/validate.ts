@@ -18,7 +18,7 @@ function normalize(s: string): string {
 /**
  * Validate editorial output against the selected memory source.
  * Blocks factual invention of place / wrong memory id / empty body.
- * Does not require inflating short sources.
+ * MEMORY_TEXT_PAGE must not carry arbitrary photo ids.
  */
 export function validateMemoryEditorial(input: {
   editorial: MemoryPageEditorial
@@ -55,7 +55,6 @@ export function validateMemoryEditorial(input: {
     if (words > maxWords + 8) {
       errors.push(`Body disproportionné par rapport à la source (${words} > ${maxWords}).`)
     }
-    // Only require body not to collapse a RICH/MEDIUM source; SHORT may stay short.
     if (
       density !== "SHORT" &&
       sourceWords >= 20 &&
@@ -73,13 +72,18 @@ export function validateMemoryEditorial(input: {
     }
   }
 
-  for (const id of editorial.sourcePhotoIds) {
-    if (!source.linkedPhotoIds.includes(id)) {
-      const photo = profile.photos.find((p) => p.id === id && p.useAuthorized)
-      if (!photo) {
-        errors.push(`Photo ${id} non autorisée / absente.`)
+  if (editorial.sourcePhotoIds.length) {
+    for (const id of editorial.sourcePhotoIds) {
+      if (!source.linkedPhotoIds.includes(id)) {
+        errors.push(
+          `Photo ${id} non liée explicitement au souvenir (pas d'association heuristique).`,
+        )
       }
     }
+  }
+
+  if (editorial.variant !== "TEXT_ONLY" && !editorial.sourcePhotoIds.length) {
+    // Variant is typed as TEXT_ONLY only — defensive.
   }
 
   if (errors.length) return { ok: false, errors }

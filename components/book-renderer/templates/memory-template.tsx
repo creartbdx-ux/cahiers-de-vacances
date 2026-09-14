@@ -6,9 +6,8 @@ import type { Palette } from "@/lib/supabase/types"
 import type { MemoryDensity, MemoryPageVariant } from "@/lib/memory-pages/types"
 
 /**
- * MEMORY_PAGE V1 — editorial memory page (not a game).
+ * MEMORY_TEXT_PAGE V1 — editorial memory page (not a game, no heuristic photo).
  * TEXT_ONLY adapts to density: SHORT (quote/typo), MEDIUM (classic), RICH (longer body).
- * Never shows a "photo manquante" placeholder.
  */
 export function MemoryTemplate({
   title,
@@ -20,8 +19,6 @@ export function MemoryTemplate({
   visualRole: _visualRole = "LIGHT",
   variant = "TEXT_ONLY",
   density = "MEDIUM",
-  photoUrl,
-  photoCaption,
 }: {
   title: string
   body: string
@@ -32,89 +29,16 @@ export function MemoryTemplate({
   visualRole?: VisualRole
   variant?: MemoryPageVariant
   density?: MemoryDensity
+  /** @deprecated MEMORY_TEXT_PAGE no longer renders photos. Ignored. */
   photoUrl?: string | null
+  /** @deprecated Ignored. */
   photoCaption?: string | null
 }) {
   void _palette
   void _visualRole
-  const showPhoto = variant === "PHOTO" && Boolean(photoUrl)
+  void variant
   const decor: CSSProperties = {
     borderRadius: style.badgeRadius === 999 ? 999 : style.frameRadius,
-  }
-
-  if (showPhoto) {
-    return (
-      <div
-        className="flex h-full w-full flex-col"
-        style={{ gap: 18 }}
-        data-memory-variant="PHOTO"
-        data-memory-density={density}
-      >
-        <div
-          className="relative overflow-hidden"
-          style={{
-            ...decor,
-            flex: "0 0 auto",
-            height: density === "SHORT" ? 380 : 340,
-            border: `${style.frameBorderWidth}px solid ${bookColor.dark}`,
-            backgroundColor: "color-mix(in srgb, var(--book-secondary) 12%, var(--book-light))",
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={photoUrl!}
-            alt=""
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-          />
-        </div>
-
-        <header className="flex flex-col" style={{ gap: 8 }}>
-          {(eyebrow || place) && (
-            <p
-              className={style.gameLabelClassName}
-              style={{
-                fontSize: 11,
-                letterSpacing: "0.22em",
-                color: "var(--book-page-band, var(--book-secondary))",
-              }}
-            >
-              {eyebrow || place}
-            </p>
-          )}
-          <h1
-            className={style.titleClassName}
-            style={{ fontSize: 36, color: bookColor.primary, lineHeight: 1.05, maxWidth: 520 }}
-          >
-            {title}
-          </h1>
-        </header>
-
-        <p
-          className={style.instructionClassName}
-          style={{
-            fontSize: density === "SHORT" ? 18 : 16,
-            color: bookColor.dark,
-            lineHeight: 1.55,
-            maxWidth: 540,
-            opacity: 0.92,
-          }}
-        >
-          {body}
-        </p>
-
-        {photoCaption ? (
-          <p className="font-sans" style={{ fontSize: 12, color: bookColor.dark, opacity: 0.55 }}>
-            {photoCaption}
-          </p>
-        ) : null}
-
-        {place && eyebrow && place !== eyebrow ? (
-          <p className="font-sans" style={{ fontSize: 12, color: bookColor.dark, opacity: 0.5 }}>
-            {place}
-          </p>
-        ) : null}
-      </div>
-    )
   }
 
   if (density === "SHORT") {
@@ -149,7 +73,10 @@ export function MemoryTemplate({
           </span>
         </div>
 
-        <div className="flex flex-1 flex-col items-center justify-center text-center" style={{ gap: 22, padding: "24px 12px" }}>
+        <div
+          className="flex flex-1 flex-col items-center justify-center text-center"
+          style={{ gap: 22, padding: "24px 12px" }}
+        >
           {(eyebrow || place) && (
             <p
               className={style.gameLabelClassName}
@@ -225,7 +152,10 @@ export function MemoryTemplate({
 
   const paragraphs =
     density === "RICH"
-      ? body.split(/\n\n+/).map((p) => p.trim()).filter(Boolean)
+      ? body
+          .split(/\n\n+/)
+          .map((p) => p.trim())
+          .filter(Boolean)
       : [body]
   const bodySize = density === "RICH" ? 16 : 17
   const titleSize = density === "RICH" ? 42 : 48
@@ -324,7 +254,10 @@ export function MemoryTemplate({
             {place}
           </span>
         ) : (
-          <span aria-hidden style={{ width: 28, height: 28, ...decor, backgroundColor: bookColor.primary }} />
+          <span
+            aria-hidden
+            style={{ width: 28, height: 28, ...decor, backgroundColor: bookColor.primary }}
+          />
         )}
       </div>
     </div>

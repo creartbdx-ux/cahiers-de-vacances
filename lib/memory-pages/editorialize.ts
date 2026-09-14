@@ -1,12 +1,7 @@
 import type { AudienceType, BookProfileV1 } from "@/lib/questionnaire/types"
 import type { ContentGenerationProvider, JsonSchemaObject } from "@/lib/content-generation/types"
 import { createDefaultContentGenerationProvider } from "@/lib/content-generation/provider"
-import type {
-  MemoryDensity,
-  MemoryPageEditorial,
-  MemoryPageSource,
-  MemoryPageVariant,
-} from "./types"
+import type { MemoryDensity, MemoryPageEditorial, MemoryPageSource } from "./types"
 import { MEMORY_PAGE_FALLBACK_TITLE } from "./types"
 import {
   classifyMemoryDensity,
@@ -38,11 +33,8 @@ function participantFirstNames(
 function fallbackEditorial(input: {
   source: MemoryPageSource
   audience: AudienceType
-  variant: MemoryPageVariant
-  photoId: string | null
   density: MemoryDensity
   fullPageRecommended: boolean
-  hasRenderablePhoto: boolean
 }): MemoryPageEditorial {
   const maxWords = maxBodyWordsForSource(input.source.originalText, input.density)
   return {
@@ -50,9 +42,9 @@ function fallbackEditorial(input: {
     eyebrow: input.source.place?.trim() || null,
     body: clampBody(input.source.originalText, maxWords),
     sourceMemoryId: input.source.memoryId,
-    sourcePhotoIds: input.photoId ? [input.photoId] : [],
+    sourcePhotoIds: [],
     place: input.source.place?.trim() || null,
-    variant: input.variant,
+    variant: "TEXT_ONLY",
     density: input.density,
     fullPageRecommended: input.fullPageRecommended,
     usedAi: false,
@@ -102,42 +94,29 @@ function densityBodyGuidance(density: MemoryDensity, sourceWords: number, maxWor
 }
 
 /**
- * Build editorial copy for a MEMORY_PAGE.
+ * Build editorial copy for MEMORY_TEXT_PAGE.
  * Uses IA only when provider is configured; otherwise deterministic fallback.
- * Never invents facts beyond the selected memory.
+ * Never invents facts beyond the selected memory. Never attaches photos.
  */
 export async function editorializeMemoryPage(input: {
   source: MemoryPageSource
   profile: BookProfileV1
   seed: string
-  /** Primary photo id already chosen (or null). */
-  photoId?: string | null
-  /** True when signed URL is available for rendering. */
-  hasRenderablePhoto?: boolean
   provider?: ContentGenerationProvider
   /** Force fallback even if AI is configured. */
   forceFallback?: boolean
 }): Promise<MemoryPageEditorial> {
   const audience = input.profile.audience
-  const photoId = input.photoId ?? input.source.linkedPhotoIds[0] ?? null
-  const hasRenderablePhoto = Boolean(input.hasRenderablePhoto)
-  const density = classifyMemoryDensity({
-    source: input.source,
-    hasRenderablePhoto,
-  })
-  const fullPageRecommended = recommendFullMemoryPage({ density, hasRenderablePhoto })
-  const variant: MemoryPageVariant = hasRenderablePhoto ? "PHOTO" : "TEXT_ONLY"
+  const density = classifyMemoryDensity({ source: input.source })
+  const fullPageRecommended = recommendFullMemoryPage({ density })
   const maxWords = maxBodyWordsForSource(input.source.originalText, density)
   const sourceWords = wordCount(input.source.originalText)
 
   const base = fallbackEditorial({
     source: input.source,
     audience,
-    variant,
-    photoId: hasRenderablePhoto ? photoId : null,
     density,
     fullPageRecommended,
-    hasRenderablePhoto,
   })
 
   if (input.forceFallback) return base
@@ -176,15 +155,12 @@ export async function editorializeMemoryPage(input: {
     "- proposer une courte accroche (eyebrow) uniquement si elle repose sur des éléments déjà présents",
     "",
     "TITRE — règles strictes :",
-    "- naturel et idiomatique en français (vérifiez la correction idiomatique)",
+    "- naturel et idiomatique en français",
     "- utiliser uniquement les éléments présents dans la source",
     "- ne jamais inventer un lieu, une date, une émotion ou un fait",
-    "- éviter les formulations artificielles ou calques maladroits",
-    "- si la source cite plusieurs lieux, le titre peut en retenir un clairement présent, sans les mélanger de façon incorrecte",
     "",
     "EYEBROW :",
     "- strictement fondé sur la source",
-    "- aucun contexte nouveau",
     "- null si rien de pertinent",
     "",
     "INTERDIT :",
@@ -196,6 +172,7 @@ export async function editorializeMemoryPage(input: {
     "- créer du dialogue",
     "- enrichir factuellement l'histoire",
     "- allonger artificiellement le body pour remplir la page",
+    "- utiliser une photo ou décrire une image",
     "",
     `Audience : ${audience}. ${audiencePrompt(audience)}`,
     densityBodyGuidance(density, sourceWords, maxWords),
@@ -211,7 +188,7 @@ export async function editorializeMemoryPage(input: {
   }>({
     system,
     input: payload,
-    schemaName: "memory_page_v1",
+    schemaName: "memory_text_page_v1",
     schema: MEMORY_EDITORIAL_SCHEMA,
     seed: input.seed,
   })
@@ -226,19 +203,16 @@ export async function editorializeMemoryPage(input: {
         : String(raw.data.eyebrow).trim() || null,
     body: clampBody(String(raw.data.body ?? "").trim() || base.body, maxWords),
     sourceMemoryId: String(raw.data.sourceMemoryId ?? "").trim(),
-    sourcePhotoIds: hasRenderablePhoto && photoId ? [photoId] : [],
+    sourcePhotoIds: [],
     place: input.source.place?.trim() || null,
-    variant,
+    variant: "TEXT_ONLY",
     density,
     fullPageRecommended,
     usedAi: true,
     audience,
   }
 
-  // Reject AI body that inventively inflates SHORT sources
-  if (wordCount(draft.body) > maxWords) {
-    return base
-  }
+  if (wordCount(draft.body) > maxWords) return base
   if (density === "SHORT" && wordCount(draft.body) > sourceWords * 1.5 + 6) {
     return base
   }
@@ -258,22 +232,12 @@ export async function editorializeMemoryPage(input: {
 export function editorializeMemoryPageFallback(input: {
   source: MemoryPageSource
   audience: AudienceType
-  photoId?: string | null
-  hasRenderablePhoto?: boolean
 }): MemoryPageEditorial {
-  const photoId = input.photoId ?? input.source.linkedPhotoIds[0] ?? null
-  const hasRenderablePhoto = Boolean(input.hasRenderablePhoto)
-  const density = classifyMemoryDensity({
-    source: input.source,
-    hasRenderablePhoto,
-  })
+  const density = classifyMemoryDensity({ source: input.source })
   return fallbackEditorial({
     source: input.source,
     audience: input.audience,
-    variant: hasRenderablePhoto ? "PHOTO" : "TEXT_ONLY",
-    photoId: hasRenderablePhoto ? photoId : null,
     density,
-    fullPageRecommended: recommendFullMemoryPage({ density, hasRenderablePhoto }),
-    hasRenderablePhoto,
+    fullPageRecommended: recommendFullMemoryPage({ density }),
   })
 }

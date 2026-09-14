@@ -240,13 +240,24 @@ function buildIntentBag(input: {
   }
 
   // --- Photos ---
+  const photoCandidates = (profile.photos ?? []).filter(
+    (p) => p.useAuthorized && Boolean(p.storagePath),
+  )
   for (let i = 0; i < targets.photoSlots; i++) {
+    const photo = photoCandidates[i] ?? profile.photos[i]
+    const hasText = Boolean(photo?.caption?.trim() || photo?.anecdote?.trim())
+    const chainReady = Boolean(
+      photo?.useAuthorized && photo.storagePath && hasText,
+    )
     bag.push({
       archetype: getArchetype("PHOTO_MEMORY_PAGE"),
       tempId: nextId(),
       sourceNeeds: ["photo"],
-      participantIds: profile.photos[i]?.participantIds,
-      reason: "Insertion photo répartie dans le cahier",
+      participantIds: photo?.participantIds,
+      reason: chainReady
+        ? "Photo autorisée avec légende/anecdote — PHOTO_MEMORY_PAGE READY"
+        : "Photo insuffisante pour PHOTO_MEMORY_PAGE (metadata ou storage) — PARTIAL",
+      implementationStatusOverride: chainReady ? "READY" : "PARTIAL",
     })
   }
 
@@ -575,7 +586,8 @@ function toBlueprintPages(
       universeId: item.universeId ?? null,
       participantIds: item.participantIds,
       sourceNeeds: item.sourceNeeds,
-      implementationStatus: item.archetype.implementationStatus,
+      implementationStatus:
+        item.implementationStatusOverride ?? item.archetype.implementationStatus,
       correctionOf: item.correctionOf,
       visualRole: visualRoles[i]!,
       density: item.archetype.estimatedDensity,

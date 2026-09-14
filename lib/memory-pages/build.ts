@@ -9,7 +9,6 @@ import { selectMemoryForPage, toMemoryPageSource } from "./select-memory"
 import type {
   BuildMemoryPageFailure,
   MemoryPageBuildResult,
-  MemoryPagePhotoRef,
   MemoryPageSource,
 } from "./types"
 import { validateMemoryEditorial } from "./validate"
@@ -20,15 +19,14 @@ export interface BuildMemoryPageInput {
   /** Explicit memory id; otherwise selected deterministically. */
   memoryId?: string
   usedMemoryIds?: ReadonlySet<string> | string[]
-  /** Map photoId → signed URL (optional). */
-  photoSignedUrls?: Record<string, string>
   provider?: ContentGenerationProvider
   forceFallback?: boolean
 }
 
 /**
- * Full MEMORY_PAGE build: select → density → editorialize → validate.
- * Never invents a memory. Works without IA.
+ * MEMORY_TEXT_PAGE build: select → density → editorialize → validate.
+ * Never invents a memory. Never attaches an unrelated photo.
+ * Always TEXT_ONLY in V1.
  */
 export async function buildMemoryPage(
   input: BuildMemoryPageInput,
@@ -40,7 +38,7 @@ export async function buildMemoryPage(
     if (!memory) {
       return fail("NO_MEMORY", "Souvenir introuvable dans le profil.")
     }
-    source = toMemoryPageSource(memory, input.profile)
+    source = toMemoryPageSource(memory)
   } else {
     source = selectMemoryForPage({
       profile: input.profile,
@@ -53,33 +51,13 @@ export async function buildMemoryPage(
     return fail("NO_MEMORY", "Aucun souvenir utilisable dans le profil.")
   }
 
-  const photoId = source.linkedPhotoIds[0] ?? null
-  let photo: MemoryPagePhotoRef | null = null
-  if (photoId) {
-    const profilePhoto = input.profile.photos.find((p) => p.id === photoId)
-    photo = {
-      photoId,
-      signedUrl: input.photoSignedUrls?.[photoId] ?? null,
-      caption: profilePhoto?.caption,
-    }
-  }
-
-  const canShowPhoto = Boolean(photo?.signedUrl)
-  const density = classifyMemoryDensity({
-    source,
-    hasRenderablePhoto: canShowPhoto,
-  })
-  const fullPageRecommended = recommendFullMemoryPage({
-    density,
-    hasRenderablePhoto: canShowPhoto,
-  })
+  const density = classifyMemoryDensity({ source })
+  const fullPageRecommended = recommendFullMemoryPage({ density })
 
   const editorial = await editorializeMemoryPage({
     source,
     profile: input.profile,
     seed: input.seed,
-    photoId,
-    hasRenderablePhoto: canShowPhoto,
     provider: input.provider,
     forceFallback: input.forceFallback,
   })
@@ -97,15 +75,15 @@ export async function buildMemoryPage(
     ...editorial,
     density,
     fullPageRecommended,
-    variant: (canShowPhoto ? "PHOTO" : "TEXT_ONLY") as typeof editorial.variant,
-    sourcePhotoIds: canShowPhoto && photo ? [photo.photoId] : [],
+    variant: "TEXT_ONLY" as const,
+    sourcePhotoIds: [] as string[],
   }
 
   return {
     ok: true,
     source,
     editorial: resolvedEditorial,
-    photo: canShowPhoto ? photo : null,
+    photo: null,
     density,
     fullPageRecommended,
   }

@@ -1,30 +1,9 @@
 import { createRng } from "@/lib/game-engines/random"
-import type { BookProfileV1, MemoryEntry, QuestionnairePhoto } from "@/lib/questionnaire/types"
+import type { BookProfileV1, MemoryEntry } from "@/lib/questionnaire/types"
 import type { MemoryPageSource } from "./types"
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
-}
-
-function usablePhotos(profile: BookProfileV1): QuestionnairePhoto[] {
-  return (profile.photos ?? []).filter((p) => p.useAuthorized && Boolean(p.storagePath))
-}
-
-function linkedPhotoIdsForMemory(
-  memory: MemoryEntry,
-  photos: QuestionnairePhoto[],
-): string[] {
-  const memParts = new Set(memory.participantIds ?? [])
-  if (!memParts.size) {
-    // No participant tag: allow any authorized photo as soft link candidate (first only later).
-    return photos.map((p) => p.id)
-  }
-  const matched = photos.filter((p) => {
-    const pp = p.participantIds ?? []
-    if (!pp.length) return true
-    return pp.some((id) => memParts.has(id))
-  })
-  return matched.map((p) => p.id)
 }
 
 function scoreMemory(memory: MemoryEntry, usedIds: ReadonlySet<string>): number {
@@ -39,26 +18,24 @@ function scoreMemory(memory: MemoryEntry, usedIds: ReadonlySet<string>): number 
   return score
 }
 
-export function toMemoryPageSource(
-  memory: MemoryEntry,
-  profile: BookProfileV1,
-): MemoryPageSource | null {
+export function toMemoryPageSource(memory: MemoryEntry): MemoryPageSource | null {
   const text = memory.text?.trim()
   if (!text) return null
-  const photos = usablePhotos(profile)
   return {
     memoryId: memory.id,
     participantIds: [...(memory.participantIds ?? [])],
     originalText: text,
     title: memory.title?.trim() || undefined,
     place: memory.place?.trim() || undefined,
-    linkedPhotoIds: linkedPhotoIdsForMemory(memory, photos),
+    // Never attach photos by participant overlap — MEMORY_TEXT stays text-only.
+    linkedPhotoIds: [],
   }
 }
 
 /**
- * Deterministic memory pick for a MEMORY_PAGE slot.
+ * Deterministic memory pick for a MEMORY_TEXT_PAGE slot.
  * Prefers detailed, unused memories; balances participants for DUO/GROUP.
+ * Does not select or link photos.
  */
 export function selectMemoryForPage(input: {
   profile: BookProfileV1
@@ -85,20 +62,18 @@ export function selectMemoryForPage(input: {
       if (prefer.size && (m.participantIds ?? []).some((id) => prefer.has(id))) {
         s += 12
       }
-      // Soft random jitter for seed diversity without destroying ranking
       s += rng.next() * 4
       return { m, s }
     })
     .sort((a, b) => b.s - a.s)
 
   const best = ranked[0]?.m
-  if (!best || used.has(best.id) && ranked.every((r) => used.has(r.m.id))) {
-    // All used — allow reuse of best unused-or-first
+  if (!best || (used.has(best.id) && ranked.every((r) => used.has(r.m.id)))) {
     const fallback = ranked.find((r) => !used.has(r.m.id))?.m ?? ranked[0]?.m
-    return fallback ? toMemoryPageSource(fallback, input.profile) : null
+    return fallback ? toMemoryPageSource(fallback) : null
   }
 
-  return toMemoryPageSource(best, input.profile)
+  return toMemoryPageSource(best)
 }
 
 /** Pick several distinct memories for multi-page planning (deterministic). */

@@ -5,7 +5,7 @@ import {
   sameEngineStreak,
   type RhythmPageView,
 } from "./rhythm"
-import type { PageArchetype } from "./types"
+import type { ImplementationStatus, PageArchetype } from "./types"
 
 export type ScoredIntent = {
   archetype: PageArchetype
@@ -15,6 +15,8 @@ export type ScoredIntent = {
   reason: string
   /** Temporary id before final slotId assignment. */
   tempId: string
+  /** Optional override (e.g. PHOTO_MEMORY weak source => PARTIAL). */
+  implementationStatusOverride?: ImplementationStatus
 }
 
 /**

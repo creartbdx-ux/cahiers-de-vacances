@@ -20,7 +20,7 @@ import { resolveBookVisualIdentity } from "@/lib/mini-book/visual-identity"
 import { getActivePalettes } from "@/lib/data/assets"
 import { getStyles } from "@/lib/data/reference"
 import type { MiniBookVisualIdentity } from "@/lib/mini-book/types"
-import { buildMemoryPage } from "@/lib/memory-pages"
+import { buildMemoryPage, buildPhotoMemoryPage } from "@/lib/memory-pages"
 
 export type BookLabSlotSummary = {
   slotId: string
@@ -381,7 +381,7 @@ export type BookLabMemoryPageResult =
       originalTitle: string | null
       originalPlace: string | null
       participantIds: string[]
-      variant: "PHOTO" | "TEXT_ONLY"
+      variant: "TEXT_ONLY"
       density: "SHORT" | "MEDIUM" | "RICH"
       fullPageRecommended: boolean
       usedAi: boolean
@@ -389,17 +389,38 @@ export type BookLabMemoryPageResult =
       eyebrow: string | null
       body: string
       place: string | null
-      photoUrl: string | null
-      photoCaption: string | null
       sourcePhotoIds: string[]
       visualIdentity: MiniBookVisualIdentity
       visualRole: "LIGHT" | "SECONDARY" | "ACCENT"
     }
   | { ok: false; message: string; details?: string[] }
 
+export type BookLabPhotoMemoryPageResult =
+  | {
+      ok: true
+      photoId: string
+      storagePath: string
+      caption: string | null
+      anecdote: string | null
+      participantIds: string[]
+      density: "SHORT" | "MEDIUM" | "RICH"
+      layout: "LANDSCAPE" | "PORTRAIT" | "SQUARE"
+      fullPageRecommended: boolean
+      weakSource: boolean
+      usedAi: boolean
+      title: string
+      eyebrow: string | null
+      body: string
+      photoUrl: string | null
+      visualIdentity: MiniBookVisualIdentity
+      visualRole: "LIGHT" | "SECONDARY" | "ACCENT"
+    }
+  | { ok: false; message: string; details?: string[] }
+
 /**
- * Prepare a MEMORY_PAGE preview for Book Lab.
+ * Prepare a MEMORY_TEXT_PAGE preview for Book Lab.
  * Does not persist. IA only when useAi=true and provider configured.
+ * Never attaches an unrelated photo.
  */
 export async function prepareBookLabMemoryPageAction(input: {
   bookProjectId: string
@@ -444,25 +465,11 @@ export async function prepareBookLabMemoryPageAction(input: {
     palettes,
   })
 
-  const photoSignedUrls: Record<string, string> = {}
-  const paths = (parsed.profile.photos ?? [])
-    .filter((p) => p.useAuthorized && p.storagePath)
-    .map((p) => p.storagePath as string)
-  if (paths.length) {
-    const byPath = await createBookPhotoSignedUrls(paths)
-    for (const p of parsed.profile.photos ?? []) {
-      if (p.storagePath && byPath[p.storagePath]) {
-        photoSignedUrls[p.id] = byPath[p.storagePath]!
-      }
-    }
-  }
-
   const useAi = Boolean(input.useAi) && isContentGenerationConfigured()
   const result = await buildMemoryPage({
     profile: parsed.profile,
-    seed: `${seed}:memory-page`,
+    seed: `${seed}:memory-text-page`,
     memoryId: input.memoryId,
-    photoSignedUrls,
     forceFallback: !useAi,
   })
 
@@ -480,7 +487,7 @@ export async function prepareBookLabMemoryPageAction(input: {
     originalTitle: result.source.title ?? null,
     originalPlace: result.source.place ?? null,
     participantIds: result.source.participantIds,
-    variant: result.editorial.variant,
+    variant: "TEXT_ONLY",
     density: result.density,
     fullPageRecommended: result.fullPageRecommended,
     usedAi: result.editorial.usedAi,
@@ -488,9 +495,102 @@ export async function prepareBookLabMemoryPageAction(input: {
     eyebrow: result.editorial.eyebrow,
     body: result.editorial.body,
     place: result.editorial.place,
-    photoUrl: result.photo?.signedUrl ?? null,
-    photoCaption: result.photo?.caption ?? null,
-    sourcePhotoIds: result.editorial.sourcePhotoIds,
+    sourcePhotoIds: [],
+    visualIdentity,
+    visualRole: roles[roleIndex]!,
+  }
+}
+
+/**
+ * Prepare a PHOTO_MEMORY_PAGE preview for Book Lab from one authorized photo.
+ */
+export async function prepareBookLabPhotoMemoryPageAction(input: {
+  bookProjectId: string
+  seed: string
+  photoId: string
+  useAi?: boolean
+  /** Optional width/height ratio for layout (LANDSCAPE / PORTRAIT / SQUARE). */
+  aspectRatio?: number
+}): Promise<BookLabPhotoMemoryPageResult> {
+  const { user, profile: authProfile } = await getCurrentUser()
+  if (!user || authProfile?.role !== "admin") {
+    return { ok: false, message: "Accès admin requis." }
+  }
+
+  const project = await getBookProject(input.bookProjectId)
+  if (!project) return { ok: false, message: "Projet introuvable." }
+
+  const parsed = parseQuestionnairePayload(project.questionnaire_data)
+  if (!parsed.profile) {
+    return { ok: false, message: "BookProfileV1 manquant sur ce projet." }
+  }
+
+  let richnessLevel = parsed.richnessLevel
+  if (!richnessLevel && parsed.questionnaire) {
+    richnessLevel = calculateProfileRichness(parsed.questionnaire, parsed.profile).level
+  }
+  if (
+    !canUseInEditorialLab({
+      status: project.status,
+      profile: parsed.profile,
+      richnessLevel: richnessLevel ?? null,
+    })
+  ) {
+    return { ok: false, message: "Projet non éligible au Book Lab." }
+  }
+
+  const [palettes, styles] = await Promise.all([getActivePalettes(), getStyles()])
+  const seed = input.seed.trim() || "lab-seed-1"
+  const visualIdentity = resolveBookVisualIdentity({
+    profile: parsed.profile,
+    seed,
+    styles,
+    palettes,
+  })
+
+  const photoSignedUrls: Record<string, string> = {}
+  const photo = parsed.profile.photos.find((p) => p.id === input.photoId)
+  if (photo?.storagePath) {
+    const byPath = await createBookPhotoSignedUrls([photo.storagePath])
+    if (byPath[photo.storagePath]) {
+      photoSignedUrls[photo.id] = byPath[photo.storagePath]!
+    }
+  }
+
+  const useAi = Boolean(input.useAi) && isContentGenerationConfigured()
+  const result = await buildPhotoMemoryPage({
+    profile: parsed.profile,
+    seed: `${seed}:photo-memory-page`,
+    photoId: input.photoId,
+    photoSignedUrls,
+    aspectRatios:
+      input.aspectRatio != null ? { [input.photoId]: input.aspectRatio } : undefined,
+    forceFallback: !useAi,
+  })
+
+  if (!result.ok) {
+    return { ok: false, message: result.message, details: result.details }
+  }
+
+  const roles = ["LIGHT", "SECONDARY", "ACCENT"] as const
+  const roleIndex = Math.abs(hashSeed(`${seed}:${result.source.photoId}`)) % roles.length
+
+  return {
+    ok: true,
+    photoId: result.source.photoId,
+    storagePath: result.source.storagePath,
+    caption: result.source.caption,
+    anecdote: result.source.anecdote,
+    participantIds: result.source.participantIds,
+    density: result.density,
+    layout: result.editorial.layout,
+    fullPageRecommended: result.fullPageRecommended,
+    weakSource: result.editorial.weakSource,
+    usedAi: result.editorial.usedAi,
+    title: result.editorial.title,
+    eyebrow: result.editorial.eyebrow,
+    body: result.editorial.body,
+    photoUrl: result.source.signedUrl,
     visualIdentity,
     visualRole: roles[roleIndex]!,
   }

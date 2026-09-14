@@ -1,4 +1,4 @@
-import type { MemoryPageSource, MemoryDensity } from "./types"
+import type { MemoryDensity, MemoryPageSource } from "./types"
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
@@ -16,12 +16,14 @@ function sentenceCount(text: string): number {
 /**
  * App-side density — never decided by the LLM.
  * SHORT ≈ one short anecdote; RICH ≈ detailed multi-sentence memory.
+ * MEMORY_TEXT_PAGE: no photo boost (photos are not heuristically attached).
  */
 export function classifyMemoryDensity(input: {
   source: MemoryPageSource
-  /** True when a usable photo (signed URL) will actually render. */
+  /** Ignored for MEMORY_TEXT V1 — kept for API compatibility. */
   hasRenderablePhoto?: boolean
 }): MemoryDensity {
+  void input.hasRenderablePhoto
   const words = wordCount(input.source.originalText)
   const sentences = sentenceCount(input.source.originalText)
   let score = Math.min(60, words * 1.4)
@@ -29,8 +31,6 @@ export function classifyMemoryDensity(input: {
   if (sentences >= 3) score += 12
   if (input.source.title?.trim()) score += 8
   if (input.source.place?.trim()) score += 6
-  // Soft photo boost — must not alone turn a one-liner into RICH.
-  if (input.hasRenderablePhoto) score += 4
   if (words < 18) score -= 12
   if (words < 28 && sentences === 1) score -= 8
 
@@ -40,14 +40,14 @@ export function classifyMemoryDensity(input: {
 }
 
 /**
- * SHORT without photo is a weak full-page candidate (future multi-snippet / photo page).
- * A real photo can still justify a full page even for SHORT text.
+ * SHORT is a weak full-page candidate for MEMORY_TEXT_PAGE.
+ * Photos never rescue a memory page (separate PHOTO_MEMORY_PAGE).
  */
 export function recommendFullMemoryPage(input: {
   density: MemoryDensity
-  hasRenderablePhoto: boolean
+  hasRenderablePhoto?: boolean
 }): boolean {
-  if (input.hasRenderablePhoto) return true
+  void input.hasRenderablePhoto
   return input.density !== "SHORT"
 }
 

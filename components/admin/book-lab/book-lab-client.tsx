@@ -30,14 +30,17 @@ import {
   generateBookLabGameAction,
   getBookLabPlanAction,
   prepareBookLabMemoryPageAction,
+  prepareBookLabPhotoMemoryPageAction,
   type BookLabCrosswordContent,
   type BookLabMemoryPageResult,
+  type BookLabPhotoMemoryPageResult,
   type BookLabQuizContent,
   type BookLabWordsearchContent,
 } from "@/app/admin/book-lab/actions"
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
 import type { Palette, Style } from "@/lib/supabase/types"
 import { MemoryTemplate } from "@/components/book-renderer/templates/memory-template"
+import { PhotoMemoryTemplate } from "@/components/book-renderer/templates/photo-memory-template"
 import { resolveMemoryPageSurface } from "@/lib/memory-pages"
 
 export type BookLabProject = {
@@ -92,6 +95,13 @@ export function BookLabClient({
   const [memoryError, setMemoryError] = useState<string | null>(null)
   const [memoryPending, startMemoryTransition] = useTransition()
 
+  const [photoId, setPhotoId] = useState("")
+  const [photoMemoryPage, setPhotoMemoryPage] = useState<
+    Extract<BookLabPhotoMemoryPageResult, { ok: true }> | null
+  >(null)
+  const [photoMemoryError, setPhotoMemoryError] = useState<string | null>(null)
+  const [photoMemoryPending, startPhotoMemoryTransition] = useTransition()
+
   const selected = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
@@ -99,6 +109,14 @@ export function BookLabClient({
 
   const availableMemories = useMemo(
     () => (selected?.profile.memories ?? []).filter((m) => m.text?.trim()),
+    [selected],
+  )
+
+  const availablePhotos = useMemo(
+    () =>
+      (selected?.profile.photos ?? []).filter(
+        (p) => p.useAuthorized && Boolean(p.storagePath),
+      ),
     [selected],
   )
 
@@ -128,20 +146,31 @@ export function BookLabClient({
   }, [crossword])
 
   const memoryPalette = useMemo(() => {
-    const id = memoryPage?.visualIdentity.paletteId ?? visualIdentity?.paletteId
+    const id =
+      memoryPage?.visualIdentity.paletteId ??
+      photoMemoryPage?.visualIdentity.paletteId ??
+      visualIdentity?.paletteId
     return palettes.find((p) => p.id === id) ?? palettes[0] ?? FALLBACK_PALETTE
-  }, [palettes, memoryPage, visualIdentity])
+  }, [palettes, memoryPage, photoMemoryPage, visualIdentity])
 
   const memoryStyle = useMemo(
     () =>
       getStyleTokens(
-        memoryPage?.visualIdentity.styleId ?? visualIdentity?.styleId ?? styles[0]?.id ?? "RETRO",
+        memoryPage?.visualIdentity.styleId ??
+          photoMemoryPage?.visualIdentity.styleId ??
+          visualIdentity?.styleId ??
+          styles[0]?.id ??
+          "RETRO",
       ),
-    [memoryPage, visualIdentity, styles],
+    [memoryPage, photoMemoryPage, visualIdentity, styles],
   )
 
   const memorySurface = memoryPage
     ? resolveMemoryPageSurface(memoryPalette, memoryPage.visualRole)
+    : undefined
+
+  const photoMemorySurface = photoMemoryPage
+    ? resolveMemoryPageSurface(memoryPalette, photoMemoryPage.visualRole)
     : undefined
 
   function resetContents() {
@@ -157,6 +186,8 @@ export function BookLabClient({
     setMissing([])
     setMemoryPage(null)
     setMemoryError(null)
+    setPhotoMemoryPage(null)
+    setPhotoMemoryError(null)
   }
 
   function loadPlan() {
@@ -285,6 +316,31 @@ export function BookLabClient({
     })
   }
 
+  function preparePhotoMemoryPage(opts: { useAi: boolean }) {
+    if (!selected) return
+    const id = photoId || availablePhotos[0]?.id
+    if (!id) {
+      setPhotoMemoryError("Aucune photo autorisée / persistée sur ce projet.")
+      return
+    }
+    setPhotoMemoryError(null)
+    startPhotoMemoryTransition(async () => {
+      const result = await prepareBookLabPhotoMemoryPageAction({
+        bookProjectId: selected.id,
+        seed: seed.trim() || "lab-seed-1",
+        photoId: id,
+        useAi: opts.useAi,
+      })
+      if (!result.ok) {
+        setPhotoMemoryPage(null)
+        setPhotoMemoryError(result.message)
+        return
+      }
+      setPhotoId(result.photoId)
+      setPhotoMemoryPage(result)
+    })
+  }
+
   const allOk =
     status.quiz === "ok" && status.wordsearch === "ok" && status.crossword === "ok"
 
@@ -317,6 +373,7 @@ export function BookLabClient({
                 setProjectId(e.target.value)
                 resetContents()
                 setMemoryId("")
+                setPhotoId("")
               }}
             >
               {projects.length === 0 && <option value="">Aucun projet</option>}
@@ -493,10 +550,10 @@ export function BookLabClient({
 
       {selected && (
         <section className="rounded-2xl border border-border bg-card p-5">
-          <h2 className="mb-1 text-base font-semibold">MEMORY_PAGE V1</h2>
+          <h2 className="mb-1 text-base font-semibold">MEMORY_TEXT_PAGE V1</h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            Page éditoriale à partir d&apos;un souvenir réel du profil — pas un jeu. Aucune
-            génération automatique au chargement.
+            Page éditoriale à partir d&apos;un souvenir réel — TEXT_ONLY. Aucune photo
+            associée par heuristique.
           </p>
 
           {availableMemories.length === 0 ? (
@@ -531,7 +588,7 @@ export function BookLabClient({
                   onClick={() => prepareMemoryPage({ useAi: false })}
                   disabled={memoryPending}
                 >
-                  Préparer la page (sans IA)
+                  Préparer sans IA
                 </Button>
                 <Button
                   type="button"
@@ -540,14 +597,6 @@ export function BookLabClient({
                   disabled={memoryPending || !aiConfigured}
                 >
                   Préparer avec reformulation IA
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => prepareMemoryPage({ useAi: aiConfigured, reformulate: true })}
-                  disabled={memoryPending || !memoryPage}
-                >
-                  Reformuler la mise en page
                 </Button>
               </div>
 
@@ -566,14 +615,11 @@ export function BookLabClient({
                     <p className="mt-3 text-xs text-muted-foreground">
                       Densité : {memoryPage.density}
                       <br />
-                      Variante : {memoryPage.variant}
+                      Variante : TEXT_ONLY
                       <br />
                       Pleine page recommandée : {memoryPage.fullPageRecommended ? "Oui" : "Non"}
                       <br />
                       {memoryPage.usedAi ? "Éditorial : IA" : "Éditorial : fallback"}
-                      {memoryPage.sourcePhotoIds.length
-                        ? ` · photo ${memoryPage.sourcePhotoIds.join(", ")}`
-                        : " · sans photo"}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-6">
@@ -591,13 +637,139 @@ export function BookLabClient({
                           style={memoryStyle}
                           palette={memoryPalette}
                           visualRole={memoryPage.visualRole}
-                          variant={memoryPage.variant}
+                          variant="TEXT_ONLY"
                           density={memoryPage.density}
-                          photoUrl={memoryPage.photoUrl}
-                          photoCaption={memoryPage.photoCaption}
                         />
                       </BookPage>
                     </PagePreview>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
+      {selected && (
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <h2 className="mb-1 text-base font-semibold">PHOTO_MEMORY_PAGE V1</h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Page construite à partir d&apos;une photo autorisée et de sa légende / anecdote —
+            jamais d&apos;un souvenir indépendant.
+          </p>
+
+          {availablePhotos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Aucune photo SAVED + autorisée dans ce BookProfile.
+            </p>
+          ) : (
+            <>
+              <label className="mb-3 flex flex-col gap-1 text-sm">
+                Photo
+                <select
+                  className="h-10 rounded-lg border border-input bg-background px-3"
+                  value={photoId || availablePhotos[0]?.id || ""}
+                  onChange={(e) => {
+                    setPhotoId(e.target.value)
+                    setPhotoMemoryPage(null)
+                    setPhotoMemoryError(null)
+                  }}
+                >
+                  {availablePhotos.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {(p.caption?.trim() || p.anecdote?.trim() || p.id).slice(0, 56)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="mb-4 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  onClick={() => preparePhotoMemoryPage({ useAi: false })}
+                  disabled={photoMemoryPending}
+                >
+                  Préparer sans IA
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => preparePhotoMemoryPage({ useAi: true })}
+                  disabled={photoMemoryPending || !aiConfigured}
+                >
+                  Préparer avec reformulation IA
+                </Button>
+              </div>
+
+              {photoMemoryError && (
+                <p className="mb-3 text-sm text-destructive">{photoMemoryError}</p>
+              )}
+
+              {photoMemoryPage && (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-xl border border-border bg-muted/30 p-4 text-sm">
+                    <p className="mb-2 font-medium">PHOTO SOURCE</p>
+                    {photoMemoryPage.photoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={photoMemoryPage.photoUrl}
+                        alt=""
+                        className="mb-3 max-h-40 rounded-md border border-border object-cover"
+                      />
+                    ) : null}
+                    <p className="text-xs text-muted-foreground">photoId {photoMemoryPage.photoId}</p>
+                    <p className="mt-2">
+                      <span className="font-medium">Légende :</span>{" "}
+                      {photoMemoryPage.caption || "—"}
+                    </p>
+                    <p className="mt-1">
+                      <span className="font-medium">Anecdote :</span>{" "}
+                      {photoMemoryPage.anecdote || "—"}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Participants :{" "}
+                      {photoMemoryPage.participantIds.length
+                        ? photoMemoryPage.participantIds.join(", ")
+                        : "—"}
+                    </p>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Layout : {photoMemoryPage.layout}
+                      <br />
+                      Densité : {photoMemoryPage.density}
+                      <br />
+                      Pleine page : {photoMemoryPage.fullPageRecommended ? "Oui" : "Non"}
+                      {photoMemoryPage.weakSource ? " · source faible (sans texte)" : ""}
+                      <br />
+                      {photoMemoryPage.usedAi ? "Éditorial : IA" : "Éditorial : fallback"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-6">
+                    {photoMemoryPage.photoUrl ? (
+                      <PagePreview>
+                        <BookPage
+                          palette={memoryPalette}
+                          showSafeArea={false}
+                          surface={photoMemorySurface}
+                        >
+                          <PhotoMemoryTemplate
+                            title={photoMemoryPage.title}
+                            body={photoMemoryPage.body}
+                            eyebrow={photoMemoryPage.eyebrow}
+                            style={memoryStyle}
+                            palette={memoryPalette}
+                            visualRole={photoMemoryPage.visualRole}
+                            density={photoMemoryPage.density}
+                            layout={photoMemoryPage.layout}
+                            photoUrl={photoMemoryPage.photoUrl}
+                            weakSource={photoMemoryPage.weakSource}
+                          />
+                        </BookPage>
+                      </PagePreview>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        URL signée indisponible — impossible de prévisualiser la photo.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
