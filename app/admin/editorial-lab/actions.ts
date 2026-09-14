@@ -313,13 +313,23 @@ export async function generateQuizThemeLabAction(input: {
     }
   }
 
-  const universeName =
-    universes.find((u) => u.id === slot.universeId)?.name ??
-    (slot.universeId ? slot.universeId : null)
+  const universe =
+    universes.find((u) => u.id === slot.universeId) ??
+    (slot.universeId
+      ? {
+          id: slot.universeId,
+          name: slot.universeId,
+          editorial_description: null,
+          allowed_topics: [],
+          excluded_topics: [],
+          quiz_guidance: null,
+        }
+      : null)
 
-  const themeContext = buildQuizThemeContext({ slot, universeName })
+  const themeContext = buildQuizThemeContext({ slot, universe })
   const result = await generateQuizThemeContent({
     slot,
+    universe: universe ?? undefined,
     universeName: themeContext.universeName,
     bookProjectId: project.id,
   })

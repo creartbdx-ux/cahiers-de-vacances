@@ -1,6 +1,7 @@
 import type { EditorialGameSlot } from "@/lib/editorial-engine/types"
 import { generateGame } from "@/lib/game-engines/registry"
 import type { QuizResult } from "@/lib/game-engines/quiz/types"
+import type { UniverseEditorialFields } from "@/lib/universes/editorial"
 import type { ContentGenerationError, ContentGenerationProvider } from "../types"
 import { createDefaultContentGenerationProvider } from "../provider"
 import { toQuizThemeEngineInput } from "./adapter"
@@ -23,6 +24,8 @@ import type { GeneratedQuizTheme, QuizThemeValidationResult } from "./types"
 
 export interface GenerateQuizThemeInput {
   slot: EditorialGameSlot
+  /** Catalogue universe row (or editorial fields) — preferred source of truth. */
+  universe?: UniverseEditorialFields | null
   universeName?: string | null
   bookProjectId?: string
   provider?: ContentGenerationProvider
@@ -135,6 +138,7 @@ export async function generateQuizThemeContent(
 
   const context = buildQuizThemeContext({
     slot: input.slot,
+    universe: input.universe,
     universeName: input.universeName,
   })
 

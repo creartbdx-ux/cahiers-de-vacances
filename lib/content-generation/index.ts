@@ -25,3 +25,8 @@ export {
   themePayloadLooksPersonalFree,
 } from "./quiz-theme/context"
 export type { GeneratedQuizTheme, GeneratedQuizThemeQuestion } from "./quiz-theme/types"
+export {
+  resolveUniverseEditorial,
+  topicHitsExcluded,
+  topicMatchesAllowed,
+} from "@/lib/universes/editorial"

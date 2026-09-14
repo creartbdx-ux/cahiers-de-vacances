@@ -23,13 +23,24 @@ export async function getStyles(): Promise<Style[]> {
 export async function getUniverses(): Promise<Universe[]> {
   const supabase = await createClient()
   const { data } = await supabase.from("universes").select("*").order("name")
-  return (data as Universe[]) ?? []
+  return ((data as Universe[]) ?? []).map(normalizeUniverse)
 }
 
 export async function getActiveUniverses(): Promise<Universe[]> {
   const supabase = await createClient()
   const { data } = await supabase.from("universes").select("*").eq("active", true).order("name")
-  return (data as Universe[]) ?? []
+  return ((data as Universe[]) ?? []).map(normalizeUniverse)
+}
+
+/** Tolerant mapping while editorial columns roll out. */
+function normalizeUniverse(row: Universe): Universe {
+  return {
+    ...row,
+    editorial_description: row.editorial_description ?? null,
+    allowed_topics: Array.isArray(row.allowed_topics) ? row.allowed_topics : [],
+    excluded_topics: Array.isArray(row.excluded_topics) ? row.excluded_topics : [],
+    quiz_guidance: row.quiz_guidance ?? null,
+  }
 }
 
 export async function getActiveStyles(): Promise<Style[]> {

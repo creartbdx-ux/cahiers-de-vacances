@@ -93,14 +93,113 @@ test("contexte limité à univers / difficulté / intérêts — sans profil", (
   assert.equal(ctx.difficulty, 3)
   assert.equal(ctx.targetQuestions, 6)
   assert.deepEqual(ctx.interestIds, ["NATURE", "MOUNTAIN"])
+  assert.ok(ctx.editorialDescription)
   const payload = buildQuizThemeUserPayload(ctx)
   assert.ok(themePayloadLooksPersonalFree(payload))
+  assert.ok("editorialDescription" in payload)
+  assert.ok("allowedTopics" in payload)
+  assert.ok("excludedTopics" in payload)
   const blob = JSON.stringify(payload)
   assert.ok(!blob.includes("Emma"))
   assert.ok(!blob.includes("email"))
   assert.ok(!blob.includes("personalFacts"))
   assert.ok(!blob.includes("memories"))
   assert.ok(!blob.includes("user_id"))
+})
+
+test("QUIZ_THEME reçoit la définition éditoriale de l'univers", () => {
+  const ctx = buildQuizThemeContext({
+    slot: themeSlot({ universeId: "BEAUTY", sourceInterestIds: ["BEAUTY"] }),
+    universe: { id: "BEAUTY", name: "Beauté" },
+  })
+  assert.ok(/cosmétiques|soins personnels/i.test(ctx.editorialDescription))
+  assert.ok(ctx.allowedTopics.some((t) => /maquillage|skincare/i.test(t)))
+  assert.ok(ctx.excludedTopics.some((t) => /peinture|architecture/i.test(t)))
+  const payload = buildQuizThemeUserPayload(ctx)
+  assert.deepEqual(payload.allowedTopics, ctx.allowedTopics)
+  assert.deepEqual(payload.excludedTopics, ctx.excludedTopics)
+  const system = buildQuizThemeSystemPrompt(ctx)
+  assert.ok(/définition éditoriale/i.test(system))
+  assert.ok(/non selon toutes les significations possibles/i.test(system))
+  assert.ok(/cosmétiques/i.test(system))
+})
+
+test("BEAUTY : topics art / architecture rejetés ; cosmétiques acceptés", () => {
+  const ctx = buildQuizThemeContext({
+    slot: themeSlot({
+      universeId: "BEAUTY",
+      sourceInterestIds: ["BEAUTY"],
+      contentRequirements: {
+        type: "QUIZ_CONTENT",
+        targetQuestions: 6,
+        choicesPerQuestion: 4,
+        requirePersonalSource: false,
+        universeId: "BEAUTY",
+      },
+    }),
+    universe: { id: "BEAUTY", name: "Beauté" },
+  })
+
+  const bad = [
+    makeQ({ id: "q1", topic: "peinture Renaissance", question: "Qui a peint La Naissance de Vénus ?" }),
+    makeQ({ id: "q2", topic: "architecture", question: "Où se trouve l'Alhambra ?" }),
+    makeQ({ id: "q3", topic: "sculpture antique", question: "Quelle sculpture célèbre représente Vénus ?" }),
+    makeQ({ id: "q4", topic: "esthétique japonaise", question: "Que désigne le wabi-sabi ?" }),
+    makeQ({ id: "q5", topic: "histoire du design", question: "Quel mouvement a popularisé l'Art nouveau ?" }),
+    makeQ({ id: "q6", topic: "musées", question: "Dans quel musée voit-on la Vénus de Milo ?" }),
+  ]
+  const badResult = validateQuizThemeGeneration({
+    title: "Beauté",
+    questions: bad,
+    context: ctx,
+  })
+  assert.equal(badResult.ok, false)
+  if (!badResult.ok) {
+    assert.ok(badResult.errors.some((e) => /hors cadre|exclu|autorisés/i.test(e)))
+  }
+
+  const goodTopics = [
+    "maquillage",
+    "skincare",
+    "cheveux",
+    "parfums",
+    "cosmétique",
+    "routines beauté",
+  ] as const
+  const good = goodTopics.map((topic, i) =>
+    makeQ({
+      id: `g${i + 1}`,
+      topic,
+      question: `Parmi ces notions de ${topic}, laquelle est exacte (cas ${i + 1}) ?`,
+      choices: [`OptA${i}`, `OptB${i}`, `OptC${i}`, `OptD${i}`],
+      correctIndex: 1,
+      explanation: `Fait stable établi sur ${topic}.`,
+    }),
+  )
+  const goodResult = validateQuizThemeGeneration({
+    title: "Éclat cosmétique",
+    questions: good,
+    context: ctx,
+  })
+  assert.equal(goodResult.ok, true)
+})
+
+test("univers sans configuration complète : fallback propre dans le contexte", () => {
+  const ctx = buildQuizThemeContext({
+    slot: themeSlot({ universeId: "UNKNOWN_X", sourceInterestIds: [] }),
+    universe: {
+      id: "UNKNOWN_X",
+      name: "Inconnu",
+      editorial_description: null,
+      allowed_topics: [],
+      excluded_topics: [],
+      quiz_guidance: null,
+    },
+  })
+  assert.equal(ctx.hasTopicFrame, false)
+  assert.ok(ctx.editorialDescription.includes("Inconnu"))
+  assert.deepEqual(ctx.allowedTopics, [])
+  assert.deepEqual(ctx.excludedTopics, [])
 })
 
 test("aucun fait personnel envoyé au provider (payload + prompt)", async () => {
@@ -132,6 +231,7 @@ test("difficulté transmise dans le contexte et le prompt", () => {
   const system = buildQuizThemeSystemPrompt(ctx)
   assert.ok(/Difficulté : 3/.test(system))
   assert.ok(/intermédiaire/.test(system))
+  assert.ok(/définition éditoriale/i.test(system))
 })
 
 test("schema Structured Outputs strict", () => {

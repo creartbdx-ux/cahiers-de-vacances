@@ -1,3 +1,7 @@
+import {
+  topicHitsExcluded,
+  topicMatchesAllowed,
+} from "@/lib/universes/editorial"
 import { choicesAreSufficientlyDistinct } from "../validators"
 import { questionLeaksCorrectAnswer } from "../quiz-personal/quality"
 import { QUIZ_THEME_CHOICE_COUNT } from "./schema"
@@ -99,6 +103,24 @@ export function validateQuizThemeGeneration(input: {
     } else {
       const tKey = normalizeKey(q.topic)
       topics.set(tKey, (topics.get(tKey) ?? 0) + 1)
+
+      const hitExcluded = topicHitsExcluded(
+        q.topic,
+        q.question,
+        context.excludedTopics,
+      )
+      if (hitExcluded) {
+        errors.push(
+          `Question ${n}: topic hors cadre (« ${q.topic} ») — sujet exclu : ${hitExcluded}.`,
+        )
+      } else if (
+        context.allowedTopics.length > 0 &&
+        !topicMatchesAllowed(q.topic, context.allowedTopics)
+      ) {
+        errors.push(
+          `Question ${n}: topic « ${q.topic} » non cohérent avec les sujets autorisés de l'univers.`,
+        )
+      }
     }
 
     const correct = q.choices[q.correctIndex] ?? ""

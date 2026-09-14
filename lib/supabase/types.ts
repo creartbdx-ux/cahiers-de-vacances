@@ -43,6 +43,11 @@ export type Universe = {
   id: string
   name: string
   category: string | null
+  /** Cadre éditorial pour la génération de contenu thématique. */
+  editorial_description: string | null
+  allowed_topics: string[]
+  excluded_topics: string[]
+  quiz_guidance: string | null
   active: boolean
   created_at: string
   updated_at: string
