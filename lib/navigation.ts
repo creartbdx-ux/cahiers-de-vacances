@@ -113,6 +113,12 @@ export const adminNav: NavItem[] = [
     icon: BookOpen,
   },
   {
+    label: 'Blueprint Lab',
+    href: '/admin/blueprint-lab',
+    description: 'Planifiez la structure éditoriale d’un cahier ~50 pages.',
+    icon: LayoutTemplate,
+  },
+  {
     label: 'Univers',
     href: '/admin/univers',
     description: 'Définissez les thèmes et ambiances proposés.',
