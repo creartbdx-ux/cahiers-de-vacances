@@ -53,6 +53,7 @@ import {
 import {
   clearAllPhotoFiles,
   clearPhotoFile,
+  ensurePhotoObjectUrl,
   getPhotoFile,
   getPhotoObjectUrl,
   setPhotoFile,
@@ -63,6 +64,7 @@ import {
   saveQuestionnaireDraft,
 } from "@/lib/questionnaire/storage"
 import { uploadBookPhotoFile } from "@/lib/questionnaire/upload-book-photo"
+import { decidePhotoUploadAction } from "@/lib/questionnaire/photo-pipeline"
 import { createClient } from "@/lib/supabase/client"
 import type { Palette, Style, Universe } from "@/lib/supabase/types"
 
@@ -98,6 +100,8 @@ export function QuestionnaireWizard({
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedJson = useRef<string>("")
+  const projectEnsurePromise = useRef<Promise<string | null> | null>(null)
+  const draftProjectIdRef = useRef<string | null>(initialQuestionnaire?.draftProjectId ?? null)
   const completed = projectStatus === "QUESTIONNAIRE_COMPLETED" || readOnly
 
   useEffect(() => {
@@ -141,6 +145,10 @@ export function QuestionnaireWizard({
     if (!hydrated || completed) return
     saveQuestionnaireDraft(q)
   }, [q, hydrated, completed])
+
+  useEffect(() => {
+    draftProjectIdRef.current = q.draftProjectId ?? null
+  }, [q.draftProjectId])
 
   // Debounced Supabase autosave when authenticated
   useEffect(() => {
@@ -281,29 +289,50 @@ export function QuestionnaireWizard({
     return data.user?.id ?? null
   }
 
+  /**
+   * Single-flight project ensure — concurrent photo uploads must share one projectId.
+   * Recovers from stale/foreign draftProjectId by creating a fresh project.
+   */
   async function ensureProjectId(snapshot: QuestionnaireV1): Promise<string | null> {
-    if (snapshot.draftProjectId) return snapshot.draftProjectId
-    const saved = await saveQuestionnaireDraftAction(snapshot)
-    if (!saved.ok) {
-      setSubmitError(saved.error)
-      return null
+    if (projectEnsurePromise.current) return projectEnsurePromise.current
+
+    projectEnsurePromise.current = (async () => {
+      const knownId = draftProjectIdRef.current ?? snapshot.draftProjectId ?? undefined
+      const base = knownId ? { ...snapshot, draftProjectId: knownId } : { ...snapshot, draftProjectId: undefined }
+
+      let saved = await saveQuestionnaireDraftAction(base)
+      if (
+        !saved.ok &&
+        base.draftProjectId &&
+        (saved.code === "SAVE" || saved.code === "FORBIDDEN")
+      ) {
+        draftProjectIdRef.current = null
+        saved = await saveQuestionnaireDraftAction({ ...snapshot, draftProjectId: undefined })
+      }
+
+      if (!saved.ok) {
+        setSubmitError(saved.error)
+        return null
+      }
+      draftProjectIdRef.current = saved.projectId
+      setQ((prev) => ({ ...prev, draftProjectId: saved.projectId }))
+      return saved.projectId
+    })()
+
+    try {
+      return await projectEnsurePromise.current
+    } finally {
+      projectEnsurePromise.current = null
     }
-    setQ((prev) => ({ ...prev, draftProjectId: saved.projectId }))
-    return saved.projectId
   }
 
   async function persistPhoto(
     photo: QuestionnairePhoto,
     projectId: string,
-    userId: string,
+    _userId: string,
   ): Promise<{ ok: true; storagePath: string } | { ok: false; error: string }> {
     if (isPhotoPersisted(photo) && photo.storagePath) {
       return { ok: true, storagePath: photo.storagePath }
-    }
-
-    const file = getPhotoFile(photo.id)
-    if (!file) {
-      return { ok: false, error: PHOTO_UPLOAD_USER_ERROR }
     }
 
     setQ((prev) => ({
@@ -315,13 +344,14 @@ export function QuestionnaireWizard({
       ),
     }))
 
-    const uploaded = await uploadBookPhotoFile({
-      userId,
-      projectId,
-      photoId: photo.id,
-      file,
+    let storagePath = photo.storagePath
+    const decision = decidePhotoUploadAction({
+      uploadStatus: photo.uploadStatus,
+      storagePath: photo.storagePath,
+      hasLocalFile: Boolean(getPhotoFile(photo.id)),
     })
-    if (!uploaded.ok) {
+
+    if (decision.action === "error_missing_file") {
       setQ((prev) => ({
         ...prev,
         photos: prev.photos.map((p) =>
@@ -329,18 +359,58 @@ export function QuestionnaireWizard({
             ? {
                 ...p,
                 uploadStatus: "error",
-                uploadError: uploaded.error,
-                storagePath: undefined,
+                uploadError: PHOTO_UPLOAD_USER_ERROR,
               }
             : p,
         ),
       }))
-      return uploaded
+      return { ok: false, error: PHOTO_UPLOAD_USER_ERROR }
+    }
+
+    if (decision.action === "upload_and_register") {
+      const file = getPhotoFile(photo.id)!
+      const uploaded = await uploadBookPhotoFile({
+        projectId,
+        photoId: photo.id,
+        file,
+      })
+      if (!uploaded.ok) {
+        console.error(
+          JSON.stringify({
+            scope: "book-photos",
+            step: uploaded.step,
+            bookProjectId: projectId,
+            photoId: photo.id,
+            code: uploaded.code ?? null,
+            message: uploaded.message?.slice(0, 240) ?? null,
+          }),
+        )
+        setQ((prev) => ({
+          ...prev,
+          photos: prev.photos.map((p) =>
+            p.id === photo.id
+              ? {
+                  ...p,
+                  uploadStatus: "error",
+                  uploadError: uploaded.error,
+                }
+              : p,
+          ),
+        }))
+        return { ok: false, error: uploaded.error }
+      }
+      storagePath = uploaded.storagePath
+    } else if (decision.action === "register_only") {
+      storagePath = decision.storagePath
+    }
+
+    if (!storagePath) {
+      return { ok: false, error: PHOTO_UPLOAD_USER_ERROR }
     }
 
     const registered = await registerBookPhotoAction({
       projectId,
-      storagePath: uploaded.storagePath,
+      storagePath,
       caption: photo.caption,
       anecdote: photo.anecdote,
       useAuthorized: photo.useAuthorized,
@@ -354,12 +424,13 @@ export function QuestionnaireWizard({
                 ...p,
                 uploadStatus: "error",
                 uploadError: registered.error,
-                storagePath: undefined,
+                // Keep storagePath so retry registers without duplicating Storage objects.
+                storagePath,
               }
             : p,
         ),
       }))
-      return registered
+      return { ok: false, error: registered.error }
     }
 
     setQ((prev) => ({
@@ -369,14 +440,14 @@ export function QuestionnaireWizard({
         p.id === photo.id
           ? {
               ...p,
-              storagePath: uploaded.storagePath,
+              storagePath,
               uploadStatus: "persisted",
               uploadError: undefined,
             }
           : p,
       ),
     }))
-    return { ok: true, storagePath: uploaded.storagePath }
+    return { ok: true, storagePath }
   }
 
   async function handleSubmit() {
@@ -1747,11 +1818,13 @@ function PhotosStep({
       )}
 
       {q.photos.map((photo, i) => {
-        const objectUrl = getPhotoObjectUrl(photo.id)
+        const objectUrl = ensurePhotoObjectUrl(photo.id) ?? getPhotoObjectUrl(photo.id)
         const previewSrc = objectUrl ?? photo.previewDataUrl
         const previewBroken =
-          brokenPreviewIds.includes(photo.id) || (!previewSrc && !isPhotoPersisted(photo))
-        const hasPreview = Boolean(previewSrc) && !brokenPreviewIds.includes(photo.id)
+          brokenPreviewIds.includes(photo.id) && !getPhotoFile(photo.id) && !previewSrc
+        const hasPreview =
+          (Boolean(previewSrc) && !brokenPreviewIds.includes(photo.id)) ||
+          Boolean(ensurePhotoObjectUrl(photo.id))
         const status = photo.uploadStatus ?? (photo.storagePath ? "persisted" : "local")
 
         return (
@@ -1759,17 +1832,23 @@ function PhotosStep({
             key={photo.id}
             className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row"
           >
-            {hasPreview ? (
+            {hasPreview && previewSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={previewSrc}
+                src={ensurePhotoObjectUrl(photo.id) ?? previewSrc}
                 alt={photo.fileName ? `Aperçu de ${photo.fileName}` : "Aperçu photo"}
                 className="h-28 w-28 shrink-0 rounded-lg object-cover"
-                onError={() =>
+                onError={() => {
+                  // If File is still in memory, recreate object URL instead of marking broken.
+                  const recovered = ensurePhotoObjectUrl(photo.id)
+                  if (recovered) {
+                    setBrokenPreviewIds((prev) => prev.filter((id) => id !== photo.id))
+                    return
+                  }
                   setBrokenPreviewIds((prev) =>
                     prev.includes(photo.id) ? prev : [...prev, photo.id],
                   )
-                }
+                }}
               />
             ) : (
               <div className="flex h-28 w-28 shrink-0 flex-col items-center justify-center rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-center text-xs text-destructive">

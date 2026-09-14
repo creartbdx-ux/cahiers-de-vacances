@@ -1,4 +1,5 @@
 import { deriveCreatorIsParticipant } from "./audience"
+import { isPhotoPersisted } from "./photos"
 import type {
   BookProfileV1,
   GamePreferences,
@@ -124,14 +125,16 @@ export function buildBookProfile(questionnaire: QuestionnaireV1): BookProfileV1 
         ? { peopleToAvoid: questionnaire.forbiddenTopics.peopleToAvoid.trim() }
         : {}),
     },
-    photos: questionnaire.photos.map((p) => ({
-      id: p.id,
-      useAuthorized: p.useAuthorized,
-      ...(p.storagePath ? { storagePath: p.storagePath } : {}),
-      ...(p.caption?.trim() ? { caption: p.caption.trim() } : {}),
-      ...(p.anecdote?.trim() ? { anecdote: p.anecdote.trim() } : {}),
-      ...(p.participantIds?.length ? { participantIds: [...p.participantIds] } : {}),
-    })),
+    photos: questionnaire.photos
+      .filter((p) => p.useAuthorized && isPhotoPersisted(p))
+      .map((p) => ({
+        id: p.id,
+        useAuthorized: p.useAuthorized,
+        ...(p.storagePath ? { storagePath: p.storagePath } : {}),
+        ...(p.caption?.trim() ? { caption: p.caption.trim() } : {}),
+        ...(p.anecdote?.trim() ? { anecdote: p.anecdote.trim() } : {}),
+        ...(p.participantIds?.length ? { participantIds: [...p.participantIds] } : {}),
+      })),
     ...(questionnaire.finalMessage?.trim()
       ? { finalMessage: questionnaire.finalMessage.trim() }
       : {}),

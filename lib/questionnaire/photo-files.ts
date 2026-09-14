@@ -2,6 +2,9 @@
  * In-memory File registry for questionnaire photos.
  * Files cannot live in React state / localStorage; kept here for upload + retry
  * until the tab is closed. Persisted photos use Storage + storagePath instead.
+ *
+ * Object URLs are revoked ONLY on replace / explicit clear / unmount cleanup —
+ * never because an upload failed (preview must survive ERROR state).
  */
 
 const files = new Map<string, File>()
@@ -21,6 +24,21 @@ export function getPhotoFile(photoId: string): File | undefined {
 
 export function getPhotoObjectUrl(photoId: string): string | undefined {
   return objectUrls.get(photoId)
+}
+
+/**
+ * Ensure a usable object URL exists while the File is still registered.
+ * Recreates the URL if it was lost without deleting the File (e.g. after a
+ * spurious revoke) — keeps ERROR-state previews alive.
+ */
+export function ensurePhotoObjectUrl(photoId: string): string | undefined {
+  const existing = objectUrls.get(photoId)
+  if (existing) return existing
+  const file = files.get(photoId)
+  if (!file) return undefined
+  const url = URL.createObjectURL(file)
+  objectUrls.set(photoId, url)
+  return url
 }
 
 export function clearPhotoFile(photoId: string): void {

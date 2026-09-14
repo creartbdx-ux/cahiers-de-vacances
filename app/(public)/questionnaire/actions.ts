@@ -23,9 +23,11 @@ import { calculateProfileRichness } from "@/lib/questionnaire/richness"
 import {
   assertPhotoBelongsToProject,
   BOOK_PHOTOS_BUCKET,
+  extractPhotoIdFromStoragePath,
   mergeBookPhotosIntoQuestionnaire,
   toUserFacingPhotoError,
 } from "@/lib/questionnaire/photos"
+import { logPhotoPipelineError } from "@/lib/questionnaire/photo-log"
 import {
   createEmptyQuestionnaire,
   type BookProfileV1,
@@ -310,6 +312,9 @@ export async function submitQuestionnaireAction(
  * Register a book_photos row after a successful client-side Storage upload.
  * The file itself must already exist in the private book-photos bucket.
  * Payload stays tiny (metadata only) — never accepts file bytes / base64.
+ *
+ * Idempotent on storage_path: retry after a failed insert updates the same row.
+ * If DB insert fails after Storage success, the Storage object is removed to avoid orphans.
  */
 export async function registerBookPhotoAction(input: {
   projectId: string
@@ -317,13 +322,32 @@ export async function registerBookPhotoAction(input: {
   caption?: string
   anecdote?: string
   useAuthorized: boolean
-}): Promise<{ ok: true; storagePath: string } | { ok: false; error: string }> {
+}): Promise<{ ok: true; storagePath: string } | { ok: false; error: string; step?: string }> {
   const { user } = await getCurrentUser()
-  if (!user) return { ok: false, error: toUserFacingPhotoError("Non authentifié") }
+  if (!user) {
+    logPhotoPipelineError({
+      step: "REGISTER_METADATA",
+      bookProjectId: input.projectId,
+      storagePath: input.storagePath,
+      code: "NO_SESSION",
+      message: "Non authentifié",
+    })
+    return { ok: false, error: toUserFacingPhotoError("Non authentifié"), step: "REGISTER_METADATA" }
+  }
+
+  const photoId = extractPhotoIdFromStoragePath(input.storagePath)
 
   const existing = await getBookProject(input.projectId)
   if (!existing || existing.user_id !== user.id) {
-    return { ok: false, error: toUserFacingPhotoError("Projet inaccessible") }
+    logPhotoPipelineError({
+      step: "REGISTER_METADATA",
+      bookProjectId: input.projectId,
+      photoId,
+      storagePath: input.storagePath,
+      code: "FORBIDDEN_OR_MISSING",
+      message: !existing ? "Projet introuvable" : "Projet inaccessible",
+    })
+    return { ok: false, error: toUserFacingPhotoError("Projet inaccessible"), step: "REGISTER_METADATA" }
   }
 
   if (
@@ -333,7 +357,15 @@ export async function registerBookPhotoAction(input: {
       projectId: input.projectId,
     })
   ) {
-    return { ok: false, error: toUserFacingPhotoError("Chemin photo invalide") }
+    logPhotoPipelineError({
+      step: "REGISTER_METADATA",
+      bookProjectId: input.projectId,
+      photoId,
+      storagePath: input.storagePath,
+      code: "PATH_MISMATCH",
+      message: "storagePath does not match auth.uid()/projectId",
+    })
+    return { ok: false, error: toUserFacingPhotoError("Chemin photo invalide"), step: "REGISTER_METADATA" }
   }
 
   const supabase = await createClient()
@@ -342,7 +374,15 @@ export async function registerBookPhotoAction(input: {
     .createSignedUrl(input.storagePath, 60)
 
   if (missingError) {
-    return { ok: false, error: toUserFacingPhotoError(missingError.message) }
+    logPhotoPipelineError({
+      step: "SIGNED_URL",
+      bookProjectId: input.projectId,
+      photoId,
+      storagePath: input.storagePath,
+      code: missingError.name,
+      message: missingError.message,
+    })
+    return { ok: false, error: toUserFacingPhotoError(missingError.message), step: "SIGNED_URL" }
   }
 
   const { error: rowError } = await insertBookPhoto({
@@ -353,7 +393,19 @@ export async function registerBookPhotoAction(input: {
     useAuthorized: input.useAuthorized,
   })
 
-  if (rowError) return { ok: false, error: toUserFacingPhotoError(rowError) }
+  if (rowError) {
+    logPhotoPipelineError({
+      step: "REGISTER_METADATA",
+      bookProjectId: input.projectId,
+      photoId,
+      storagePath: input.storagePath,
+      code: "DB_INSERT",
+      message: rowError,
+    })
+    // Keep Storage object — client retries register only (same path, upsert-safe).
+    return { ok: false, error: toUserFacingPhotoError(rowError), step: "REGISTER_METADATA" }
+  }
+
   return { ok: true, storagePath: input.storagePath }
 }
 
