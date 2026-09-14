@@ -56,7 +56,9 @@ import {
   ensurePhotoObjectUrl,
   getPhotoFile,
   getPhotoObjectUrl,
+  hasPhotoFile,
   setPhotoFile,
+  snapshotPhotoFile,
 } from "@/lib/questionnaire/photo-files"
 import {
   clearQuestionnaireDraft,
@@ -348,7 +350,7 @@ export function QuestionnaireWizard({
     const decision = decidePhotoUploadAction({
       uploadStatus: photo.uploadStatus,
       storagePath: photo.storagePath,
-      hasLocalFile: Boolean(getPhotoFile(photo.id)),
+      hasLocalFile: hasPhotoFile(photo.id),
     })
 
     if (decision.action === "error_missing_file") {
@@ -368,7 +370,22 @@ export function QuestionnaireWizard({
     }
 
     if (decision.action === "upload_and_register") {
-      const file = getPhotoFile(photo.id)!
+      const file = getPhotoFile(photo.id)
+      if (!file || !hasPhotoFile(photo.id)) {
+        setQ((prev) => ({
+          ...prev,
+          photos: prev.photos.map((p) =>
+            p.id === photo.id
+              ? {
+                  ...p,
+                  uploadStatus: "error",
+                  uploadError: PHOTO_UPLOAD_USER_ERROR,
+                }
+              : p,
+          ),
+        }))
+        return { ok: false, error: PHOTO_UPLOAD_USER_ERROR }
+      }
       const uploaded = await uploadBookPhotoFile({
         projectId,
         photoId: photo.id,
@@ -1671,34 +1688,14 @@ function PhotosStep({
     setUploadErrors((prev) => [...prev, message])
   }
 
-  function addPhotoFromFile(file: File) {
-    const validation = validatePhotoFile(file)
-    if (validation) {
-      pushUploadError(validation)
-      return
-    }
-    setQ((prev) => {
-      if (prev.photos.length >= MAX_PHOTOS) return prev
-      const id = newId("ph")
-      const previewDataUrl = setPhotoFile(id, file)
-      return {
-        ...prev,
-        photos: [
-          ...prev.photos,
-          {
-            id,
-            previewDataUrl,
-            fileName: file.name,
-            useAuthorized: false,
-            uploadStatus: "local",
-          },
-        ],
-      }
-    })
-  }
-
-  function readFiles(fileList: FileList | File[]) {
+  /**
+   * Snapshot FileList entries immediately, register each File under a stable
+   * photoId OUTSIDE setState (avoids Strict Mode / stale FileList issues),
+   * then append metadata in one state update.
+   */
+  async function readFiles(fileList: FileList | File[]) {
     setUploadErrors([])
+    // Copy BEFORE any input reset / await — FileList is live.
     const all = Array.from(fileList)
     const images = all.filter((f) => f.type.startsWith("image/"))
     const rejected = all.length - images.length
@@ -1717,7 +1714,63 @@ function PhotosStep({
         `Maximum ${MAX_PHOTOS} photos : seules les ${remaining} premières ont été prises en compte.`,
       )
     }
-    images.slice(0, remaining).forEach((file) => addPhotoFromFile(file))
+
+    const selected = images.slice(0, remaining)
+    const additions: Array<{
+      id: string
+      previewDataUrl: string
+      fileName: string
+    }> = []
+
+    for (const original of selected) {
+      const validation = validatePhotoFile(original)
+      if (validation) {
+        pushUploadError(validation)
+        continue
+      }
+      // Detach bytes from the live FileList entry before input clear / GC.
+      const snap = await snapshotPhotoFile(original)
+      if (!snap) {
+        pushUploadError(PHOTO_UPLOAD_USER_ERROR)
+        continue
+      }
+      const id = newId("ph")
+      try {
+        const previewDataUrl = setPhotoFile(id, snap)
+        additions.push({
+          id,
+          previewDataUrl,
+          fileName: snap.name,
+        })
+      } catch {
+        pushUploadError(PHOTO_UPLOAD_USER_ERROR)
+      }
+    }
+
+    if (!additions.length) return
+
+    setQ((prev) => {
+      const room = MAX_PHOTOS - prev.photos.length
+      if (room <= 0) {
+        for (const a of additions) clearPhotoFile(a.id)
+        return prev
+      }
+      const take = additions.slice(0, room)
+      for (const dropped of additions.slice(room)) clearPhotoFile(dropped.id)
+      return {
+        ...prev,
+        photos: [
+          ...prev.photos,
+          ...take.map((a) => ({
+            id: a.id,
+            previewDataUrl: a.previewDataUrl,
+            fileName: a.fileName,
+            useAuthorized: false,
+            uploadStatus: "local" as const,
+          })),
+        ],
+      }
+    })
   }
 
   async function uploadAuthorizedPhoto(photo: QuestionnairePhoto) {
@@ -1740,7 +1793,46 @@ function PhotosStep({
       }))
       return
     }
-    await persistPhoto({ ...photo, useAuthorized: true }, projectId, userId)
+    // Always re-read the latest photo row (storagePath / status) from state via id.
+    const latest = q.photos.find((p) => p.id === photo.id) ?? photo
+    await persistPhoto({ ...latest, useAuthorized: true }, projectId, userId)
+  }
+
+  async function replacePhotoFile(photoId: string, fileList: FileList | null) {
+    if (!fileList?.length) return
+    const original = fileList[0]!
+    const validation = validatePhotoFile(original)
+    if (validation) {
+      pushUploadError(validation)
+      return
+    }
+    const snap = await snapshotPhotoFile(original)
+    if (!snap) {
+      pushUploadError(PHOTO_UPLOAD_USER_ERROR)
+      return
+    }
+    try {
+      const previewDataUrl = setPhotoFile(photoId, snap)
+      setQ((prev) => ({
+        ...prev,
+        photos: prev.photos.map((p) =>
+          p.id === photoId
+            ? {
+                ...p,
+                previewDataUrl,
+                fileName: snap.name,
+                uploadStatus: "local",
+                uploadError: undefined,
+                // New file → previous failed storage path no longer valid.
+                storagePath: undefined,
+              }
+            : p,
+        ),
+      }))
+      setBrokenPreviewIds((prev) => prev.filter((id) => id !== photoId))
+    } catch {
+      pushUploadError(PHOTO_UPLOAD_USER_ERROR)
+    }
   }
 
   async function removePhoto(photo: QuestionnairePhoto) {
@@ -1788,7 +1880,10 @@ function PhotosStep({
           onDrop={(e) => {
             e.preventDefault()
             setDragging(false)
-            if (e.dataTransfer.files?.length) readFiles(e.dataTransfer.files)
+            if (e.dataTransfer.files?.length) {
+              const copied = Array.from(e.dataTransfer.files)
+              void readFiles(copied)
+            }
           }}
           className={cn(
             "flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors",
@@ -1810,8 +1905,9 @@ function PhotosStep({
             multiple
             className="hidden"
             onChange={(e) => {
-              if (e.target.files?.length) readFiles(e.target.files)
+              const list = e.target.files ? Array.from(e.target.files) : []
               e.target.value = ""
+              if (list.length) void readFiles(list)
             }}
           />
         </div>
@@ -1952,7 +2048,7 @@ function PhotosStep({
                 </span>
               </label>
               <div className="flex flex-wrap gap-3">
-                {status === "error" && (
+                {status === "error" && hasPhotoFile(photo.id) && (
                   <button
                     type="button"
                     className="text-sm text-primary underline underline-offset-4"
@@ -1960,6 +2056,21 @@ function PhotosStep({
                   >
                     Réessayer
                   </button>
+                )}
+                {status === "error" && !hasPhotoFile(photo.id) && (
+                  <label className="cursor-pointer text-sm text-primary underline underline-offset-4">
+                    Resélectionner le fichier
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      className="hidden"
+                      onChange={(e) => {
+                        const list = e.target.files
+                        e.target.value = ""
+                        void replacePhotoFile(photo.id, list)
+                      }}
+                    />
+                  </label>
                 )}
                 <button
                   type="button"

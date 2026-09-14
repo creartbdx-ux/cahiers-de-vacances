@@ -56,6 +56,12 @@ export function isAcceptedPhotoMimeType(mime: string): boolean {
 }
 
 export function validatePhotoFile(file: Pick<File, "size" | "type" | "name">): string | null {
+  if (!file || typeof file.size !== "number") {
+    return PHOTO_UPLOAD_USER_ERROR
+  }
+  if (file.size <= 0) {
+    return PHOTO_UPLOAD_USER_ERROR
+  }
   if (!file.type.startsWith("image/") || !isAcceptedPhotoMimeType(file.type)) {
     return PHOTO_FORMAT_USER_ERROR
   }
