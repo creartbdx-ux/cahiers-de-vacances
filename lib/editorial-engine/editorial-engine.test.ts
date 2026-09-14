@@ -11,6 +11,8 @@ import {
   evaluateEligibility,
   targetPersonalRatio,
 } from "./index"
+import { templateForEngine } from "./requirements"
+import { resolveTemplateEngine } from "../book-renderer/templates"
 
 function mockGame(
   id: string,
@@ -483,4 +485,87 @@ test("rejet QUIZ_PERSONAL ME/OTHER ne réduit pas inutilement les slots si THEME
   assert.ok(plan.selectedGames.length >= 5)
   assert.ok(plan.selectedGames.some((s) => s.gameId === "QUIZ_THEME"))
   assert.ok(!plan.selectedGames.some((s) => s.gameId === "QUIZ_PERSONAL"))
+})
+
+/** Expected live catalogue row for TRUE_FALSE_THEME (scripts/013) — not a bypass. */
+const TRUE_FALSE_THEME_CATALOG_EXPECTED = {
+  id: "TRUE_FALSE_THEME",
+  name: "Vrai ou faux thématique",
+  family: "QUIZ",
+  personalization_type: "THEME",
+  technical_engine: "TRUE_FALSE",
+  min_difficulty: 1,
+  max_difficulty: 4,
+  max_per_book: 1,
+  correction_required: true,
+  active: true,
+} as const
+
+test("TRUE_FALSE_THEME présent dans catalogue V1 + moteur / template compatibles", () => {
+  assert.ok(EDITORIAL_V1_GAME_IDS.includes("TRUE_FALSE_THEME"))
+  assert.equal(isGameEngineId("TRUE_FALSE"), true)
+  assert.equal(templateForEngine("TRUE_FALSE"), "TRUE_FALSE_01")
+  assert.equal(resolveTemplateEngine("TRUE_FALSE_01"), "TRUE_FALSE")
+
+  const row = mockGame("TRUE_FALSE_THEME", { ...TRUE_FALSE_THEME_CATALOG_EXPECTED })
+  assert.equal(row.id, TRUE_FALSE_THEME_CATALOG_EXPECTED.id)
+  assert.equal(row.personalization_type, "THEME")
+  assert.equal(row.technical_engine, "TRUE_FALSE")
+  assert.equal(row.active, true)
+  assert.equal(row.correction_required, true)
+  assert.equal(row.max_per_book, 1)
+})
+
+test("TRUE_FALSE_THEME actif + univers => éligible ; absent/inactif rejeté", () => {
+  const profile = baseProfile({
+    sharedProfile: { interestUniverseIds: ["MOUNTAIN", "FOOD"] },
+  })
+  const inv = buildSourceInventory(profile)
+
+  const withCatalog = evaluateEligibility(profile, inv, CATALOG)
+  assert.ok(withCatalog.eligible.some((e) => e.gameId === "TRUE_FALSE_THEME"))
+  assert.ok(!withCatalog.rejected.some((r) => r.gameId === "TRUE_FALSE_THEME"))
+
+  const without = evaluateEligibility(
+    profile,
+    inv,
+    CATALOG.filter((g) => g.id !== "TRUE_FALSE_THEME"),
+  )
+  const absent = without.rejected.find((r) => r.gameId === "TRUE_FALSE_THEME")
+  assert.ok(absent)
+  assert.equal(absent!.reason, "Jeu absent du catalogue.")
+
+  const inactive = evaluateEligibility(profile, inv, [
+    ...CATALOG.filter((g) => g.id !== "TRUE_FALSE_THEME"),
+    mockGame("TRUE_FALSE_THEME", { active: false }),
+  ])
+  const inac = inactive.rejected.find((r) => r.gameId === "TRUE_FALSE_THEME")
+  assert.ok(inac)
+  assert.equal(inac!.reason, "Jeu inactif.")
+})
+
+test("TRUE_FALSE_PERSONAL inchangé par l'ajout THEME", () => {
+  const profile = baseProfile({
+    audience: "DUO",
+    participants: [
+      { id: "p1", firstName: "A" },
+      { id: "p2", firstName: "B" },
+    ],
+    personalFacts: richFacts("tf", 8),
+  })
+  const inv = buildSourceInventory(profile)
+  const { eligible } = evaluateEligibility(profile, inv, CATALOG)
+  const personal = eligible.find((e) => e.gameId === "TRUE_FALSE_PERSONAL")
+  const theme = eligible.find((e) => e.gameId === "TRUE_FALSE_THEME")
+  assert.ok(personal)
+  assert.ok(theme)
+  assert.equal(personal!.personalizationType, "PERSONAL")
+  assert.equal(theme!.personalizationType, "THEME")
+
+  const req = buildContentRequirements("TRUE_FALSE_PERSONAL", "PERSONAL", null)
+  assert.equal(req.type, "TRUE_FALSE_CONTENT")
+  if (req.type === "TRUE_FALSE_CONTENT") {
+    assert.equal(req.requirePersonalSource, true)
+    assert.equal(req.targetStatements, 8)
+  }
 })

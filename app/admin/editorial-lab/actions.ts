@@ -963,7 +963,7 @@ export async function generateTrueFalseThemeCatalogTestAction(input: {
     return {
       ok: false,
       configured: true,
-      message: "TRUE_FALSE_THEME absent du catalogue (exécutez scripts/010_true_false_theme_seed.sql).",
+      message: "TRUE_FALSE_THEME absent du catalogue (exécutez scripts/013_true_false_theme_seed.sql dans Supabase).",
     }
   }
 
