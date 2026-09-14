@@ -1,7 +1,4 @@
-import {
-  topicHitsExcluded,
-  topicMatchesAllowed,
-} from "@/lib/universes/editorial"
+import { topicHitsExcluded } from "@/lib/universes/editorial"
 import { choicesAreSufficientlyDistinct } from "../validators"
 import { questionLeaksCorrectAnswer } from "../quiz-personal/quality"
 import { QUIZ_THEME_CHOICE_COUNT } from "./schema"
@@ -13,6 +10,7 @@ import {
 import type { QuizThemeContext } from "./context"
 import type {
   GeneratedQuizThemeQuestion,
+  QuizThemeQuestionIssue,
   QuizThemeValidationResult,
 } from "./types"
 
@@ -39,8 +37,105 @@ export function looksTemporalOrNewsy(text: string): boolean {
   return TEMPORAL_RE.test(text)
 }
 
+/** Exact membership in allowedTopics when the list is non-empty. */
+export function topicKeyIsAllowed(topicKey: string, allowedTopics: string[]): boolean {
+  if (!allowedTopics.length) return Boolean(topicKey.trim())
+  return allowedTopics.includes(topicKey)
+}
+
 /**
- * Independent QUIZ_THEME validator — reuses shared choice / leak helpers.
+ * Validate a single question (structural + thematic). Returns error strings.
+ */
+export function validateQuizThemeQuestion(
+  q: GeneratedQuizThemeQuestion,
+  context: QuizThemeContext,
+  questionNumber1Based: number,
+): string[] {
+  const n = questionNumber1Based
+  const errors: string[] = []
+
+  if (!q.question?.trim()) {
+    errors.push(`Question ${n}: énoncé vide.`)
+    return errors
+  }
+
+  if (!isQuizThemeQuestionStyle(q.questionStyle)) {
+    errors.push(
+      `Question ${n}: questionStyle invalide ou manquant (« ${String(q.questionStyle ?? "")} »).`,
+    )
+  }
+
+  if (!Array.isArray(q.choices) || q.choices.length !== QUIZ_THEME_CHOICE_COUNT) {
+    errors.push(
+      `Question ${n}: exactement ${QUIZ_THEME_CHOICE_COUNT} choix requis (reçu ${q.choices?.length ?? 0}).`,
+    )
+  } else {
+    if (q.choices.some((c) => !c?.trim())) {
+      errors.push(`Question ${n}: un choix est vide.`)
+    }
+    if (!choicesAreSufficientlyDistinct(q.choices)) {
+      errors.push(`Question ${n}: choix dupliqués ou trop similaires.`)
+    }
+  }
+
+  if (
+    !Number.isInteger(q.correctIndex) ||
+    q.correctIndex < 0 ||
+    q.correctIndex > 3
+  ) {
+    errors.push(`Question ${n}: correctIndex invalide.`)
+  }
+
+  if (!q.explanation?.trim()) {
+    errors.push(`Question ${n}: explanation obligatoire.`)
+  }
+
+  if (!q.topicKey?.trim()) {
+    errors.push(`Question ${n}: topicKey manquant.`)
+  } else if (!topicKeyIsAllowed(q.topicKey, context.allowedTopics)) {
+    errors.push(
+      `Question ${n}: topicKey « ${q.topicKey} » hors allowedTopics de l'univers.`,
+    )
+  }
+
+  if (!q.topicLabel?.trim()) {
+    errors.push(`Question ${n}: topicLabel manquant.`)
+  }
+
+  const hitExcluded = topicHitsExcluded(
+    q.topicLabel || q.topicKey,
+    `${q.question} ${q.explanation} ${q.topicLabel}`,
+    context.excludedTopics,
+  )
+  if (hitExcluded) {
+    errors.push(
+      `Question ${n}: contenu hors cadre — sujet exclu détecté : ${hitExcluded}.`,
+    )
+  }
+
+  const correct = q.choices[q.correctIndex] ?? ""
+  if (q.choices.length === QUIZ_THEME_CHOICE_COUNT && questionLeaksCorrectAnswer(q.question, correct)) {
+    errors.push(
+      `Question ${n}: la bonne réponse est trop clairement révélée dans l'énoncé.`,
+    )
+  }
+
+  if (isTrivialThemeQuestion(q.question)) {
+    errors.push(`Question ${n}: formulation trop triviale pour un quiz thématique.`)
+  }
+
+  const blob = `${q.question} ${q.explanation}`
+  if (looksTemporalOrNewsy(blob)) {
+    errors.push(
+      `Question ${n}: formulation trop liée à l'actualité / au temps présent — privilégier des faits stables.`,
+    )
+  }
+
+  return errors
+}
+
+/**
+ * Independent QUIZ_THEME validator — topicKey exact + style diversity + quality.
  */
 export function validateQuizThemeGeneration(input: {
   title: string
@@ -50,6 +145,7 @@ export function validateQuizThemeGeneration(input: {
   const { title, questions, context } = input
   const errors: string[] = []
   const warnings: string[] = []
+  const questionIssues: QuizThemeQuestionIssue[] = []
   const target = context.targetQuestions
 
   if (!title.trim()) {
@@ -61,113 +157,60 @@ export function validateQuizThemeGeneration(input: {
   }
 
   const seenQuestions = new Set<string>()
-  const topics = new Map<string, number>()
+  const topicKeys = new Map<string, number>()
   const styles: QuizThemeQuestionStyle[] = []
 
   questions.forEach((q, i) => {
     const n = i + 1
-    if (!q.question?.trim()) {
-      errors.push(`Question ${n}: énoncé vide.`)
-      return
-    }
+    const qErrors = validateQuizThemeQuestion(q, context, n)
 
     const qKey = normalizeKey(q.question)
-    if (seenQuestions.has(qKey)) {
-      errors.push(`Question ${n}: doublon d'énoncé.`)
+    if (q.question?.trim()) {
+      if (seenQuestions.has(qKey)) {
+        qErrors.push(`Question ${n}: doublon d'énoncé.`)
+      }
+      seenQuestions.add(qKey)
     }
-    seenQuestions.add(qKey)
 
-    if (!isQuizThemeQuestionStyle(q.questionStyle)) {
-      errors.push(
-        `Question ${n}: questionStyle invalide ou manquant (« ${String(q.questionStyle ?? "")} »).`,
-      )
-    } else {
+    if (q.topicKey?.trim()) {
+      const tKey = normalizeKey(q.topicKey)
+      topicKeys.set(tKey, (topicKeys.get(tKey) ?? 0) + 1)
+    }
+
+    if (isQuizThemeQuestionStyle(q.questionStyle)) {
       styles.push(q.questionStyle)
     }
 
-    if (!Array.isArray(q.choices) || q.choices.length !== QUIZ_THEME_CHOICE_COUNT) {
-      errors.push(
-        `Question ${n}: exactement ${QUIZ_THEME_CHOICE_COUNT} choix requis (reçu ${q.choices?.length ?? 0}).`,
-      )
-      return
-    }
-
-    if (q.choices.some((c) => !c?.trim())) {
-      errors.push(`Question ${n}: un choix est vide.`)
-    }
-
-    if (!choicesAreSufficientlyDistinct(q.choices)) {
-      errors.push(`Question ${n}: choix dupliqués ou trop similaires.`)
-    }
-
-    if (
-      !Number.isInteger(q.correctIndex) ||
-      q.correctIndex < 0 ||
-      q.correctIndex > 3
-    ) {
-      errors.push(`Question ${n}: correctIndex invalide.`)
-    }
-
-    if (!q.explanation?.trim()) {
-      errors.push(`Question ${n}: explanation obligatoire.`)
-    }
-
-    if (!q.topic?.trim()) {
-      errors.push(`Question ${n}: topic manquant.`)
-    } else {
-      const tKey = normalizeKey(q.topic)
-      topics.set(tKey, (topics.get(tKey) ?? 0) + 1)
-
-      const hitExcluded = topicHitsExcluded(
-        q.topic,
-        q.question,
-        context.excludedTopics,
-      )
-      if (hitExcluded) {
-        errors.push(
-          `Question ${n}: topic hors cadre (« ${q.topic} ») — sujet exclu : ${hitExcluded}.`,
-        )
-      } else if (
-        context.allowedTopics.length > 0 &&
-        !topicMatchesAllowed(q.topic, context.allowedTopics)
-      ) {
-        errors.push(
-          `Question ${n}: topic « ${q.topic} » non cohérent avec les sujets autorisés de l'univers.`,
-        )
-      }
-    }
-
-    const correct = q.choices[q.correctIndex] ?? ""
-    if (questionLeaksCorrectAnswer(q.question, correct)) {
-      errors.push(
-        `Question ${n}: la bonne réponse est trop clairement révélée dans l'énoncé.`,
-      )
-    }
-
-    if (isTrivialThemeQuestion(q.question)) {
-      errors.push(`Question ${n}: formulation trop triviale pour un quiz thématique.`)
-    }
-
-    const blob = `${q.question} ${q.explanation}`
-    if (looksTemporalOrNewsy(blob)) {
-      errors.push(
-        `Question ${n}: formulation trop liée à l'actualité / au temps présent — privilégier des faits stables.`,
-      )
+    if (qErrors.length) {
+      questionIssues.push({ index: i, errors: qErrors })
+      errors.push(...qErrors)
     }
   })
 
-  // Topic diversity
+  // topicKey diversity (canonical keys)
   if (questions.length >= 4) {
-    const distinct = topics.size
+    const distinct = topicKeys.size
     const minDistinct = Math.max(3, Math.ceil(questions.length / 2))
     if (distinct < minDistinct) {
       errors.push(
-        `Diversité insuffisante des topics (${distinct} distincts, minimum ${minDistinct}).`,
+        `Diversité insuffisante des topicKeys (${distinct} distincts, minimum ${minDistinct}).`,
       )
     }
-    for (const [topic, count] of topics) {
+    for (const [topic, count] of topicKeys) {
       if (count > Math.ceil(questions.length / 2)) {
-        errors.push(`Topic « ${topic} » sur-représenté (${count} questions).`)
+        errors.push(`topicKey « ${topic} » sur-représenté (${count} questions).`)
+        // Attribute to questions using that key (for targeted repair)
+        questions.forEach((q, i) => {
+          if (normalizeKey(q.topicKey) === topic) {
+            const existing = questionIssues.find((qi) => qi.index === i)
+            const msg = `Question ${i + 1}: topicKey « ${q.topicKey} » sur-représenté dans le quiz.`
+            if (existing) {
+              if (!existing.errors.includes(msg)) existing.errors.push(msg)
+            } else {
+              questionIssues.push({ index: i, errors: [msg] })
+            }
+          }
+        })
       }
     }
   }
@@ -175,12 +218,49 @@ export function validateQuizThemeGeneration(input: {
   // Form / questionStyle diversity
   if (styles.length === questions.length && questions.length > 0) {
     const styleEval = evaluateQuestionStyleDiversity(styles)
-    errors.push(...styleEval.errors)
+    for (const e of styleEval.errors) {
+      errors.push(e)
+      // Attribute consecutive / overused styles to question indexes
+      if (/consécutif/i.test(e)) {
+        const m = e.match(/Questions (\d+) et (\d+)/i)
+        if (m) {
+          for (const num of [Number(m[1]), Number(m[2])]) {
+            const idx = num - 1
+            const msg = e
+            const existing = questionIssues.find((qi) => qi.index === idx)
+            if (existing) {
+              if (!existing.errors.includes(msg)) existing.errors.push(msg)
+            } else {
+              questionIssues.push({ index: idx, errors: [msg] })
+            }
+          }
+        }
+      } else if (/surutilisé/i.test(e)) {
+        const m = e.match(/Style (\w+) surutilisé/i)
+        const style = m?.[1]
+        if (style) {
+          questions.forEach((q, i) => {
+            if (q.questionStyle === style) {
+              const msg = e
+              const existing = questionIssues.find((qi) => qi.index === i)
+              if (existing) {
+                if (!existing.errors.includes(msg)) existing.errors.push(msg)
+              } else {
+                questionIssues.push({ index: i, errors: [msg] })
+              }
+            }
+          })
+        }
+      } else if (/formes insuffisante/i.test(e)) {
+        // Attribute to all — repair may need several replacements; mark none-specific
+        // by leaving as global only (questionIssues may stay empty for this alone)
+      }
+    }
     warnings.push(...styleEval.warnings)
   }
 
   if (errors.length) {
-    return { ok: false, errors, warnings }
+    return { ok: false, errors, warnings, questionIssues }
   }
 
   const styleEval = evaluateQuestionStyleDiversity(styles)
@@ -188,7 +268,7 @@ export function validateQuizThemeGeneration(input: {
     ok: true,
     questions,
     title: title.trim(),
-    topics: [...topics.keys()],
+    topics: [...topicKeys.keys()],
     styles,
     styleDistinctCount: styleEval.distinctCount,
     styleDiversityOk: true,

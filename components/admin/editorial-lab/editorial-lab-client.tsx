@@ -452,13 +452,15 @@ export function EditorialLabClient({
                             <p className="text-sm font-medium">{themeOk.title}</p>
                             <p className="text-sm text-muted-foreground">
                               Validation OK · {themeOk.questionCount} question
-                              {themeOk.questionCount > 1 ? "s" : ""} · topics :{" "}
+                              {themeOk.questionCount > 1 ? "s" : ""} · topicKeys :{" "}
                               {themeOk.topics.join(", ") || "—"} · {themeOk.durationMs} ms
-                              {themeOk.repaired ? " · réparation auto utilisée" : ""}
+                              {themeOk.repaired
+                                ? ` · Réparation : ${themeOk.repairedCount} question${themeOk.repairedCount > 1 ? "s" : ""} remplacée${themeOk.repairedCount > 1 ? "s" : ""}`
+                                : ""}
                             </p>
                             <p className="text-sm text-muted-foreground">
                               Diversité : {themeOk.styleDistinctCount} style
-                              {themeOk.styleDistinctCount > 1 ? "s" : ""} utiliséé
+                              {themeOk.styleDistinctCount > 1 ? "s" : ""} utilisé
                               {themeOk.styleDistinctCount > 1 ? "s" : ""} sur{" "}
                               {themeOk.questionCount} question
                               {themeOk.questionCount > 1 ? "s" : ""}
@@ -477,6 +479,9 @@ export function EditorialLabClient({
                               <div key={q.id} className="rounded-lg border border-border p-3">
                                 <p className="text-sm font-medium">Question {qi + 1}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">
+                                  Sujet : {q.topicKey}
+                                  {q.topicLabel ? ` · Sous-thème : ${q.topicLabel}` : ""}
+                                  {" · "}
                                   Style : {q.questionStyle}
                                 </p>
                                 <p className="mt-1 text-sm">&ldquo;{q.question}&rdquo;</p>
@@ -493,9 +498,6 @@ export function EditorialLabClient({
                                 </p>
                                 <p className="mt-1 text-sm text-muted-foreground">
                                   Explication : {q.explanation}
-                                </p>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  Topic : {q.topic}
                                 </p>
                               </div>
                             ))}

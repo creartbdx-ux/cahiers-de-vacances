@@ -3,6 +3,7 @@ import {
   QUIZ_THEME_QUESTION_STYLES,
   QUIZ_THEME_STYLE_GUIDANCE,
 } from "./styles"
+import type { GeneratedQuizThemeQuestion } from "./types"
 
 function difficultyGuidance(level: number): string {
   switch (level) {
@@ -30,8 +31,25 @@ function questionStylePromptBlock(targetQuestions: number): string {
     `Pour ${targetQuestions} questions : au plus 2 du même questionStyle, au moins 3 styles distincts, et évitez deux fois le même style d'affilée.`,
     "Chaque question DOIT déclarer un questionStyle parmi :",
     ...lines,
-    "Visez un mix raisonnable (vocabulaire, différence, curiosité / histoire, identification, fonction, séquence, association…) adapté à l'univers — sans forcer un style inadapté.",
-    "La diversité de forme ne remplace PAS la difficulté : à difficulté 3, une question FUNCTION ne doit pas être évidente (ex. éviter « À quoi sert un mascara ? »).",
+    "Visez un mix raisonnable adapté à l'univers — sans forcer un style inadapté.",
+    "La diversité de forme ne remplace PAS la difficulté : à difficulté 3, une question FUNCTION ne doit pas être évidente.",
+  ].join("\n")
+}
+
+function topicKeyPromptBlock(ctx: QuizThemeContext): string {
+  if (ctx.allowedTopics.length) {
+    return [
+      "Classification thématique (topicKey / topicLabel) :",
+      "- topicKey DOIT être exactement l'une des valeurs allowedTopics (enum).",
+      `- Valeurs autorisées : ${ctx.allowedTopics.join(" | ")}.`,
+      "- topicLabel est un sous-thème libre et précis pour le debug (ex. topicKey=parfums, topicLabel=concentration olfactive).",
+      "- Ne jamais inventer un topicKey hors liste.",
+    ].join("\n")
+  }
+  return [
+    "Classification thématique (topicKey / topicLabel) :",
+    "- topicKey : catégorie éditoriale courte de l'univers.",
+    "- topicLabel : sous-thème libre plus précis.",
   ].join("\n")
 }
 
@@ -50,54 +68,94 @@ export function buildQuizThemeSystemPrompt(ctx: QuizThemeContext): string {
     "- Le joueur doit pouvoir se tromper ou chercher la réponse.",
     "- Questions intéressantes, accessibles selon la difficulté, jamais triviales.",
     "- Éviter absolument les QCM enfantins sans vraie connaissance.",
-    "- Chaque topic de question doit coller aux sujets autorisés (et jamais aux exclus).",
+    "",
+    topicKeyPromptBlock(ctx),
     "",
     questionStylePromptBlock(ctx.targetQuestions),
     "",
-    "Diversité de SUJETS (topic) :",
-    `- Variez les micro-sujets à l'intérieur du cadre éditorial. Pas ${ctx.targetQuestions} questions sur la même sous-thématique.`,
+    "Diversité de SUJETS (topicKey) :",
+    `- Variez les topicKey à l'intérieur du cadre. Pas ${ctx.targetQuestions} questions sur le même topicKey.`,
     "",
     "Distracteurs :",
     "- 3 mauvaises réponses plausibles, même domaine, formes similaires, distinctes.",
     "- Pas d'absurde, pas de synonymes, pas de réponse évidente par sa forme.",
     "",
     "Indice dans la question :",
-    "- La question ne doit pas contenir quasiment la réponse ni la traduire (ex. « mont Fuji japonais » → Japon).",
+    "- La question ne doit pas contenir quasiment la réponse ni la traduire.",
     "",
     "Stabilité factuelle :",
     "- Uniquement des connaissances raisonnablement stables et largement établies.",
-    "- Éviter actualité, politique actuelle, classements en cours, records changeants, prix, stats récentes, résultats sportifs récents, « actuellement », années très récentes.",
+    "- Éviter actualité, politique actuelle, classements en cours, records changeants, prix, stats récentes.",
     "- Si vous n'êtes pas certain d'un fait, ne l'utilisez pas.",
     "- Pas de conseil médical, pas de diagnostic, pas de claims santé douteux.",
     "",
     "Chaque question doit avoir :",
     "- exactement 4 choix, correctIndex ∈ {0,1,2,3}",
     "- un questionStyle (enum)",
-    "- une explanation courte non vide (pourquoi la bonne réponse est correcte)",
-    "- un topic court (sous-thème) aligné sur les sujets autorisés",
+    "- un topicKey (enum allowedTopics si fourni) + topicLabel précis",
+    "- une explanation courte non vide",
     "",
-    "Générez aussi un title court et élégant pour le quiz (style cahier de vacances), dérivé de l'univers — pas un titre générique plat.",
+    "Générez aussi un title court et élégant pour le quiz.",
     "Répondez UNIQUEMENT via le schéma JSON imposé.",
   ].join("\n")
 }
 
+export function buildQuizThemeTargetedRepairPrompt(input: {
+  baseSystem: string
+  keptQuestions: Array<{ index1: number; question: GeneratedQuizThemeQuestion }>
+  invalid: Array<{ index1: number; errors: string[] }>
+  usedStyles: string[]
+  usedTopicKeys: string[]
+}): string {
+  const keptBlock = input.keptQuestions.map((k) => {
+    const q = k.question
+    return [
+      `Q${k.index1} (À CONSERVER TELLE QUELLE) :`,
+      `  questionStyle=${q.questionStyle}`,
+      `  topicKey=${q.topicKey}`,
+      `  topicLabel=${q.topicLabel}`,
+      `  question=${q.question}`,
+    ].join("\n")
+  })
+
+  const invalidBlock = input.invalid.map((inv) =>
+    [
+      `Q${inv.index1} À REMPLACER :`,
+      ...inv.errors.map((e) => `  - ${e}`),
+    ].join("\n"),
+  )
+
+  return [
+    input.baseSystem,
+    "",
+    "Réparation ciblée (une seule tentative) :",
+    "Certaines questions du quiz sont invalides. Conservez STRICTEMENT les questions listées comme valides.",
+    "Renvoyez UNIQUEMENT les questions de remplacement demandées (schéma replacements), pas le quiz entier.",
+    "Chaque remplacement doit porter le même index 1-based que la question invalide.",
+    "",
+    "Questions valides à conserver (ne pas les réécrire) :",
+    ...keptBlock,
+    "",
+    "Questions invalides à remplacer :",
+    ...invalidBlock,
+    "",
+    `questionStyles déjà présents dans le quiz conservé : ${input.usedStyles.join(", ") || "—"}.`,
+    `topicKeys déjà présents dans le quiz conservé : ${input.usedTopicKeys.join(", ") || "—"}.`,
+    "Les remplacements doivent respecter la diversité globale (styles ≤2, ≥3 distincts, pas deux identiques d'affilée) une fois réintégrés.",
+    "Ne créez pas de questions triviales. Respectez allowedTopics / excludedTopics.",
+  ].join("\n")
+}
+
+/** @deprecated Prefer buildQuizThemeTargetedRepairPrompt — kept for full-regeneration edge cases. */
 export function buildQuizThemeRepairSystemPrompt(
   base: string,
   validationErrors: string[],
 ): string {
-  const overused = validationErrors
-    .filter((e) => /Style \w+ surutilisé/i.test(e) || /même questionStyle/i.test(e))
-    .join("\n")
   return [
     base,
     "",
     "Tentative de réparation : la génération précédente a échoué la validation.",
     "Corrigez UNIQUEMENT ces problèmes et renvoyez un JSON complet valide.",
-    "Remplacez les questions hors cadre éditorial, triviales, révélatrices, d'actualité, en doublon, ou trop uniformes de forme — sans inventer de trivia douteuse.",
-    "Redistribuez les questionStyle : maximum 2 par style, ≥ 3 styles distincts, pas deux identiques d'affilée.",
-    ...(overused
-      ? ["Styles déjà problématiques à corriger en priorité :", overused]
-      : []),
     ...validationErrors.map((e) => `- ${e}`),
   ].join("\n")
 }

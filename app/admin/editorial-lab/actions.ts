@@ -213,10 +213,11 @@ export type QuizThemeLabQuestionView = {
   id: string
   question: string
   questionStyle: string
+  topicKey: string
+  topicLabel: string
   choices: [string, string, string, string]
   correctIndex: 0 | 1 | 2 | 3
   explanation: string
-  topic: string
 }
 
 export type GenerateQuizThemeLabResult =
@@ -235,6 +236,7 @@ export type GenerateQuizThemeLabResult =
       styleDiversityOk: boolean
       durationMs: number
       repaired: boolean
+      repairedCount: number
       warnings: string[]
       questions: QuizThemeLabQuestionView[]
       engineQuestions: QuizQuestion[]
@@ -375,6 +377,7 @@ export async function generateQuizThemeLabAction(input: {
     styleDiversityOk: result.validation.styleDiversityOk,
     durationMs: result.durationMs,
     repaired: result.repaired,
+    repairedCount: result.repairedCount,
     warnings: result.validation.warnings,
     questions,
     engineQuestions: result.engineResult.questions,
@@ -387,9 +390,10 @@ function toThemeLabQuestionView(q: GeneratedQuizThemeQuestion): QuizThemeLabQues
     id: q.id,
     question: q.question,
     questionStyle: q.questionStyle,
+    topicKey: q.topicKey,
+    topicLabel: q.topicLabel,
     choices: q.choices,
     correctIndex: q.correctIndex,
     explanation: q.explanation,
-    topic: q.topic,
   }
 }

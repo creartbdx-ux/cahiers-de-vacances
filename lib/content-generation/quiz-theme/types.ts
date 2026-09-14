@@ -8,7 +8,10 @@ export interface GeneratedQuizThemeQuestion {
   choices: [string, string, string, string]
   correctIndex: 0 | 1 | 2 | 3
   explanation: string
-  topic: string
+  /** Canonical allowed topic from the universe (exact match). */
+  topicKey: string
+  /** Optional precise sub-theme for debug / admin. */
+  topicLabel: string
 }
 
 export interface GeneratedQuizTheme {
@@ -20,10 +23,17 @@ export interface GeneratedQuizTheme {
   questions: GeneratedQuizThemeQuestion[]
 }
 
+export interface QuizThemeQuestionIssue {
+  /** 0-based index in the questions array. */
+  index: number
+  errors: string[]
+}
+
 export interface QuizThemeValidationSuccess {
   ok: true
   questions: GeneratedQuizThemeQuestion[]
   title: string
+  /** Distinct topicKeys used. */
   topics: string[]
   styles: QuizThemeQuestionStyle[]
   styleDistinctCount: number
@@ -35,6 +45,8 @@ export interface QuizThemeValidationFailure {
   ok: false
   errors: string[]
   warnings: string[]
+  /** Per-question issues when identifiable (for targeted repair). */
+  questionIssues: QuizThemeQuestionIssue[]
 }
 
 export type QuizThemeValidationResult = QuizThemeValidationSuccess | QuizThemeValidationFailure

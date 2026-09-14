@@ -11,13 +11,18 @@ import {
   type QuizThemeContext,
 } from "./context"
 import {
-  buildQuizThemeRepairSystemPrompt,
   buildQuizThemeSystemPrompt,
+  buildQuizThemeTargetedRepairPrompt,
+  buildQuizThemeRepairSystemPrompt,
 } from "./prompt"
 import {
+  applyQuizThemeReplacements,
+  buildQuizThemeOutputSchema,
+  buildQuizThemeRepairOutputSchema,
   coerceQuizThemeQuestions,
+  coerceQuizThemeReplacements,
   isQuizThemeLlmPayload,
-  QUIZ_THEME_OUTPUT_SCHEMA,
+  isQuizThemeRepairLlmPayload,
 } from "./schema"
 import { validateQuizThemeGeneration } from "./validate"
 import type { GeneratedQuizTheme, QuizThemeValidationResult } from "./types"
@@ -28,8 +33,8 @@ export interface GenerateQuizThemeInput {
   universe?: UniverseEditorialFields | null
   universeName?: string | null
   bookProjectId?: string
-  provider?: ContentGenerationProvider
   maxRepairAttempts?: 0 | 1
+  provider?: ContentGenerationProvider
 }
 
 export interface GenerateQuizThemeSuccess {
@@ -40,6 +45,8 @@ export interface GenerateQuizThemeSuccess {
   context: QuizThemeContext
   durationMs: number
   repaired: boolean
+  /** Number of questions replaced during targeted repair (0 if none). */
+  repairedCount: number
 }
 
 export type GenerateQuizThemeResult = GenerateQuizThemeSuccess | ContentGenerationError
@@ -52,6 +59,7 @@ function logGeneration(meta: {
   ok: boolean
   durationMs: number
   repaired?: boolean
+  repairedCount?: number
   code?: string
 }): void {
   console.info("[content-generation]", {
@@ -63,24 +71,30 @@ function logGeneration(meta: {
     ok: meta.ok,
     durationMs: meta.durationMs,
     repaired: meta.repaired ?? false,
+    repairedCount: meta.repairedCount ?? 0,
     code: meta.code ?? null,
   })
 }
 
-async function callProviderOnce(
+async function callFullGeneration(
   provider: ContentGenerationProvider,
   system: string,
   input: unknown,
   seed: string,
+  context: QuizThemeContext,
 ): Promise<
   | { ok: true; title: string; questions: ReturnType<typeof coerceQuizThemeQuestions>["questions"] }
   | ContentGenerationError
 > {
+  const schema = buildQuizThemeOutputSchema({
+    targetQuestions: context.targetQuestions,
+    allowedTopics: context.allowedTopics,
+  })
   const raw = await provider.generateStructured<unknown>({
     system,
     input,
     schemaName: "quiz_theme_v1",
-    schema: QUIZ_THEME_OUTPUT_SCHEMA,
+    schema,
     seed,
   })
 
@@ -98,9 +112,45 @@ async function callProviderOnce(
   return { ok: true, title: coerced.title, questions: coerced.questions }
 }
 
+async function callTargetedRepair(
+  provider: ContentGenerationProvider,
+  system: string,
+  input: unknown,
+  seed: string,
+  context: QuizThemeContext,
+  invalidIndexes1Based: number[],
+): Promise<
+  | { ok: true; replacements: ReturnType<typeof coerceQuizThemeReplacements> }
+  | ContentGenerationError
+> {
+  const schema = buildQuizThemeRepairOutputSchema({
+    invalidIndexes1Based,
+    allowedTopics: context.allowedTopics,
+  })
+  const raw = await provider.generateStructured<unknown>({
+    system,
+    input,
+    schemaName: "quiz_theme_repair_v1",
+    schema,
+    seed,
+  })
+
+  if (!raw.ok) return raw
+
+  if (!isQuizThemeRepairLlmPayload(raw.data)) {
+    return {
+      ok: false,
+      code: "INVALID_JSON",
+      message: "Structure JSON de réparation inattendue (replacements manquants).",
+    }
+  }
+
+  return { ok: true, replacements: coerceQuizThemeReplacements(raw.data) }
+}
+
 /**
- * Full QUIZ_THEME pipeline: theme context → LLM → validate → QUIZ engine.
- * No BookProfile. At most one automatic repair attempt.
+ * Full QUIZ_THEME pipeline: theme context → LLM → validate → targeted repair → QUIZ engine.
+ * At most one automatic repair attempt.
  */
 export async function generateQuizThemeContent(
   input: GenerateQuizThemeInput,
@@ -154,14 +204,19 @@ export async function generateQuizThemeContent(
   const baseSystem = buildQuizThemeSystemPrompt(context)
 
   let repaired = false
-  let questionsResult = await callProviderOnce(
+  let repairedCount = 0
+  let title = ""
+  let questions: ReturnType<typeof coerceQuizThemeQuestions>["questions"] = []
+
+  const first = await callFullGeneration(
     provider,
     baseSystem,
     userPayload,
     input.slot.seed,
+    context,
   )
 
-  if (!questionsResult.ok) {
+  if (!first.ok) {
     logGeneration({
       bookProjectId: input.bookProjectId,
       slotId: input.slot.slotId,
@@ -169,44 +224,106 @@ export async function generateQuizThemeContent(
       universeId: context.universeId,
       ok: false,
       durationMs: Date.now() - started,
-      code: questionsResult.code,
+      code: first.code,
     })
-    return questionsResult
+    return first
   }
 
-  let validation = validateQuizThemeGeneration({
-    title: questionsResult.title,
-    questions: questionsResult.questions,
-    context,
-  })
+  title = first.title
+  questions = first.questions
+
+  let validation = validateQuizThemeGeneration({ title, questions, context })
 
   if (!validation.ok && maxRepair >= 1) {
     repaired = true
-    const repairSystem = buildQuizThemeRepairSystemPrompt(baseSystem, validation.errors)
-    questionsResult = await callProviderOnce(
-      provider,
-      repairSystem,
-      userPayload,
-      `${input.slot.seed}:repair`,
-    )
-    if (!questionsResult.ok) {
-      logGeneration({
-        bookProjectId: input.bookProjectId,
-        slotId: input.slot.slotId,
-        gameId: input.slot.gameId,
-        universeId: context.universeId,
-        ok: false,
-        durationMs: Date.now() - started,
-        repaired: true,
-        code: questionsResult.code,
+    const failed = validation
+    const issues = failed.questionIssues
+    const invalidIndexes = [...new Set(issues.map((i) => i.index))].sort((a, b) => a - b)
+
+    if (invalidIndexes.length > 0 && invalidIndexes.length < questions.length) {
+      const invalidIndexes1Based = invalidIndexes.map((i) => i + 1)
+      const keptQuestions = questions
+        .map((q, i) => ({ index1: i + 1, question: q }))
+        .filter((_, i) => !invalidIndexes.includes(i))
+      const invalid = invalidIndexes.map((idx) => ({
+        index1: idx + 1,
+        errors: issues.find((qi) => qi.index === idx)?.errors ?? failed.errors,
+      }))
+
+      const repairSystem = buildQuizThemeTargetedRepairPrompt({
+        baseSystem,
+        keptQuestions,
+        invalid,
+        usedStyles: keptQuestions.map((k) => k.question.questionStyle),
+        usedTopicKeys: keptQuestions.map((k) => k.question.topicKey),
       })
-      return questionsResult
+
+      const repairResult = await callTargetedRepair(
+        provider,
+        repairSystem,
+        {
+          ...userPayload,
+          keepUnchanged: keptQuestions.map((k) => ({
+            index: k.index1,
+            id: k.question.id,
+            questionStyle: k.question.questionStyle,
+            topicKey: k.question.topicKey,
+          })),
+          replaceIndexes: invalidIndexes1Based,
+        },
+        `${input.slot.seed}:repair`,
+        context,
+        invalidIndexes1Based,
+      )
+
+      if (!repairResult.ok) {
+        logGeneration({
+          bookProjectId: input.bookProjectId,
+          slotId: input.slot.slotId,
+          gameId: input.slot.gameId,
+          universeId: context.universeId,
+          ok: false,
+          durationMs: Date.now() - started,
+          repaired: true,
+          code: repairResult.code,
+        })
+        return repairResult
+      }
+
+      const before = questions.map((q) => q.id)
+      questions = applyQuizThemeReplacements(questions, repairResult.replacements)
+      repairedCount = repairResult.replacements.filter(
+        (r) => r.index0 >= 0 && r.index0 < before.length,
+      ).length
+    } else {
+      // Fallback: full regeneration when every question is bad or issues are not attributable
+      const repairSystem = buildQuizThemeRepairSystemPrompt(baseSystem, failed.errors)
+      const full = await callFullGeneration(
+        provider,
+        repairSystem,
+        userPayload,
+        `${input.slot.seed}:repair`,
+        context,
+      )
+      if (!full.ok) {
+        logGeneration({
+          bookProjectId: input.bookProjectId,
+          slotId: input.slot.slotId,
+          gameId: input.slot.gameId,
+          universeId: context.universeId,
+          ok: false,
+          durationMs: Date.now() - started,
+          repaired: true,
+          code: full.code,
+        })
+        return full
+      }
+      title = full.title
+      questions = full.questions
+      repairedCount = questions.length
     }
-    validation = validateQuizThemeGeneration({
-      title: questionsResult.title,
-      questions: questionsResult.questions,
-      context,
-    })
+
+    validation = validateQuizThemeGeneration({ title, questions, context })
   }
 
   if (!validation.ok) {
@@ -224,6 +341,7 @@ export async function generateQuizThemeContent(
       ok: false,
       durationMs: Date.now() - started,
       repaired,
+      repairedCount,
       code: result.code,
     })
     return result
@@ -254,6 +372,7 @@ export async function generateQuizThemeContent(
       ok: false,
       durationMs: Date.now() - started,
       repaired,
+      repairedCount,
       code: result.code,
     })
     return result
@@ -268,6 +387,7 @@ export async function generateQuizThemeContent(
     ok: true,
     durationMs,
     repaired,
+    repairedCount,
   })
 
   return {
@@ -278,5 +398,6 @@ export async function generateQuizThemeContent(
     context,
     durationMs,
     repaired,
+    repairedCount,
   }
 }
