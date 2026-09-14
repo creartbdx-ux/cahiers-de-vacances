@@ -82,7 +82,16 @@ export interface ContentGenerationError {
 }
 
 export interface JsonSchemaObject {
-  type: "object" | "array" | "string" | "number" | "integer" | "boolean"
+  /** Single type, or OpenAI Structured Outputs nullable union e.g. ["string","null"]. */
+  type:
+    | "object"
+    | "array"
+    | "string"
+    | "number"
+    | "integer"
+    | "boolean"
+    | "null"
+    | Array<"object" | "array" | "string" | "number" | "integer" | "boolean" | "null">
   properties?: Record<string, unknown>
   items?: unknown
   required?: string[]
