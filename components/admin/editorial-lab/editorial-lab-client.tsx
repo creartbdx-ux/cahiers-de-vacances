@@ -452,9 +452,19 @@ export function EditorialLabClient({
                             <p className="text-sm font-medium">{themeOk.title}</p>
                             <p className="text-sm text-muted-foreground">
                               Validation OK · {themeOk.questionCount} question
-                              {themeOk.questionCount > 1 ? "s" : ""} · diversité :{" "}
+                              {themeOk.questionCount > 1 ? "s" : ""} · topics :{" "}
                               {themeOk.topics.join(", ") || "—"} · {themeOk.durationMs} ms
                               {themeOk.repaired ? " · réparation auto utilisée" : ""}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              Diversité : {themeOk.styleDistinctCount} style
+                              {themeOk.styleDistinctCount > 1 ? "s" : ""} utiliséé
+                              {themeOk.styleDistinctCount > 1 ? "s" : ""} sur{" "}
+                              {themeOk.questionCount} question
+                              {themeOk.questionCount > 1 ? "s" : ""}
+                              {" · "}
+                              Validation diversité :{" "}
+                              {themeOk.styleDiversityOk ? "OK" : "KO"}
                             </p>
                             {themeOk.warnings.length > 0 && (
                               <ul className="text-sm text-muted-foreground">
@@ -466,6 +476,9 @@ export function EditorialLabClient({
                             {themeOk.questions.map((q, qi) => (
                               <div key={q.id} className="rounded-lg border border-border p-3">
                                 <p className="text-sm font-medium">Question {qi + 1}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Style : {q.questionStyle}
+                                </p>
                                 <p className="mt-1 text-sm">&ldquo;{q.question}&rdquo;</p>
                                 <ul className="mt-2 space-y-1 text-sm">
                                   {q.choices.map((c, ci) => (

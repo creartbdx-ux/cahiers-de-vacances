@@ -15,6 +15,7 @@ import { buildQuizThemeSystemPrompt } from "./prompt"
 import { collectOpenAiStrictSchemaViolations, QUIZ_THEME_OUTPUT_SCHEMA } from "./schema"
 import { validateQuizThemeGeneration } from "./validate"
 import type { GeneratedQuizThemeQuestion } from "./types"
+import type { QuizThemeQuestionStyle } from "./styles"
 
 function themeSlot(over: Partial<EditorialGameSlot> = {}): EditorialGameSlot {
   return {
@@ -51,6 +52,7 @@ function makeQ(
   return {
     id: over.id,
     question: over.question ?? `Quelle notion thématique ${over.id} est correcte ?`,
+    questionStyle: over.questionStyle ?? "FACT_CURIOSITY",
     choices: over.choices ?? [
       `Choix A ${over.id}`,
       `Choix B ${over.id}`,
@@ -64,12 +66,21 @@ function makeQ(
 }
 
 const TOPICS = ["faune", "flore", "géographie", "phénomène", "culture", "science"] as const
+const STYLES: QuizThemeQuestionStyle[] = [
+  "VOCABULARY",
+  "DIFFERENCE",
+  "ORIGIN_HISTORY",
+  "IDENTIFICATION",
+  "FUNCTION",
+  "FACT_CURIOSITY",
+]
 
 function validSix(): GeneratedQuizThemeQuestion[] {
   return TOPICS.map((topic, i) =>
     makeQ({
       id: `q${i + 1}`,
       topic,
+      questionStyle: STYLES[i]!,
       question: `Parmi ces affirmations liées à ${topic}, laquelle est exacte (variante ${i + 1}) ?`,
       choices: [
         `Réponse alpha ${i}`,
@@ -141,12 +152,12 @@ test("BEAUTY : topics art / architecture rejetés ; cosmétiques acceptés", () 
   })
 
   const bad = [
-    makeQ({ id: "q1", topic: "peinture Renaissance", question: "Qui a peint La Naissance de Vénus ?" }),
-    makeQ({ id: "q2", topic: "architecture", question: "Où se trouve l'Alhambra ?" }),
-    makeQ({ id: "q3", topic: "sculpture antique", question: "Quelle sculpture célèbre représente Vénus ?" }),
-    makeQ({ id: "q4", topic: "esthétique japonaise", question: "Que désigne le wabi-sabi ?" }),
-    makeQ({ id: "q5", topic: "histoire du design", question: "Quel mouvement a popularisé l'Art nouveau ?" }),
-    makeQ({ id: "q6", topic: "musées", question: "Dans quel musée voit-on la Vénus de Milo ?" }),
+    makeQ({ id: "q1", topic: "peinture Renaissance", questionStyle: "IDENTIFICATION", question: "Qui a peint La Naissance de Vénus ?" }),
+    makeQ({ id: "q2", topic: "architecture", questionStyle: "ASSOCIATION", question: "Où se trouve l'Alhambra ?" }),
+    makeQ({ id: "q3", topic: "sculpture antique", questionStyle: "IDENTIFICATION", question: "Quelle sculpture célèbre représente Vénus ?" }),
+    makeQ({ id: "q4", topic: "esthétique japonaise", questionStyle: "VOCABULARY", question: "Que désigne le wabi-sabi ?" }),
+    makeQ({ id: "q5", topic: "histoire du design", questionStyle: "ORIGIN_HISTORY", question: "Quel mouvement a popularisé l'Art nouveau ?" }),
+    makeQ({ id: "q6", topic: "musées", questionStyle: "FACT_CURIOSITY", question: "Dans quel musée voit-on la Vénus de Milo ?" }),
   ]
   const badResult = validateQuizThemeGeneration({
     title: "Beauté",
@@ -166,10 +177,19 @@ test("BEAUTY : topics art / architecture rejetés ; cosmétiques acceptés", () 
     "cosmétique",
     "routines beauté",
   ] as const
+  const goodStyles: QuizThemeQuestionStyle[] = [
+    "VOCABULARY",
+    "DIFFERENCE",
+    "ORIGIN_HISTORY",
+    "IDENTIFICATION",
+    "FUNCTION",
+    "SEQUENCE_USAGE",
+  ]
   const good = goodTopics.map((topic, i) =>
     makeQ({
       id: `g${i + 1}`,
       topic,
+      questionStyle: goodStyles[i]!,
       question: `Parmi ces notions de ${topic}, laquelle est exacte (cas ${i + 1}) ?`,
       choices: [`OptA${i}`, `OptB${i}`, `OptC${i}`, `OptD${i}`],
       correctIndex: 1,
@@ -232,6 +252,8 @@ test("difficulté transmise dans le contexte et le prompt", () => {
   assert.ok(/Difficulté : 3/.test(system))
   assert.ok(/intermédiaire/.test(system))
   assert.ok(/définition éditoriale/i.test(system))
+  assert.ok(/questionStyle/i.test(system))
+  assert.ok(/même mécanique/i.test(system))
 })
 
 test("schema Structured Outputs strict", () => {
@@ -361,7 +383,109 @@ test("validation OK sur six questions diversifiées", () => {
     context: ctx,
   })
   assert.equal(result.ok, true)
-  if (result.ok) assert.equal(result.topics.length, 6)
+  if (result.ok) {
+    assert.equal(result.topics.length, 6)
+    assert.ok(result.styleDistinctCount >= 3)
+    assert.equal(result.styleDiversityOk, true)
+  }
+})
+
+test("6 questions avec 3+ styles distincts -> OK", () => {
+  const ctx = buildQuizThemeContext({ slot: themeSlot(), universeName: "Nature" })
+  const result = validateQuizThemeGeneration({
+    title: "Mix",
+    questions: validSix(),
+    context: ctx,
+  })
+  assert.equal(result.ok, true)
+})
+
+test("6 questions avec 2 styles seulement -> rejet", () => {
+  const ctx = buildQuizThemeContext({ slot: themeSlot(), universeName: "Nature" })
+  const questions = validSix().map((q, i) => ({
+    ...q,
+    questionStyle: (i % 2 === 0 ? "FUNCTION" : "VOCABULARY") as QuizThemeQuestionStyle,
+  }))
+  const result = validateQuizThemeGeneration({
+    title: "Titre",
+    questions,
+    context: ctx,
+  })
+  assert.equal(result.ok, false)
+  if (!result.ok) {
+    assert.ok(result.errors.some((e) => /formes insuffisante|style/i.test(e)))
+  }
+})
+
+test("3 questions FUNCTION + 3 autres -> rejet car FUNCTION > 2", () => {
+  const ctx = buildQuizThemeContext({ slot: themeSlot(), universeName: "Nature" })
+  const styles: QuizThemeQuestionStyle[] = [
+    "FUNCTION",
+    "VOCABULARY",
+    "FUNCTION",
+    "DIFFERENCE",
+    "FUNCTION",
+    "ORIGIN_HISTORY",
+  ]
+  const questions = validSix().map((q, i) => ({ ...q, questionStyle: styles[i]! }))
+  const result = validateQuizThemeGeneration({
+    title: "Titre",
+    questions,
+    context: ctx,
+  })
+  assert.equal(result.ok, false)
+  if (!result.ok) {
+    assert.ok(result.errors.some((e) => /FUNCTION.*surutilisé|maximum 2/i.test(e)))
+  }
+})
+
+test("deux mêmes styles consécutifs rejetés", () => {
+  const ctx = buildQuizThemeContext({ slot: themeSlot(), universeName: "Nature" })
+  const styles: QuizThemeQuestionStyle[] = [
+    "VOCABULARY",
+    "VOCABULARY",
+    "DIFFERENCE",
+    "ORIGIN_HISTORY",
+    "IDENTIFICATION",
+    "FUNCTION",
+  ]
+  const questions = validSix().map((q, i) => ({ ...q, questionStyle: styles[i]! }))
+  const result = validateQuizThemeGeneration({
+    title: "Titre",
+    questions,
+    context: ctx,
+  })
+  assert.equal(result.ok, false)
+  if (!result.ok) {
+    assert.ok(result.errors.some((e) => /consécutif/i.test(e)))
+  }
+})
+
+test("schema Structured Output exige questionStyle", () => {
+  const item = (
+    QUIZ_THEME_OUTPUT_SCHEMA.properties as {
+      questions: { items: { required: string[]; properties: Record<string, unknown> } }
+    }
+  ).questions.items
+  assert.ok(item.required.includes("questionStyle"))
+  const styleSchema = item.properties.questionStyle as { enum?: string[] }
+  assert.ok(Array.isArray(styleSchema.enum))
+  assert.ok(styleSchema.enum!.includes("VOCABULARY"))
+})
+
+test("enum questionStyle invalide rejeté", () => {
+  const ctx = buildQuizThemeContext({ slot: themeSlot(), universeName: "Nature" })
+  const questions = validSix()
+  questions[0]!.questionStyle = "NOT_A_STYLE" as QuizThemeQuestionStyle
+  const result = validateQuizThemeGeneration({
+    title: "Titre",
+    questions,
+    context: ctx,
+  })
+  assert.equal(result.ok, false)
+  if (!result.ok) {
+    assert.ok(result.errors.some((e) => /questionStyle invalide/i.test(e)))
+  }
 })
 
 test("adaptation QuizEngineInput valide + preview moteur", () => {
@@ -369,6 +493,7 @@ test("adaptation QuizEngineInput valide + preview moteur", () => {
   assert.equal(input.questions.length, 6)
   assert.ok(!("sourceRefs" in (input.questions[0] as object)))
   assert.ok(!("topic" in (input.questions[0] as object)))
+  assert.ok(!("questionStyle" in (input.questions[0] as object)))
   const engine = generateGame("QUIZ", input)
   assert.equal(engine.success, true)
   if (engine.success) {

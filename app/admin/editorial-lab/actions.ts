@@ -212,6 +212,7 @@ function toLabQuestionView(
 export type QuizThemeLabQuestionView = {
   id: string
   question: string
+  questionStyle: string
   choices: [string, string, string, string]
   correctIndex: 0 | 1 | 2 | 3
   explanation: string
@@ -229,6 +230,9 @@ export type GenerateQuizThemeLabResult =
       difficulty: number
       questionCount: number
       topics: string[]
+      styles: string[]
+      styleDistinctCount: number
+      styleDiversityOk: boolean
       durationMs: number
       repaired: boolean
       warnings: string[]
@@ -366,6 +370,9 @@ export async function generateQuizThemeLabAction(input: {
     difficulty: themeContext.difficulty,
     questionCount: questions.length,
     topics: result.validation.topics,
+    styles: result.validation.styles,
+    styleDistinctCount: result.validation.styleDistinctCount,
+    styleDiversityOk: result.validation.styleDiversityOk,
     durationMs: result.durationMs,
     repaired: result.repaired,
     warnings: result.validation.warnings,
@@ -379,6 +386,7 @@ function toThemeLabQuestionView(q: GeneratedQuizThemeQuestion): QuizThemeLabQues
   return {
     id: q.id,
     question: q.question,
+    questionStyle: q.questionStyle,
     choices: q.choices,
     correctIndex: q.correctIndex,
     explanation: q.explanation,

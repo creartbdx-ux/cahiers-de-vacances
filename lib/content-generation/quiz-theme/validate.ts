@@ -5,6 +5,11 @@ import {
 import { choicesAreSufficientlyDistinct } from "../validators"
 import { questionLeaksCorrectAnswer } from "../quiz-personal/quality"
 import { QUIZ_THEME_CHOICE_COUNT } from "./schema"
+import {
+  evaluateQuestionStyleDiversity,
+  isQuizThemeQuestionStyle,
+  type QuizThemeQuestionStyle,
+} from "./styles"
 import type { QuizThemeContext } from "./context"
 import type {
   GeneratedQuizThemeQuestion,
@@ -57,6 +62,7 @@ export function validateQuizThemeGeneration(input: {
 
   const seenQuestions = new Set<string>()
   const topics = new Map<string, number>()
+  const styles: QuizThemeQuestionStyle[] = []
 
   questions.forEach((q, i) => {
     const n = i + 1
@@ -70,6 +76,14 @@ export function validateQuizThemeGeneration(input: {
       errors.push(`Question ${n}: doublon d'énoncé.`)
     }
     seenQuestions.add(qKey)
+
+    if (!isQuizThemeQuestionStyle(q.questionStyle)) {
+      errors.push(
+        `Question ${n}: questionStyle invalide ou manquant (« ${String(q.questionStyle ?? "")} »).`,
+      )
+    } else {
+      styles.push(q.questionStyle)
+    }
 
     if (!Array.isArray(q.choices) || q.choices.length !== QUIZ_THEME_CHOICE_COUNT) {
       errors.push(
@@ -142,7 +156,7 @@ export function validateQuizThemeGeneration(input: {
     }
   })
 
-  // Diversity: at least ~half distinct topics when we have 6+ questions
+  // Topic diversity
   if (questions.length >= 4) {
     const distinct = topics.size
     const minDistinct = Math.max(3, Math.ceil(questions.length / 2))
@@ -158,15 +172,26 @@ export function validateQuizThemeGeneration(input: {
     }
   }
 
+  // Form / questionStyle diversity
+  if (styles.length === questions.length && questions.length > 0) {
+    const styleEval = evaluateQuestionStyleDiversity(styles)
+    errors.push(...styleEval.errors)
+    warnings.push(...styleEval.warnings)
+  }
+
   if (errors.length) {
     return { ok: false, errors, warnings }
   }
 
+  const styleEval = evaluateQuestionStyleDiversity(styles)
   return {
     ok: true,
     questions,
     title: title.trim(),
     topics: [...topics.keys()],
+    styles,
+    styleDistinctCount: styleEval.distinctCount,
+    styleDiversityOk: true,
     warnings,
   }
 }
