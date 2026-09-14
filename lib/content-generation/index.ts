@@ -25,6 +25,22 @@ export {
   themePayloadLooksPersonalFree,
 } from "./quiz-theme/context"
 export type { GeneratedQuizTheme, GeneratedQuizThemeQuestion } from "./quiz-theme/types"
+export { generateWordSearchThemeContent } from "./wordsearch-theme/generate"
+export type {
+  GenerateWordSearchThemeInput,
+  GenerateWordSearchThemeResult,
+  GenerateWordSearchThemeSuccess,
+} from "./wordsearch-theme/generate"
+export { toWordSearchThemeEngineInput } from "./wordsearch-theme/adapter"
+export { validateWordSearchThemeGeneration } from "./wordsearch-theme/validate"
+export {
+  buildWordSearchThemeContext,
+  buildWordSearchThemeUserPayload,
+} from "./wordsearch-theme/context"
+export type {
+  GeneratedWordSearchTheme,
+  GeneratedWordSearchThemeWord,
+} from "./wordsearch-theme/types"
 export {
   resolveUniverseEditorial,
   topicHitsExcluded,

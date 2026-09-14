@@ -8,14 +8,18 @@ import { buildEditorialPlan } from "@/lib/editorial-engine"
 import {
   buildQuizPersonalSourceContext,
   buildQuizThemeContext,
+  buildWordSearchThemeContext,
   generateQuizPersonalContent,
   generateQuizThemeContent,
+  generateWordSearchThemeContent,
   isContentGenerationConfigured,
   lookupSourceText,
   summarizeSourceContext,
   type GeneratedQuizPersonalQuestion,
   type GeneratedQuizThemeQuestion,
+  type GeneratedWordSearchThemeWord,
 } from "@/lib/content-generation"
+import type { WordSearchSuccess } from "@/lib/game-engines/wordsearch/types"
 import { getUniverses } from "@/lib/data/reference"
 import { calculateProfileRichness } from "@/lib/questionnaire/richness"
 import type { QuizQuestion } from "@/lib/game-engines/quiz/types"
@@ -395,5 +399,170 @@ function toThemeLabQuestionView(q: GeneratedQuizThemeQuestion): QuizThemeLabQues
     choices: q.choices,
     correctIndex: q.correctIndex,
     explanation: q.explanation,
+  }
+}
+
+export type WordsearchThemeLabWordView = {
+  display: string
+  normalized: string
+  topicKey: string
+}
+
+export type GenerateWordsearchThemeLabResult =
+  | {
+      ok: true
+      configured: true
+      slotId: string
+      title: string
+      universeId: string
+      universeName: string
+      difficulty: number
+      wordCount: number
+      topicKeys: string[]
+      topicDistinctCount: number
+      topicDiversityOk: boolean
+      durationMs: number
+      repaired: boolean
+      repairedCount: number
+      warnings: string[]
+      words: WordsearchThemeLabWordView[]
+      engineWordSearch: WordSearchSuccess
+      seed: string
+    }
+  | {
+      ok: false
+      configured: boolean
+      message: string
+      details?: string[]
+      code?: string
+    }
+
+/**
+ * Admin-only: rebuild plan server-side, generate WORDSEARCH_THEME for one slot.
+ * Does not persist to generated_pages. No personal profile data sent to the LLM.
+ */
+export async function generateWordsearchThemeLabAction(input: {
+  bookProjectId: string
+  seed: string
+  slotId: string
+}): Promise<GenerateWordsearchThemeLabResult> {
+  const { user, profile: authProfile } = await getCurrentUser()
+  if (!user || authProfile?.role !== "admin") {
+    return { ok: false, configured: isContentGenerationConfigured(), message: "Accès admin requis." }
+  }
+
+  if (!isContentGenerationConfigured()) {
+    return {
+      ok: false,
+      configured: false,
+      code: "NOT_CONFIGURED",
+      message:
+        "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY dans les variables d'environnement serveur (Vercel → Settings → Environment Variables), puis redéployez.",
+    }
+  }
+
+  const project = await getBookProject(input.bookProjectId)
+  if (!project) {
+    return { ok: false, configured: true, message: "Projet introuvable." }
+  }
+
+  const parsed = parseQuestionnairePayload(project.questionnaire_data)
+  if (!parsed.profile) {
+    return { ok: false, configured: true, message: "BookProfileV1 manquant sur ce projet." }
+  }
+
+  let richnessLevel = parsed.richnessLevel
+  if (!richnessLevel && parsed.questionnaire) {
+    richnessLevel = calculateProfileRichness(parsed.questionnaire, parsed.profile).level
+  }
+  if (
+    !canUseInEditorialLab({
+      status: project.status,
+      profile: parsed.profile,
+      richnessLevel: richnessLevel ?? null,
+    })
+  ) {
+    return { ok: false, configured: true, message: "Projet non éligible à l'Editorial Lab." }
+  }
+
+  const [games, universes] = await Promise.all([getGames(), getUniverses()])
+  const plan = buildEditorialPlan({
+    profile: parsed.profile,
+    seed: input.seed.trim() || "lab-seed-1",
+    games,
+    richnessLevel: richnessLevel ?? "ENOUGH",
+    maxSlots: 8,
+  })
+
+  const slot = plan.selectedGames.find((s) => s.slotId === input.slotId)
+  if (!slot) {
+    return { ok: false, configured: true, message: "Slot introuvable dans le plan reconstruit." }
+  }
+  if (slot.gameId !== "WORDSEARCH_THEME") {
+    return {
+      ok: false,
+      configured: true,
+      message: "Ce slot n'est pas WORDSEARCH_THEME.",
+    }
+  }
+
+  const universe =
+    universes.find((u) => u.id === slot.universeId) ??
+    (slot.universeId
+      ? {
+          id: slot.universeId,
+          name: slot.universeId,
+          editorial_description: null,
+          allowed_topics: [],
+          excluded_topics: [],
+          quiz_guidance: null,
+        }
+      : null)
+
+  const themeContext = buildWordSearchThemeContext({ slot, universe })
+  const result = await generateWordSearchThemeContent({
+    slot,
+    universe: universe ?? undefined,
+    universeName: themeContext.universeName,
+    bookProjectId: project.id,
+  })
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      configured: result.code !== "NOT_CONFIGURED",
+      code: result.code,
+      message: result.message,
+      details: result.details,
+    }
+  }
+
+  return {
+    ok: true,
+    configured: true,
+    slotId: slot.slotId,
+    title: result.generated.title,
+    universeId: themeContext.universeId,
+    universeName: themeContext.universeName,
+    difficulty: themeContext.difficulty,
+    wordCount: result.generated.words.length,
+    topicKeys: result.validation.topicKeys,
+    topicDistinctCount: result.validation.topicDistinctCount,
+    topicDiversityOk: result.validation.topicDiversityOk,
+    durationMs: result.durationMs,
+    repaired: result.repaired,
+    repairedCount: result.repairedCount,
+    warnings: result.validation.warnings,
+    words: result.generated.words.map(toWordsearchLabWordView),
+    engineWordSearch: result.engineResult,
+    seed: slot.seed,
+  }
+}
+
+function toWordsearchLabWordView(w: GeneratedWordSearchThemeWord): WordsearchThemeLabWordView {
+  return {
+    display: w.display,
+    normalized: w.normalized,
+    topicKey: w.topicKey,
   }
 }

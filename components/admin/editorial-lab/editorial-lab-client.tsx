@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button"
 import { BookPage } from "@/components/book-renderer/book-page"
 import { PagePreview } from "@/components/book-renderer/page-preview"
 import { QuizTemplate } from "@/components/book-renderer/templates/quiz-template"
-import { QUIZ_01_SAMPLE } from "@/lib/book-renderer/templates"
+import { WordsearchTemplate } from "@/components/book-renderer/templates/wordsearch-template"
+import { QUIZ_01_SAMPLE, WORDSEARCH_01_SAMPLE } from "@/lib/book-renderer/templates"
 import { getStyleTokens } from "@/lib/book-renderer/styles"
 import { cn } from "@/lib/utils"
 import {
@@ -17,13 +18,32 @@ import { buildQuizPersonalSourceContext } from "@/lib/content-generation/source-
 import {
   generateQuizPersonalLabAction,
   generateQuizThemeLabAction,
+  generateWordsearchThemeLabAction,
   type GenerateQuizPersonalLabResult,
   type GenerateQuizThemeLabResult,
+  type GenerateWordsearchThemeLabResult,
 } from "@/app/admin/editorial-lab/actions"
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
 import type { Game, Palette, Style, Universe } from "@/lib/supabase/types"
 import type { QuizQuestion } from "@/lib/game-engines/quiz/types"
 import { QUIZ_CHOICE_LABELS } from "@/lib/game-engines/quiz/types"
+
+type SlotGenResult =
+  | GenerateQuizPersonalLabResult
+  | GenerateQuizThemeLabResult
+  | GenerateWordsearchThemeLabResult
+
+function isQuizThemeLabOk(
+  gen: SlotGenResult | undefined,
+): gen is Extract<GenerateQuizThemeLabResult, { ok: true }> {
+  return Boolean(gen?.ok && "engineQuestions" in gen)
+}
+
+function isWordsearchThemeLabOk(
+  gen: SlotGenResult | undefined,
+): gen is Extract<GenerateWordsearchThemeLabResult, { ok: true }> {
+  return Boolean(gen?.ok && "engineWordSearch" in gen)
+}
 
 export type EditorialLabProject = {
   id: string
@@ -52,9 +72,7 @@ export function EditorialLabClient({
   const [seed, setSeed] = useState("lab-seed-1")
   const [plan, setPlan] = useState<EditorialPlanV1 | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [genBySlot, setGenBySlot] = useState<
-    Record<string, GenerateQuizPersonalLabResult | GenerateQuizThemeLabResult | undefined>
-  >({})
+  const [genBySlot, setGenBySlot] = useState<Record<string, SlotGenResult | undefined>>({})
   const [previewSlotId, setPreviewSlotId] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState<"game" | "solution">("game")
   const [pending, startTransition] = useTransition()
@@ -119,12 +137,28 @@ export function EditorialLabClient({
     })
   }
 
-  const previewQuestions: QuizQuestion[] | null = (() => {
-    if (!previewSlotId) return null
-    const gen = genBySlot[previewSlotId]
-    if (!gen || !gen.ok) return null
-    return gen.engineQuestions
-  })()
+  function generateWordsearchSlot(slot: EditorialGameSlot) {
+    if (!selected) return
+    setError(null)
+    startTransition(async () => {
+      const result = await generateWordsearchThemeLabAction({
+        bookProjectId: selected.id,
+        seed: seed.trim() || "lab-seed-1",
+        slotId: slot.slotId,
+      })
+      setGenBySlot((prev) => ({ ...prev, [slot.slotId]: result }))
+      if (result.ok) setPreviewSlotId(null)
+    })
+  }
+
+  const previewSlot = plan?.selectedGames.find((s) => s.slotId === previewSlotId) ?? null
+  const previewGen = previewSlotId ? genBySlot[previewSlotId] : null
+  const previewQuestions: QuizQuestion[] | null =
+    previewGen?.ok && "engineQuestions" in previewGen ? previewGen.engineQuestions : null
+  const previewWordSearch =
+    previewGen?.ok && "engineWordSearch" in previewGen ? previewGen.engineWordSearch : null
+  const previewWordsearchTitle =
+    previewGen?.ok && "engineWordSearch" in previewGen ? previewGen.title : null
 
   return (
     <div className="flex flex-col gap-6">
@@ -137,7 +171,7 @@ export function EditorialLabClient({
         )}
       >
         {aiConfigured
-          ? "Génération IA configurée (CONTENT_GENERATION_API_KEY). Disponible pour QUIZ_PERSONAL et QUIZ_THEME."
+          ? "Génération IA configurée (CONTENT_GENERATION_API_KEY). Disponible pour QUIZ_PERSONAL, QUIZ_THEME et WORDSEARCH_THEME."
           : "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY dans les variables d'environnement serveur (Vercel), puis redéployez."}
       </div>
 
@@ -215,14 +249,17 @@ export function EditorialLabClient({
               {plan.selectedGames.map((slot, i) => {
                 const isQuizPersonal = slot.gameId === "QUIZ_PERSONAL"
                 const isQuizTheme = slot.gameId === "QUIZ_THEME"
+                const isWordsearchTheme = slot.gameId === "WORDSEARCH_THEME"
                 const gen = genBySlot[slot.slotId]
                 const personalOk =
                   isQuizPersonal && gen?.ok && "sourceSummary" in gen ? gen : null
                 const personalErr =
                   isQuizPersonal && gen && !gen.ok ? gen : null
-                const themeOk =
-                  isQuizTheme && gen?.ok && "title" in gen ? gen : null
+                const themeOk = isQuizTheme && isQuizThemeLabOk(gen) ? gen : null
                 const themeErr = isQuizTheme && gen && !gen.ok ? gen : null
+                const wordsearchOk =
+                  isWordsearchTheme && isWordsearchThemeLabOk(gen) ? gen : null
+                const wordsearchErr = isWordsearchTheme && gen && !gen.ok ? gen : null
                 const sourcePreview =
                   selected && isQuizPersonal
                     ? buildQuizPersonalSourceContext({
@@ -234,6 +271,10 @@ export function EditorialLabClient({
                   slot.contentRequirements.type === "QUIZ_CONTENT"
                     ? slot.contentRequirements.targetQuestions
                     : 6
+                const wordsearchTargetWords =
+                  slot.contentRequirements.type === "WORDSEARCH_CONTENT"
+                    ? slot.contentRequirements.targetWords
+                    : 12
 
                 return (
                   <article
@@ -393,6 +434,103 @@ export function EditorialLabClient({
                       </div>
                     )}
 
+                    {isWordsearchTheme && (
+                      <div className="mt-4 rounded-lg border border-border bg-card/60 p-3">
+                        <h3 className="text-sm font-semibold">MOTS MÊLÉS THÉMATIQUES</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Univers :{" "}
+                          <span className="text-foreground">
+                            {universeName(slot.universeId) ?? slot.universeId ?? "—"}
+                          </span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Difficulté :{" "}
+                          <span className="text-foreground">{slot.difficulty}</span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Mots prévus :{" "}
+                          <span className="text-foreground">{wordsearchTargetWords}</span>
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={pending || !aiConfigured}
+                            onClick={() => generateWordsearchSlot(slot)}
+                          >
+                            {pending ? "Génération…" : "Générer le contenu"}
+                          </Button>
+                          {wordsearchOk && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setPreviewSlotId(slot.slotId)
+                                setPreviewMode("game")
+                              }}
+                            >
+                              Voir le rendu
+                            </Button>
+                          )}
+                        </div>
+
+                        {wordsearchErr && (
+                          <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                            <p className="font-medium">{wordsearchErr.message}</p>
+                            {wordsearchErr.details?.length ? (
+                              <ul className="mt-2 list-disc pl-5">
+                                {wordsearchErr.details.map((d) => (
+                                  <li key={d}>{d}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {wordsearchOk && (
+                          <div className="mt-4 flex flex-col gap-4">
+                            <p className="text-sm font-medium">Titre : {wordsearchOk.title}</p>
+                            <p className="text-sm text-muted-foreground">
+                              Validation OK · {wordsearchOk.wordCount} mot
+                              {wordsearchOk.wordCount > 1 ? "s" : ""} · topicKeys :{" "}
+                              {wordsearchOk.topicKeys.join(", ") || "—"} · {wordsearchOk.durationMs}{" "}
+                              ms
+                              {wordsearchOk.repaired
+                                ? ` · Réparation : ${wordsearchOk.repairedCount} mot${wordsearchOk.repairedCount > 1 ? "s" : ""} remplacé${wordsearchOk.repairedCount > 1 ? "s" : ""}`
+                                : ""}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              Diversité : {wordsearchOk.topicDistinctCount} topicKey
+                              {wordsearchOk.topicDistinctCount > 1 ? "s" : ""} distinct
+                              {wordsearchOk.topicDistinctCount > 1 ? "s" : ""}
+                              {" · "}
+                              Validation diversité :{" "}
+                              {wordsearchOk.topicDiversityOk ? "OK" : "KO"}
+                            </p>
+                            {wordsearchOk.warnings.length > 0 && (
+                              <ul className="text-sm text-muted-foreground">
+                                {wordsearchOk.warnings.map((w) => (
+                                  <li key={w}>{w}</li>
+                                ))}
+                              </ul>
+                            )}
+                            <p className="text-sm font-medium">Mots :</p>
+                            <ul className="space-y-2 text-sm">
+                              {wordsearchOk.words.map((w, wi) => (
+                                <li key={wi} className="rounded-lg border border-border p-3">
+                                  <span className="font-medium">{w.display}</span>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    topicKey : {w.topicKey} · normalisation : {w.normalized}
+                                  </p>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {isQuizTheme && (
                       <div className="mt-4 rounded-lg border border-border bg-card/60 p-3">
                         <h3 className="text-sm font-semibold">QUIZ THÉMATIQUE</h3>
@@ -511,7 +649,7 @@ export function EditorialLabClient({
             </div>
           </section>
 
-          {previewQuestions && previewSlotId && (
+          {previewSlotId && previewSlot && previewGen?.ok && previewQuestions && (
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-base font-semibold">Preview QUIZ_01</h2>
@@ -537,17 +675,51 @@ export function EditorialLabClient({
                       assets={[]}
                       quiz={{
                         success: true,
-                        seed: genBySlot[previewSlotId]?.ok
-                          ? genBySlot[previewSlotId].seed
-                          : "preview",
+                        seed: previewGen.seed,
                         questions: previewQuestions,
                         stats: {
-                          seed: "preview",
+                          seed: previewGen.seed,
                           received: previewQuestions.length,
                           validated: previewQuestions.length,
                         },
                         validation: { ok: true, errors: [] },
                       }}
+                      mode={previewMode}
+                    />
+                  </BookPage>
+                </PagePreview>
+              </div>
+            </section>
+          )}
+
+          {previewSlotId && previewSlot && previewGen?.ok && previewWordSearch && (
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-base font-semibold">Preview WORDSEARCH_01</h2>
+                <div className="flex items-center gap-3">
+                  <ModeToggle mode={previewMode} setMode={setPreviewMode} />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPreviewSlotId(null)}
+                  >
+                    Fermer
+                  </Button>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-8">
+                <PagePreview>
+                  <BookPage palette={palette} showSafeArea={false}>
+                    <WordsearchTemplate
+                      sample={{
+                        ...WORDSEARCH_01_SAMPLE,
+                        title: previewWordsearchTitle ?? WORDSEARCH_01_SAMPLE.title,
+                      }}
+                      style={styleTokens}
+                      palette={palette}
+                      assets={[]}
+                      wordsearch={previewWordSearch}
                       mode={previewMode}
                     />
                   </BookPage>
