@@ -6,6 +6,7 @@ import { UNIVERSE_EDITORIAL_DEFAULTS } from "@/lib/universes/editorial"
 import { FakeContentGenerationProvider, UnconfiguredProvider } from "../provider"
 import { questionLeaksCorrectAnswer } from "../quiz-personal/quality"
 import { toQuizThemeEngineInput } from "./adapter"
+import { buildQuizThemePreview, QUIZ_THEME_PREVIEW_BUILD_ERROR } from "./preview"
 import {
   buildQuizThemeContext,
   buildQuizThemeUserPayload,
@@ -703,4 +704,45 @@ test("difficulté transmise dans le contexte et le prompt", () => {
   const system = buildQuizThemeSystemPrompt(ctx)
   assert.ok(/Difficulté : 3/.test(system))
   assert.ok(/questionStyle/i.test(system))
+})
+
+test("preview Lab : QUIZ_THEME valide fournit questions pour QuizTemplate", () => {
+  const questions = validSix()
+  const preview = buildQuizThemePreview(questions, "lab-quiz-theme-preview")
+  assert.equal(preview.ok, true)
+  if (preview.ok) {
+    assert.equal(preview.quiz.success, true)
+    assert.equal(preview.quiz.questions.length, 6)
+    assert.equal(preview.quiz.questions[0]!.choices.length, 4)
+    assert.ok(preview.quiz.questions.every((q) => q.question.length > 0))
+  }
+})
+
+test("preview Lab : même questions + seed => même résultat moteur (pas de regénération IA)", () => {
+  const questions = validSix()
+  const a = buildQuizThemePreview(questions, "stable-quiz-preview")
+  const b = buildQuizThemePreview(questions, "stable-quiz-preview")
+  assert.equal(a.ok, true)
+  assert.equal(b.ok, true)
+  if (a.ok && b.ok) {
+    assert.deepEqual(a.quiz.questions, b.quiz.questions)
+  }
+})
+
+test("preview Lab : bascule Jeu/Correction réutilise les mêmes questions", () => {
+  const preview = buildQuizThemePreview(validSix(), "mode-toggle-quiz")
+  assert.equal(preview.ok, true)
+  if (preview.ok) {
+    const { questions } = preview.quiz
+    assert.equal(questions.length, 6)
+    assert.deepEqual(questions, preview.quiz.questions)
+  }
+})
+
+test("preview Lab : liste vide => message admin clair", () => {
+  const preview = buildQuizThemePreview([], "seed")
+  assert.equal(preview.ok, false)
+  if (!preview.ok) {
+    assert.equal(preview.message, QUIZ_THEME_PREVIEW_BUILD_ERROR)
+  }
 })

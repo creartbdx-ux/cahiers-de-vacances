@@ -15,6 +15,7 @@ import {
   type EditorialPlanV1,
 } from "@/lib/editorial-engine"
 import { buildQuizPersonalSourceContext } from "@/lib/content-generation/source-context"
+import { buildQuizThemePreview } from "@/lib/content-generation/quiz-theme/preview"
 import { buildWordSearchThemePreview } from "@/lib/content-generation/wordsearch-theme/preview"
 import {
   generateQuizPersonalLabAction,
@@ -34,10 +35,16 @@ type SlotGenResult =
   | GenerateQuizThemeLabResult
   | GenerateWordsearchThemeLabResult
 
+function isQuizPersonalLabOk(
+  gen: SlotGenResult | undefined,
+): gen is Extract<GenerateQuizPersonalLabResult, { ok: true }> {
+  return Boolean(gen?.ok && "sourceSummary" in gen)
+}
+
 function isQuizThemeLabOk(
   gen: SlotGenResult | undefined,
 ): gen is Extract<GenerateQuizThemeLabResult, { ok: true }> {
-  return Boolean(gen?.ok && "engineQuestions" in gen)
+  return Boolean(gen?.ok && "title" in gen && "topics" in gen && !("sourceSummary" in gen))
 }
 
 function isWordsearchThemeLabOk(
@@ -154,8 +161,20 @@ export function EditorialLabClient({
 
   const previewSlot = plan?.selectedGames.find((s) => s.slotId === previewSlotId) ?? null
   const previewGen = previewSlotId ? genBySlot[previewSlotId] : null
-  const previewQuestions: QuizQuestion[] | null =
-    previewGen?.ok && "engineQuestions" in previewGen ? previewGen.engineQuestions : null
+
+  const quizThemePreview = useMemo(() => {
+    if (!previewSlotId) return null
+    const gen = genBySlot[previewSlotId]
+    if (!isQuizThemeLabOk(gen)) return null
+    return buildQuizThemePreview(gen.questions, gen.seed)
+  }, [previewSlotId, genBySlot])
+
+  const quizPersonalPreviewQuestions: QuizQuestion[] | null = useMemo(() => {
+    if (!previewSlotId) return null
+    const gen = genBySlot[previewSlotId]
+    if (!isQuizPersonalLabOk(gen)) return null
+    return gen.engineQuestions
+  }, [previewSlotId, genBySlot])
 
   const wordsearchPreview = useMemo(() => {
     if (!previewSlotId) return null
@@ -601,19 +620,29 @@ export function EditorialLabClient({
                           >
                             {pending ? "Génération…" : "Générer le contenu"}
                           </Button>
-                          {themeOk && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setPreviewSlotId(slot.slotId)
-                                setPreviewMode("game")
-                              }}
-                            >
-                              Voir le rendu
-                            </Button>
-                          )}
+                          {themeOk &&
+                            (previewSlotId === slot.slotId ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setPreviewSlotId(null)}
+                              >
+                                Masquer le rendu
+                              </Button>
+                            ) : (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setPreviewSlotId(slot.slotId)
+                                  setPreviewMode("game")
+                                }}
+                              >
+                                Voir le rendu
+                              </Button>
+                            ))}
                         </div>
 
                         {themeErr && (
@@ -685,6 +714,36 @@ export function EditorialLabClient({
                             ))}
                           </div>
                         )}
+
+                        {previewSlotId === slot.slotId && themeOk && (
+                          <div className="mt-4 rounded-lg border border-border bg-background p-4">
+                            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                              <h4 className="text-sm font-semibold">APERÇU</h4>
+                              <ModeToggle mode={previewMode} setMode={setPreviewMode} />
+                            </div>
+                            {quizThemePreview && !quizThemePreview.ok ? (
+                              <p className="text-sm text-destructive">{quizThemePreview.message}</p>
+                            ) : quizThemePreview?.ok ? (
+                              <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-8">
+                                <PagePreview>
+                                  <BookPage palette={palette} showSafeArea={false}>
+                                    <QuizTemplate
+                                      sample={{
+                                        ...QUIZ_01_SAMPLE,
+                                        title: themeOk.title,
+                                      }}
+                                      style={styleTokens}
+                                      palette={palette}
+                                      assets={[]}
+                                      quiz={quizThemePreview.quiz}
+                                      mode={previewMode}
+                                    />
+                                  </BookPage>
+                                </PagePreview>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
                     )}
                   </article>
@@ -693,7 +752,11 @@ export function EditorialLabClient({
             </div>
           </section>
 
-          {previewSlotId && previewSlot && previewGen?.ok && previewQuestions && (
+          {previewSlotId &&
+            previewSlot &&
+            previewGen &&
+            isQuizPersonalLabOk(previewGen) &&
+            quizPersonalPreviewQuestions && (
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-base font-semibold">Preview QUIZ_01</h2>
@@ -720,11 +783,11 @@ export function EditorialLabClient({
                       quiz={{
                         success: true,
                         seed: previewGen.seed,
-                        questions: previewQuestions,
+                        questions: quizPersonalPreviewQuestions,
                         stats: {
                           seed: previewGen.seed,
-                          received: previewQuestions.length,
-                          validated: previewQuestions.length,
+                          received: quizPersonalPreviewQuestions.length,
+                          validated: quizPersonalPreviewQuestions.length,
                         },
                         validation: { ok: true, errors: [] },
                       }}
