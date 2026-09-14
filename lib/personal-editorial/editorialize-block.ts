@@ -1,4 +1,4 @@
-import type { AudienceType, BookProfileV1 } from "@/lib/questionnaire/types"
+import type { BookProfileV1 } from "@/lib/questionnaire/types"
 import type { ContentGenerationProvider, JsonSchemaObject } from "@/lib/content-generation/types"
 import { createDefaultContentGenerationProvider } from "@/lib/content-generation/provider"
 import {
@@ -13,36 +13,54 @@ import {
 } from "@/lib/memory-pages/photo-layout"
 import { toMemoryPageSource } from "@/lib/memory-pages/select-memory"
 import { toPhotoMemorySource } from "@/lib/memory-pages/select-photo"
-import type { PersonalEditorialAudienceContext } from "./audience-context"
-import { buildPersonalEditorialAudienceContext } from "./audience-context"
-import { classifyPersonalSemantics } from "./semantic"
 import {
-  hasForbiddenCreatorVoice,
-  rewritePerspectiveDeterministic,
-  type PersonalFactPerspective,
-} from "./perspective"
+  buildPersonalEditorialAudienceContext,
+  type PersonalEditorialAudienceContext,
+} from "./audience-context"
+import { extractPersonalSourceFacts } from "./facts"
+import {
+  buildEditorialCopyFromFacts,
+  type EditorialCopyFromFacts,
+  type EditorialPerspectiveV2,
+} from "./editorial-copy"
+import { validateEditorialCopy } from "./validate-editorial"
+import { assertPhotoBlockIntegrity } from "./provenance"
 import type { MemoryBlockV1, PhotoMemoryBlockV1, PersonalBlockV1 } from "./types"
 
-function clampWords(text: string, max: number): string {
-  const words = text.trim().split(/\s+/).filter(Boolean)
-  if (words.length <= max) return words.join(" ")
-  return words.slice(0, max).join(" ")
+function mapPerspective(
+  p: EditorialPerspectiveV2,
+): PersonalBlockV1["perspective"] {
+  return p
 }
 
-function wordCount(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length
+function applyCopyToMemory(
+  base: Omit<MemoryBlockV1, keyof EditorialCopyFromFacts | "perspective" | "attributedQuote" | "claimsUsed" | "title" | "body" | "displayText" | "kicker" | "shortTitle" | "eyebrow"> & {
+    facts: MemoryBlockV1["facts"]
+    place?: string | null
+  },
+  copy: EditorialCopyFromFacts,
+  usedAi: boolean,
+): MemoryBlockV1 {
+  return {
+    ...base,
+    type: "MEMORY",
+    title: copy.shortTitle || base.place || "Moment",
+    body: copy.displayText,
+    displayText: copy.displayText,
+    kicker: copy.kicker,
+    shortTitle: copy.shortTitle,
+    eyebrow: copy.kicker || base.place || null,
+    perspective: mapPerspective(copy.perspective),
+    attributedQuote: copy.attributedQuote,
+    claimsUsed: copy.claimsUsed,
+    usedAi,
+  } as MemoryBlockV1
 }
 
 const BLOCK_SCHEMA: JsonSchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: [
-    "sourceId",
-    "kicker",
-    "shortTitle",
-    "displayText",
-    "perspective",
-  ],
+  required: ["sourceId", "kicker", "shortTitle", "displayText", "perspective", "claimsUsed"],
   properties: {
     sourceId: { type: "string", minLength: 1 },
     kicker: { type: ["string", "null"] },
@@ -50,87 +68,48 @@ const BLOCK_SCHEMA: JsonSchemaObject = {
     displayText: { type: "string", minLength: 1 },
     perspective: {
       type: "string",
-      enum: [
-        "CREATOR_PERSPECTIVE_FACT",
-        "RECIPIENT_FACT",
-        "SHARED_FACT",
-      ],
+      enum: ["CREATOR_ATTRIBUTED", "RECIPIENT", "SHARED", "NEUTRAL_EDITORIAL"],
     },
+    claimsUsed: { type: "array", items: { type: "string" } },
   },
 }
 
-function genericTitleBan(title: string): boolean {
-  const t = title.trim().toLowerCase()
-  const banned = [
-    "un moment à garder",
-    "un souvenir partagé",
-    "un souvenir à garder",
-    "voyage portugal",
-    "voyage australie",
-    "un souvenir",
-  ]
-  return banned.includes(t)
-}
-
-function finalizeTitles(input: {
-  shortTitle: string | null
-  kicker: string | null
+function editorialFromSource(input: {
+  sourceId: string
+  sourceType: "MEMORY" | "PHOTO_MEMORY"
+  rawText: string
   place?: string | null
-  locations: string[]
-  attributedQuote: boolean
-  creatorName: string | null
-}): { title: string; eyebrow: string | null; kicker: string | null } {
-  let shortTitle = input.shortTitle?.trim() || null
-  if (shortTitle && genericTitleBan(shortTitle)) shortTitle = null
-  const title =
-    shortTitle ||
-    input.locations[0] ||
-    input.place?.trim() ||
-    (input.attributedQuote ? "Citation" : "Moment")
-  const kicker =
-    input.kicker?.trim() ||
-    (input.attributedQuote ? input.creatorName : null) ||
-    null
-  const eyebrow = input.place?.trim() || input.locations[0] || null
-  return { title, eyebrow, kicker }
-}
-
-function applyDeterministicEditorial(input: {
-  sourceText: string
+  title?: string | null
   ctx: PersonalEditorialAudienceContext
-  place?: string | null
-  titleHint?: string | null
-}): {
-  displayText: string
-  shortTitle: string | null
-  kicker: string | null
-  perspective: PersonalFactPerspective
-  attributedQuote: boolean
-  semantics: ReturnType<typeof classifyPersonalSemantics>
-} {
-  const semantics = classifyPersonalSemantics({
-    text: input.sourceText,
+}): { facts: ReturnType<typeof extractPersonalSourceFacts>; copy: EditorialCopyFromFacts } {
+  const facts = extractPersonalSourceFacts({
+    sourceId: input.sourceId,
+    sourceType: input.sourceType,
+    rawText: input.rawText,
     place: input.place,
-    title: input.titleHint,
-  })
-  const rewritten = rewritePerspectiveDeterministic({
-    sourceText: input.sourceText,
+    title: input.title,
     ctx: input.ctx,
-    place: input.place || semantics.locations[0] || null,
   })
-  return {
-    displayText: rewritten.displayText,
-    shortTitle: rewritten.shortTitle || semantics.locations[0] || null,
-    kicker: rewritten.kicker,
-    perspective: rewritten.perspective,
-    attributedQuote: rewritten.attributedQuote,
-    semantics,
+  let copy = buildEditorialCopyFromFacts({ facts, ctx: input.ctx })
+  const validation = validateEditorialCopy({
+    copy,
+    facts,
+    recipientNames: input.ctx.recipientNames,
+  })
+  if (!validation.ok) {
+    // Safe repair: attributed quote
+    copy = {
+      kicker: input.ctx.creatorName || "Souvenir",
+      shortTitle: facts.locations[0] || null,
+      displayText: facts.quotes[0] || input.rawText,
+      perspective: "CREATOR_ATTRIBUTED",
+      attributedQuote: true,
+      claimsUsed: ["repair-citation"],
+    }
   }
+  return { facts, copy }
 }
 
-/**
- * Sync editorialization — always runs perspective layer (never raw dump).
- */
 export function memoryToBlock(
   memory: BookProfileV1["memories"][number],
   profile: BookProfileV1,
@@ -144,42 +123,38 @@ export function memoryToBlock(
       creatorName: options?.creatorName,
     })
   const density = classifyMemoryDensity({ source })
-  const ed = applyDeterministicEditorial({
-    sourceText: source.originalText,
+  const { facts, copy } = editorialFromSource({
+    sourceId: source.memoryId,
+    sourceType: "MEMORY",
+    rawText: source.originalText,
+    place: source.place,
+    title: source.title,
     ctx,
-    place: source.place,
-    titleHint: source.title,
-  })
-  const titles = finalizeTitles({
-    shortTitle: ed.shortTitle,
-    kicker: ed.kicker,
-    place: source.place,
-    locations: ed.semantics.locations,
-    attributedQuote: ed.attributedQuote,
-    creatorName: ctx.creatorName,
   })
 
   return {
     type: "MEMORY",
     sourceMemoryId: source.memoryId,
     originalText: source.originalText,
-    title: titles.title,
-    body: ed.displayText,
-    displayText: ed.displayText,
+    title: copy.shortTitle || source.place || facts.locations[0] || "Moment",
+    body: copy.displayText,
+    displayText: copy.displayText,
     density,
     participantIds: [...source.participantIds],
     fullPageRecommended: recommendFullMemoryPage({ density }),
-    eyebrow: titles.eyebrow,
-    place: source.place?.trim() || ed.semantics.locations[0] || null,
-    kicker: titles.kicker,
-    shortTitle: ed.shortTitle,
-    semanticCategory: ed.semantics.category,
-    semanticTags: ed.semantics.semanticTags,
-    locations: ed.semantics.locations,
-    trips: ed.semantics.trips,
-    perspective: ed.perspective,
-    attributedQuote: ed.attributedQuote,
+    eyebrow: copy.kicker || source.place || null,
+    place: source.place?.trim() || facts.locations[0] || null,
+    kicker: copy.kicker,
+    shortTitle: copy.shortTitle,
+    semanticCategory: facts.category,
+    semanticTags: facts.semanticTags,
+    locations: facts.locations,
+    trips: facts.tripContext,
+    perspective: mapPerspective(copy.perspective),
+    attributedQuote: copy.attributedQuote,
     usedAi: false,
+    claimsUsed: copy.claimsUsed,
+    facts,
   }
 }
 
@@ -200,41 +175,65 @@ export function photoToBlock(
   const density = classifyPhotoMemoryDensity(source)
   const combined = photoMemoryCombinedText(source) || ""
   const weak = !combined.trim()
-  const ed = weak
-    ? {
-        displayText: "",
-        shortTitle: null as string | null,
-        kicker: null as string | null,
-        perspective: "SHARED_FACT" as PersonalFactPerspective,
-        attributedQuote: false,
-        semantics: classifyPersonalSemantics({ text: "" }),
-      }
-    : applyDeterministicEditorial({
-        sourceText: combined,
-        ctx,
-        place: null,
-        titleHint: source.caption,
-      })
 
-  const titles = finalizeTitles({
-    shortTitle: ed.shortTitle,
-    kicker: ed.kicker,
-    place: null,
-    locations: ed.semantics.locations,
-    attributedQuote: ed.attributedQuote,
-    creatorName: ctx.creatorName,
+  if (weak) {
+    const facts = extractPersonalSourceFacts({
+      sourceId: source.photoId,
+      sourceType: "PHOTO_MEMORY",
+      rawText: "",
+      ctx,
+    })
+    const block: PhotoMemoryBlockV1 = {
+      type: "PHOTO_MEMORY",
+      sourcePhotoId: source.photoId,
+      signedUrl: source.signedUrl,
+      caption: source.caption,
+      anecdote: source.anecdote,
+      originalText: "",
+      title: "Photo",
+      body: "",
+      displayText: "",
+      density,
+      aspectRatio: source.aspectRatio,
+      photoLayout: classifyPhotoMemoryLayout(source.aspectRatio),
+      participantIds: [...source.participantIds],
+      fullPageRecommended: false,
+      weakSource: true,
+      eyebrow: null,
+      kicker: null,
+      shortTitle: null,
+      semanticCategory: "OTHER",
+      semanticTags: [],
+      locations: [],
+      trips: [],
+      perspective: "NEUTRAL_EDITORIAL",
+      attributedQuote: false,
+      usedAi: false,
+      claimsUsed: [],
+      facts,
+    }
+    assertPhotoBlockIntegrity(block)
+    return block
+  }
+
+  const { facts, copy } = editorialFromSource({
+    sourceId: source.photoId,
+    sourceType: "PHOTO_MEMORY",
+    rawText: combined,
+    title: source.caption,
+    ctx,
   })
 
-  return {
+  const block: PhotoMemoryBlockV1 = {
     type: "PHOTO_MEMORY",
     sourcePhotoId: source.photoId,
     signedUrl: source.signedUrl,
     caption: source.caption,
     anecdote: source.anecdote,
     originalText: combined,
-    title: weak ? "Photo" : titles.title,
-    body: ed.displayText,
-    displayText: ed.displayText,
+    title: copy.shortTitle || facts.locations[0] || "Photo",
+    body: copy.displayText,
+    displayText: copy.displayText,
     density,
     aspectRatio: source.aspectRatio,
     photoLayout: classifyPhotoMemoryLayout(source.aspectRatio),
@@ -243,23 +242,24 @@ export function photoToBlock(
       source,
       hasRenderablePhoto: Boolean(source.signedUrl),
     }),
-    weakSource: weak,
-    eyebrow: titles.eyebrow,
-    kicker: titles.kicker,
-    shortTitle: ed.shortTitle,
-    semanticCategory: ed.semantics.category,
-    semanticTags: ed.semantics.semanticTags,
-    locations: ed.semantics.locations,
-    trips: ed.semantics.trips,
-    perspective: ed.perspective,
-    attributedQuote: ed.attributedQuote,
+    weakSource: false,
+    eyebrow: copy.kicker,
+    kicker: copy.kicker,
+    shortTitle: copy.shortTitle,
+    semanticCategory: facts.category,
+    semanticTags: facts.semanticTags,
+    locations: facts.locations,
+    trips: facts.tripContext,
+    perspective: mapPerspective(copy.perspective),
+    attributedQuote: copy.attributedQuote,
     usedAi: false,
+    claimsUsed: copy.claimsUsed,
+    facts,
   }
+  assertPhotoBlockIntegrity(block)
+  return block
 }
 
-/**
- * Collect blocks with deterministic editorial layer (sync — Blueprint safe).
- */
 export function collectPersonalBlocks(input: {
   profile: BookProfileV1
   photoSignedUrls?: Record<string, string>
@@ -275,30 +275,27 @@ export function collectPersonalBlocks(input: {
   const photos = (input.profile.photos ?? []).filter(
     (p) => p.useAuthorized && Boolean(p.storagePath),
   )
-  const memLimit = input.maxMemories ?? memories.length
-  const photoLimit = input.maxPhotos ?? photos.length
   const out: PersonalBlockV1[] = []
 
-  for (const m of memories.slice(0, memLimit)) {
+  for (const m of memories.slice(0, input.maxMemories ?? memories.length)) {
     const block = memoryToBlock(m, input.profile, { ctx })
     if (block) out.push(block)
   }
-  for (const p of photos.slice(0, photoLimit)) {
-    const block = photoToBlock(
-      p,
-      input.profile,
-      input.photoSignedUrls?.[p.id] ?? null,
-      input.aspectRatios?.[p.id],
-      { ctx },
-    )
-    if (block) out.push(block)
+  for (const p of photos.slice(0, input.maxPhotos ?? photos.length)) {
+    // URL keyed by photo id — never by array index
+    const url = input.photoSignedUrls?.[p.id] ?? null
+    const ratio = input.aspectRatios?.[p.id]
+    const block = photoToBlock(p, input.profile, url, ratio, { ctx })
+    if (block) {
+      assertPhotoBlockIntegrity(block)
+      out.push(block)
+    }
   }
   return out
 }
 
 /**
- * Optional AI polish for a single block — one source only, no cross-memory context.
- * Falls back to deterministic editorial on any failure.
+ * Optional AI polish — one source only. Fake provider in tests.
  */
 export async function polishPersonalBlockWithAi(input: {
   block: PersonalBlockV1
@@ -316,43 +313,30 @@ export async function polishPersonalBlockWithAi(input: {
 
   const sourceId =
     base.type === "MEMORY" ? base.sourceMemoryId : base.sourcePhotoId
+
   const payload = {
     sourceId,
     sourceType: base.type,
     originalText: base.originalText,
+    facts: {
+      sharedFacts: base.facts.sharedFacts,
+      creatorOpinions: base.facts.creatorOpinions,
+      locations: base.facts.locations,
+      tripContext: base.facts.tripContext,
+      events: base.facts.events,
+    },
     audience: input.ctx.audience,
-    creatorIsParticipant: input.ctx.creatorIsParticipant,
-    ...(input.ctx.creatorName ? { creatorName: input.ctx.creatorName } : {}),
+    creatorName: input.ctx.creatorName,
     recipientNames: input.ctx.recipientNames,
-    addressMode: input.ctx.addressMode,
-    density: base.density,
-    knownPerspective: base.perspective,
-  }
-
-  const rawGuard = JSON.stringify(payload).toLowerCase()
-  if (
-    rawGuard.includes("personalfacts") ||
-    rawGuard.includes("memories") ||
-    rawGuard.includes("email")
-  ) {
-    return base
   }
 
   const system = [
-    "Vous éditorialisez UN seul fragment pour un cahier imprimé.",
-    "Vous recevez UNIQUEMENT cette source + le contexte d'audience.",
-    "",
-    "Mission : adapter la perspective du lecteur, condensé, naturel.",
-    "Pour OTHER_PERSON : le destinataire lit le cahier — pas la voix questionnaire du créateur.",
-    "Interdit : « Sami et moi… », « J'ai adoré… » non attribué, ton documentaire « Vous êtes allé… » répété.",
-    "Si une opinion appartient au créateur, elle reste attribuée au créateur.",
-    "Ne jamais transformer l'opinion d'Emma en opinion de Sami.",
-    "",
-    "INTERDIT : inventer lieu/date/personne/émotion ; enrichir factuellement ; fusionner d'autres souvenirs.",
-    "Titres génériques interdits : « Un moment à garder », « Un souvenir partagé ».",
-    "perspective doit être CREATOR_PERSPECTIVE_FACT | RECIPIENT_FACT | SHARED_FACT.",
-    "sourceId DOIT être exactement celui fourni.",
-    "Répondez uniquement via le schéma JSON.",
+    "Éditorialisez UN fragment pour un cahier imprimé (lecteur = destinataire).",
+    "OTHER_PERSON : voix NEUTRAL_EDITORIAL ou CREATOR_ATTRIBUTED.",
+    "Interdit : « X et moi », « j'ai » non attribué, mélange votre/nous, récits « vous êtes allé… ».",
+    "Les opinions du créateur restent attribuées au créateur.",
+    "N'inventez aucun lieu/date/personne/fait. Condenser est autorisé.",
+    "sourceId DOIT matcher. claimsUsed = faits utilisés.",
   ].join("\n")
 
   const raw = await provider.generateStructured<{
@@ -360,75 +344,75 @@ export async function polishPersonalBlockWithAi(input: {
     kicker: string | null
     shortTitle: string | null
     displayText: string
-    perspective: PersonalFactPerspective
+    perspective: EditorialPerspectiveV2
+    claimsUsed: string[]
   }>({
     system,
     input: payload,
-    schemaName: "personal_editorial_block_v1",
+    schemaName: "personal_editorial_block_v2",
     schema: BLOCK_SCHEMA,
     seed: input.seed,
   })
 
   if (!raw.ok) return base
-
-  const displayText = clampWords(String(raw.data.displayText ?? "").trim(), 120)
-  if (!displayText) return base
   if (String(raw.data.sourceId ?? "").trim() !== sourceId) return base
-  if (hasForbiddenCreatorVoice(displayText, input.ctx)) return base
-  if (wordCount(displayText) > wordCount(base.originalText) * 1.4 + 12) return base
 
-  const perspective = (raw.data.perspective || base.perspective) as PersonalFactPerspective
-  // Never allow flipping creator opinion to recipient
-  if (
-    base.perspective === "CREATOR_PERSPECTIVE_FACT" &&
-    perspective === "RECIPIENT_FACT"
-  ) {
-    return base
+  const copy: EditorialCopyFromFacts = {
+    kicker: raw.data.kicker,
+    shortTitle: raw.data.shortTitle,
+    displayText: String(raw.data.displayText ?? "").trim(),
+    perspective: raw.data.perspective,
+    attributedQuote: raw.data.perspective === "CREATOR_ATTRIBUTED" &&
+      /^«|^"/.test(String(raw.data.displayText ?? "")),
+    claimsUsed: Array.isArray(raw.data.claimsUsed) ? raw.data.claimsUsed.map(String) : [],
   }
+  if (!copy.displayText) return base
 
-  const shortTitle = raw.data.shortTitle?.trim() || base.shortTitle || null
-  const kicker = raw.data.kicker?.trim() || base.kicker || null
-  const titles = finalizeTitles({
-    shortTitle,
-    kicker,
-    place: base.type === "MEMORY" ? base.place : null,
-    locations: base.locations,
-    attributedQuote: false,
-    creatorName: input.ctx.creatorName,
+  const validation = validateEditorialCopy({
+    copy,
+    facts: base.facts,
+    recipientNames: input.ctx.recipientNames,
   })
+  if (!validation.ok) return base
 
   if (base.type === "MEMORY") {
     return {
       ...base,
-      title: titles.title,
-      body: displayText,
-      displayText,
-      eyebrow: titles.eyebrow,
-      kicker: titles.kicker,
-      shortTitle,
-      perspective,
-      attributedQuote: false,
+      title: copy.shortTitle || base.title,
+      body: copy.displayText,
+      displayText: copy.displayText,
+      kicker: copy.kicker,
+      shortTitle: copy.shortTitle,
+      perspective: mapPerspective(copy.perspective),
+      attributedQuote: copy.attributedQuote,
+      claimsUsed: copy.claimsUsed,
       usedAi: true,
     }
   }
 
-  return {
+  const next: PhotoMemoryBlockV1 = {
     ...base,
-    title: titles.title,
-    body: displayText,
-    displayText,
-    eyebrow: titles.eyebrow,
-    kicker: titles.kicker,
-    shortTitle,
-    perspective,
-    attributedQuote: false,
+    title: copy.shortTitle || base.title,
+    body: copy.displayText,
+    displayText: copy.displayText,
+    kicker: copy.kicker,
+    shortTitle: copy.shortTitle,
+    perspective: mapPerspective(copy.perspective),
+    attributedQuote: copy.attributedQuote,
+    claimsUsed: copy.claimsUsed,
     usedAi: true,
+    // provenance locked
+    sourcePhotoId: base.sourcePhotoId,
+    signedUrl: base.signedUrl,
+    caption: base.caption,
+    anecdote: base.anecdote,
+    originalText: base.originalText,
+    facts: base.facts,
   }
+  assertPhotoBlockIntegrity(next)
+  return next
 }
 
-/**
- * Async pipeline: collect + optional AI polish per block.
- */
 export async function collectAndEditorializePersonalBlocks(input: {
   profile: BookProfileV1
   seed: string
@@ -451,17 +435,20 @@ export async function collectAndEditorializePersonalBlocks(input: {
     maxPhotos: input.maxPhotos,
     creatorName: input.creatorName,
   })
-
   const out: PersonalBlockV1[] = []
   for (let i = 0; i < blocks.length; i++) {
-    const polished = await polishPersonalBlockWithAi({
-      block: blocks[i]!,
-      ctx,
-      seed: `${input.seed}:block:${i}`,
-      provider: input.provider,
-      forceFallback: input.forceFallback,
-    })
-    out.push(polished)
+    out.push(
+      await polishPersonalBlockWithAi({
+        block: blocks[i]!,
+        ctx,
+        seed: `${input.seed}:block:${i}`,
+        provider: input.provider,
+        forceFallback: input.forceFallback,
+      }),
+    )
   }
   return out
 }
+
+// silence unused helper
+void applyCopyToMemory

@@ -263,7 +263,7 @@ function HeroPhoto({
     return (
       <div className="flex h-full" style={{ gap: 18 }} data-layout-zone="hero-photo-portrait">
         <div style={{ ...frame, width: "48%", alignSelf: "stretch" }}>
-          {block.signedUrl ? <PhotoImg src={block.signedUrl} /> : null}
+          {block.signedUrl ? <PhotoImg src={block.signedUrl} sourcePhotoId={block.sourcePhotoId} /> : null}
         </div>
         <div className="flex min-w-0 flex-1 flex-col justify-center" style={{ gap: 14 }}>
           <PhotoCopy block={block} style={style} titleSize={32} bodySize={15} />
@@ -275,7 +275,7 @@ function HeroPhoto({
     <div className="flex h-full flex-col" style={{ gap: 14 }} data-layout-zone="hero-photo">
       {block.signedUrl ? (
         <div style={{ ...frame, flex: "1 1 58%", minHeight: 320 }}>
-          <PhotoImg src={block.signedUrl} />
+          <PhotoImg src={block.signedUrl} sourcePhotoId={block.sourcePhotoId} />
         </div>
       ) : null}
       <div style={{ flex: "0 0 auto", paddingBottom: 8 }}>
@@ -310,7 +310,7 @@ function SinglePhoto({
               : { flex: "1 1 48%", minHeight: 260, maxHeight: "52%" }),
           }}
         >
-          <PhotoImg src={block.signedUrl} />
+          <PhotoImg src={block.signedUrl} sourcePhotoId={block.sourcePhotoId} />
         </div>
       ) : null}
       <div
@@ -362,7 +362,7 @@ function PhotoPlusMemory({
         <div className="flex flex-col" style={{ width: photoWidthPortrait, gap: 10 }}>
           {photo.signedUrl ? (
             <div style={{ ...frame, flex: "1 1 auto", minHeight: 280 }}>
-              <PhotoImg src={photo.signedUrl} />
+              <PhotoImg src={photo.signedUrl} sourcePhotoId={photo.sourcePhotoId} />
             </div>
           ) : null}
           <PhotoCopy block={photo} style={style} titleSize={18} bodySize={12} label="Photo" />
@@ -409,7 +409,7 @@ function PhotoPlusMemory({
       <div className="flex flex-col" style={{ flex: photoFlex, gap: 8, minHeight: 0 }} data-source="photo">
         {photo.signedUrl ? (
           <div style={{ ...frame, flex: "1 1 auto", minHeight: variant === "ASYMMETRIC" ? 250 : 220 }}>
-            <PhotoImg src={photo.signedUrl} />
+            <PhotoImg src={photo.signedUrl} sourcePhotoId={photo.sourcePhotoId} />
           </div>
         ) : null}
         <PhotoCopy block={photo} style={style} titleSize={20} bodySize={13} label="Photo" />
@@ -475,7 +475,7 @@ function TwoPhotos({
             <div key={p.sourcePhotoId} className="flex min-w-0 flex-1 flex-col" style={{ gap: 8 }}>
               {p.signedUrl ? (
                 <div style={{ ...frame, flex: "1 1 auto", minHeight: 280 }}>
-                  <PhotoImg src={p.signedUrl} />
+                  <PhotoImg src={p.signedUrl} sourcePhotoId={p.sourcePhotoId} />
                 </div>
               ) : null}
               <PhotoCopy block={p} style={style} titleSize={17} bodySize={12} />
@@ -493,7 +493,7 @@ function TwoPhotos({
           <div key={p.sourcePhotoId} className="flex min-h-0 flex-1 flex-col" style={{ gap: 6 }}>
             {p.signedUrl ? (
               <div style={{ ...frame, flex: "1 1 72%", minHeight: 160 }}>
-                <PhotoImg src={p.signedUrl} />
+                <PhotoImg src={p.signedUrl} sourcePhotoId={p.sourcePhotoId} />
               </div>
             ) : null}
             <PhotoCopy block={p} style={style} titleSize={17} bodySize={12} />
@@ -637,7 +637,7 @@ function PhotoPlusTwoSnippets({
         <div className="flex flex-col" style={{ width: "46%", gap: 8 }}>
           {photo && photo.type === "PHOTO_MEMORY" && photo.signedUrl ? (
             <div style={{ ...frame, flex: "1 1 auto", minHeight: 240 }}>
-              <PhotoImg src={photo.signedUrl} />
+              <PhotoImg src={photo.signedUrl} sourcePhotoId={photo.sourcePhotoId} />
             </div>
           ) : null}
           {photo && photo.type === "PHOTO_MEMORY" ? (
@@ -698,7 +698,7 @@ function PhotoPlusTwoSnippets({
       >
         {photo && photo.type === "PHOTO_MEMORY" && photo.signedUrl ? (
           <div style={{ ...frame, flex: "1 1 auto", minHeight: 200 }}>
-            <PhotoImg src={photo.signedUrl} />
+            <PhotoImg src={photo.signedUrl} sourcePhotoId={photo.sourcePhotoId} />
           </div>
         ) : null}
         {photo && photo.type === "PHOTO_MEMORY" ? (
@@ -767,7 +767,11 @@ function PhotoCopy({
   const body = block.displayText || block.body
   const showTitle = Boolean(block.shortTitle || block.locations[0])
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 6 }}
+      data-source-photo-id={block.sourcePhotoId}
+      data-rendered-photo-id={block.sourcePhotoId}
+    >
       {(block.kicker || label) && (
         <p className={style.gameLabelClassName} style={{ fontSize: 10, letterSpacing: "0.2em" }}>
           {block.kicker || label}
@@ -801,13 +805,15 @@ function PhotoCopy({
   )
 }
 
-function PhotoImg({ src }: { src: string }) {
+function PhotoImg({ src, sourcePhotoId }: { src: string; sourcePhotoId: string }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
       alt=""
       data-object-fit="cover"
+      data-source-photo-id={sourcePhotoId}
+      data-rendered-photo-id={sourcePhotoId}
       style={{
         width: "100%",
         height: "100%",

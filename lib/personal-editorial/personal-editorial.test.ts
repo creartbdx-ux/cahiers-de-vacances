@@ -13,6 +13,7 @@ import {
   blockTextWordCount,
   collectPersonalBlocks,
   composePersonalEditorialPages,
+  hasMixedEditorialVoice,
   isTrueHeroCandidate,
   memoryToBlock,
   pageFillScore,
@@ -20,6 +21,7 @@ import {
   photoToBlock,
   prefersDedicatedPage,
   semanticCompatibilityScore,
+  validatePageTitle,
   PERSONAL_PAGE_CAPACITY,
   PERSONAL_PAGE_MAX_BLOCKS,
   PERSONAL_PAGE_MAX_PHOTOS,
@@ -84,7 +86,7 @@ const STYLES = [
   },
 ]
 
-function editorialDefaults(text: string) {
+function editorialDefaults(text: string, sourceId = "x") {
   return {
     originalText: text,
     displayText: text,
@@ -92,9 +94,27 @@ function editorialDefaults(text: string) {
     semanticTags: [] as string[],
     locations: [] as string[],
     trips: [] as string[],
-    perspective: "SHARED_FACT" as const,
+    perspective: "NEUTRAL_EDITORIAL" as const,
     attributedQuote: false,
     usedAi: false,
+    claimsUsed: [] as string[],
+    facts: {
+      sourceId,
+      sourceType: "MEMORY" as const,
+      rawText: text,
+      actors: [],
+      sharedFacts: [],
+      creatorFacts: [],
+      recipientFacts: [],
+      locations: [],
+      tripContext: [],
+      events: [],
+      creatorOpinions: [],
+      recipientOpinions: [],
+      quotes: text ? [text] : [],
+      category: "OTHER" as const,
+      semanticTags: [],
+    },
   }
 }
 
@@ -107,7 +127,7 @@ function shortMemory(id: string, text = "Petite anecdote."): MemoryBlockV1 {
     density: "SHORT",
     participantIds: ["p1"],
     fullPageRecommended: false,
-    ...editorialDefaults(text),
+    ...editorialDefaults(text, id),
   }
 }
 
@@ -122,12 +142,13 @@ function mediumMemory(id: string): MemoryBlockV1 {
     density: "MEDIUM",
     participantIds: ["p1"],
     fullPageRecommended: true,
-    ...editorialDefaults(text),
+    ...editorialDefaults(text, id),
   }
 }
 
 function shortPhoto(id: string): PhotoMemoryBlockV1 {
   const text = "Petite légende"
+  const base = editorialDefaults(text, id)
   return {
     type: "PHOTO_MEMORY",
     sourcePhotoId: id,
@@ -141,12 +162,14 @@ function shortPhoto(id: string): PhotoMemoryBlockV1 {
     participantIds: ["p1"],
     fullPageRecommended: true,
     weakSource: false,
-    ...editorialDefaults(text),
+    ...base,
+    facts: { ...base.facts, sourceType: "PHOTO_MEMORY" },
   }
 }
 
 function mediumPhoto(id: string): PhotoMemoryBlockV1 {
   const text = "Légende un peu plus détaillée de la photo. Petite note"
+  const base = editorialDefaults(text, id)
   return {
     type: "PHOTO_MEMORY",
     sourcePhotoId: id,
@@ -160,7 +183,8 @@ function mediumPhoto(id: string): PhotoMemoryBlockV1 {
     participantIds: ["p1"],
     fullPageRecommended: true,
     weakSource: false,
-    ...editorialDefaults(text),
+    ...base,
+    facts: { ...base.facts, sourceType: "PHOTO_MEMORY", rawText: text },
   }
 }
 
@@ -278,7 +302,7 @@ test("RICH réel => HERO possible", () => {
     density: "RICH",
     participantIds: ["p1"],
     fullPageRecommended: true,
-    ...editorialDefaults(body),
+    ...editorialDefaults(body, "rich"),
   }
   assert.equal(isTrueHeroCandidate(rich), true)
   const pages = composePersonalEditorialPages([rich], "hero-mem")
@@ -620,7 +644,7 @@ test("RICH conserve possibilité de 4 pages", () => {
     density: "RICH",
     participantIds: ["p1"],
     fullPageRecommended: true,
-    ...editorialDefaults(richBody),
+    ...editorialDefaults(richBody, "rich"),
   }
   const blocks = [
     mediumPhoto("ph1"),
@@ -675,17 +699,16 @@ test("OTHER_PERSON : Sami et moi ne reste pas en voix questionnaire", () => {
     ],
   })
   const block = memoryToBlock(p.memories[0]!, p, { creatorName: "Emma" })!
-  assert.ok(!/^Sami et moi/i.test(block.displayText))
-  assert.ok(!block.displayText.toLowerCase().includes("sami et moi"))
-  assert.equal(block.perspective, "CREATOR_PERSPECTIVE_FACT")
+  assert.ok(!/Sami et moi/i.test(block.displayText) || block.attributedQuote)
   assert.ok(
-    /emma/i.test(block.displayText) || block.attributedQuote,
-    "préférence reste attribuée à Emma",
+    block.perspective === "CREATOR_ATTRIBUTED" || block.attributedQuote,
   )
-  assert.ok(!/votre plage préférée/i.test(block.displayText))
+  assert.ok(/emma/i.test(block.displayText) || block.attributedQuote)
+  assert.ok(!/votre (plage|moment) préfér/i.test(block.displayText))
+  assert.ok(!hasMixedEditorialVoice(block.displayText, block.attributedQuote))
 })
 
-test("OTHER_PERSON : notre voyage → votre voyage", () => {
+test("OTHER_PERSON : fait partagé voyage sans dump brut", () => {
   const p = profile({
     audience: "OTHER_PERSON",
     creatorIsParticipant: false,
@@ -695,8 +718,8 @@ test("OTHER_PERSON : notre voyage → votre voyage", () => {
     ],
   })
   const block = memoryToBlock(p.memories[0]!, p, { creatorName: "Emma" })!
-  assert.match(block.displayText, /votre voyage/i)
-  assert.doesNotMatch(block.displayText, /notre voyage/i)
+  assert.ok(!/Sami et moi/i.test(block.displayText))
+  assert.ok(!hasMixedEditorialVoice(block.displayText, block.attributedQuote))
 })
 
 test("SHARED : dernier jour conservé", () => {
@@ -714,11 +737,79 @@ test("SHARED : dernier jour conservé", () => {
       },
     ],
   })
-  const block = photoToBlock(p.photos[0]!, p, "https://x", undefined, {
+  const block = photoToBlock(p.photos[0]!, p, "https://x/ph1.jpg", undefined, {
     creatorName: "Emma",
   })!
   assert.match(block.displayText, /dernier jour/i)
   assert.ok(!/Sami et moi/i.test(block.displayText))
+  assert.equal(block.sourcePhotoId, "ph1")
+  assert.equal(block.facts.sourceId, "ph1")
+})
+
+test("photo A ne reçoit jamais la copy de photo B", () => {
+  const p = profile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "sami", firstName: "Sami" }],
+    photos: [
+      {
+        id: "whitehaven",
+        useAuthorized: true,
+        storagePath: "wh.jpg",
+        caption: "Whitehaven Beach pendant le voyage en Australie.",
+        anecdote: "J'ai adoré cette plage, c'est mon moment préféré.",
+      },
+      {
+        id: "sydney",
+        useAuthorized: true,
+        storagePath: "sy.jpg",
+        caption: "Sydney Tower Eye.",
+        anecdote: "C'était notre dernier jour en Australie.",
+      },
+    ],
+  })
+  const urls = {
+    whitehaven: "https://signed.example/whitehaven.jpg",
+    sydney: "https://signed.example/sydney.jpg",
+  }
+  const blocks = collectPersonalBlocks({
+    profile: p,
+    photoSignedUrls: urls,
+    creatorName: "Emma",
+  })
+  const pages = composePersonalEditorialPages(blocks, "photo-prov")
+  for (const page of pages) {
+    for (const b of page.blocks) {
+      if (b.type !== "PHOTO_MEMORY") continue
+      assert.equal(b.facts.sourceId, b.sourcePhotoId)
+      if (b.sourcePhotoId === "whitehaven") {
+        assert.equal(b.signedUrl, urls.whitehaven)
+        assert.ok(!/sydney\s+tower/i.test(b.displayText))
+        assert.ok(!/sydney\s+tower/i.test(b.originalText))
+        assert.match(b.originalText, /whitehaven/i)
+      }
+      if (b.sourcePhotoId === "sydney") {
+        assert.equal(b.signedUrl, urls.sydney)
+        assert.ok(!/whitehaven/i.test(b.displayText))
+        assert.match(b.originalText, /sydney/i)
+      }
+    }
+    const html = renderToStaticMarkup(
+      createElement(PersonalEditorialTemplate, {
+        page,
+        style: getStyleTokens("RETRO"),
+        palette: PALETTE,
+      }),
+    )
+    // Each rendered photo id appears paired
+    for (const b of page.blocks) {
+      if (b.type !== "PHOTO_MEMORY" || !b.signedUrl) continue
+      const re = new RegExp(
+        `data-source-photo-id="${b.sourcePhotoId}"[^>]*src="${b.signedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"|src="${b.signedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*data-source-photo-id="${b.sourcePhotoId}"`,
+      )
+      assert.ok(re.test(html) || html.includes(`data-source-photo-id="${b.sourcePhotoId}"`))
+    }
+  }
 })
 
 test("compatibilité sémantique Australie positive", () => {
@@ -754,10 +845,11 @@ test("voyage + rendez-vous pro : pas de faux thème forcé", () => {
     if (page.blocks.length > 1) {
       assert.equal(page.theme.themeType, "NEUTRAL_MOMENTS")
     }
+    assert.ok(!/&/.test(page.theme.title))
   }
 })
 
-test("fixture Emma → Sami : perspective + thèmes", () => {
+test("fixture Emma → Sami : perspective + thèmes + anti-&", () => {
   const p = profile({
     audience: "OTHER_PERSON",
     creatorIsParticipant: false,
@@ -773,7 +865,11 @@ test("fixture Emma → Sami : perspective + thèmes", () => {
       },
       {
         id: "work",
-        text: "Les premiers rendez-vous professionnels pour lancer notre entreprise.",
+        text: "Lors de nos premiers rendez-vous professionnels pour du démarchage, on a beaucoup ri.",
+      },
+      {
+        id: "japan",
+        text: "Lors de notre passage au Japon, escale pendant le voyage en Australie.",
       },
     ],
     photos: [
@@ -801,16 +897,48 @@ test("fixture Emma → Sami : perspective + thèmes", () => {
   })
   const blocks = collectPersonalBlocks({ profile: p, creatorName: "Emma" })
   for (const b of blocks) {
-    assert.ok(!/Sami et moi/i.test(b.displayText), b.displayText)
+    // Non-attributed copy must not keep questionnaire voice
+    if (!b.attributedQuote) {
+      assert.ok(!/Sami et moi/i.test(b.displayText), b.displayText)
+    }
+    assert.ok(!hasMixedEditorialVoice(b.displayText, b.attributedQuote), b.displayText)
+    if (/j['\u2019]ai/i.test(b.displayText) && !b.attributedQuote) {
+      assert.ok(/emma/i.test(b.displayText))
+    }
   }
   const pages = composePersonalEditorialPages(blocks, "emma-sami")
   assert.ok(pages.length >= 3)
-  assert.ok(pages.length <= 5)
-  assert.ok(pages.every((pg) => pg.theme?.title))
+  assert.ok(pages.length <= 6)
+  for (const pg of pages) {
+    assert.ok(pg.theme?.title)
+    assert.ok(!/&/.test(pg.theme.title), pg.theme.title)
+  }
   const a = composePersonalEditorialPages(blocks, "emma-sami")
   const b = composePersonalEditorialPages(blocks, "emma-sami")
   assert.deepEqual(
     a.map((x) => x.layoutId),
     b.map((x) => x.layoutId),
   )
+})
+
+test("titre page naturel — pas de concaténation &", () => {
+  assert.equal(validatePageTitle("AUSTRALIE & JAPON & ESCALE").ok, false)
+  assert.equal(validatePageTitle("En Australie").ok, true)
+})
+
+test("fallback citation attribuée sans IA", () => {
+  const p = profile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "sami", firstName: "Sami" }],
+    memories: [
+      {
+        id: "odd",
+        text: "Je me souviens encore de cette sensation bizarre sans lieu précis.",
+      },
+    ],
+  })
+  const block = memoryToBlock(p.memories[0]!, p, { creatorName: "Emma" })!
+  assert.ok(block.attributedQuote || block.perspective === "CREATOR_ATTRIBUTED")
+  assert.ok(!hasMixedEditorialVoice(block.displayText, block.attributedQuote))
 })

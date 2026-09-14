@@ -1,22 +1,21 @@
 import type { MemoryDensity, PhotoMemoryLayout } from "@/lib/memory-pages/types"
 import type { VisualRole } from "@/lib/book-blueprint/types"
-import type { PersonalFactPerspective } from "./perspective"
+import type { EditorialPerspectiveV2 } from "./editorial-copy"
+import type { PersonalSourceFacts } from "./facts"
 import type { PersonalSemanticCategory } from "./semantic"
 
-/** Editorial unit from a memory — not yet a page. */
-export interface MemoryBlockV1 {
-  type: "MEMORY"
-  sourceMemoryId: string
-  /** Raw questionnaire text — debug / provenance only. */
+/** @deprecated Prefer EditorialPerspectiveV2 on blocks. */
+export type PersonalFactPerspective =
+  | "CREATOR_PERSPECTIVE_FACT"
+  | "RECIPIENT_FACT"
+  | "SHARED_FACT"
+  | "CREATOR_ATTRIBUTED"
+  | "RECIPIENT"
+  | "SHARED"
+  | "NEUTRAL_EDITORIAL"
+
+interface PersonalBlockEditorialFields {
   originalText: string
-  title: string
-  body: string
-  density: MemoryDensity
-  participantIds: string[]
-  fullPageRecommended: boolean
-  eyebrow?: string | null
-  place?: string | null
-  /** Editorial layer */
   kicker?: string | null
   shortTitle?: string | null
   displayText: string
@@ -27,17 +26,28 @@ export interface MemoryBlockV1 {
   perspective: PersonalFactPerspective
   attributedQuote: boolean
   usedAi: boolean
+  claimsUsed: string[]
+  facts: PersonalSourceFacts
 }
 
-/** Editorial unit from a photo + its metadata — not yet a page. */
-export interface PhotoMemoryBlockV1 {
+export interface MemoryBlockV1 extends PersonalBlockEditorialFields {
+  type: "MEMORY"
+  sourceMemoryId: string
+  title: string
+  body: string
+  density: MemoryDensity
+  participantIds: string[]
+  fullPageRecommended: boolean
+  eyebrow?: string | null
+  place?: string | null
+}
+
+export interface PhotoMemoryBlockV1 extends PersonalBlockEditorialFields {
   type: "PHOTO_MEMORY"
   sourcePhotoId: string
   signedUrl: string | null
-  /** Raw caption/anecdote — debug. */
   caption: string | null
   anecdote: string | null
-  originalText: string
   title: string
   body: string
   density: MemoryDensity
@@ -47,21 +57,10 @@ export interface PhotoMemoryBlockV1 {
   fullPageRecommended: boolean
   weakSource: boolean
   eyebrow?: string | null
-  kicker?: string | null
-  shortTitle?: string | null
-  displayText: string
-  semanticCategory: PersonalSemanticCategory
-  semanticTags: string[]
-  locations: string[]
-  trips: string[]
-  perspective: PersonalFactPerspective
-  attributedQuote: boolean
-  usedAi: boolean
 }
 
 export type PersonalBlockV1 = MemoryBlockV1 | PhotoMemoryBlockV1
 
-/** Packing shape (capacity rules). */
 export type PersonalEditorialLayoutId =
   | "PHOTO_PLUS_MEMORY"
   | "TWO_PHOTOS"
@@ -73,7 +72,6 @@ export type PersonalEditorialLayoutId =
   | "SINGLE_MEMORY"
   | "SINGLE_PHOTO_MEMORY"
 
-/** Visual editorial family (V1 — 3 + hero/single). */
 export type PersonalEditorialFamily =
   | "FEATURE_NOTES"
   | "STORY_STRIP"
@@ -98,10 +96,6 @@ export interface PersonalEditorialPageTheme {
   groupingReason: string
 }
 
-/**
- * Composed personal page — real Blueprint unit.
- * Blocks share a page editorially; they are NOT fused into one narrative.
- */
 export interface PersonalEditorialPageV1 {
   pageKey: string
   layoutId: PersonalEditorialLayoutId
@@ -111,15 +105,15 @@ export interface PersonalEditorialPageV1 {
   visualRole: VisualRole
   weight: number
   packingFillScore: number
-  /** @deprecated Alias of packingFillScore — packing only. */
   pageFillScore: number
   isHero: boolean
   heroReason: string | null
   layoutVariant?: PhotoPlusMemoryVariant | null
-  /** Mean pairwise semantic compatibility (0–1). */
   compatibilityScore: number
 }
 
 export const PERSONAL_PAGE_CAPACITY = 4
 export const PERSONAL_PAGE_MAX_BLOCKS = 3
 export const PERSONAL_PAGE_MAX_PHOTOS = 2
+
+export type { EditorialPerspectiveV2 }

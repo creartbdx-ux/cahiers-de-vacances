@@ -26,6 +26,7 @@ import {
 } from "./compatibility"
 import { buildPageTheme } from "./theme"
 import { categoriesClash } from "./semantic"
+import { assertPagePhotoProvenance } from "./provenance"
 
 const VISUAL_ROLES: VisualRole[] = ["LIGHT", "SECONDARY", "ACCENT", "NEUTRAL"]
 const SEARCH_LIMIT = 12
@@ -94,6 +95,7 @@ function makePage(
   index: number,
 ): PersonalEditorialPageV1 {
   const ordered = stableSortIds(blocks)
+  assertPagePhotoProvenance(ordered)
   const layoutId = pickPersonalEditorialLayout(ordered)
   const isHero = isHeroLayout(layoutId)
   const editorialFamily = pickEditorialFamily(ordered, layoutId)

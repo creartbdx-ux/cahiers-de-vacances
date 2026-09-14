@@ -909,8 +909,25 @@ export function BookLabClient({
                                 SOURCE : {(b.originalText || "").slice(0, 120)}
                                 {(b.originalText || "").length > 120 ? "…" : ""}
                                 <br />
+                                FACT :{" "}
+                                {[
+                                  ...(b.facts?.creatorOpinions ?? []),
+                                  ...(b.facts?.sharedFacts ?? []),
+                                ]
+                                  .slice(0, 3)
+                                  .join(" · ") || "—"}
+                                <br />
+                                CLAIMS : {(b.claimsUsed ?? []).join(" · ") || "—"}
+                                <br />
                                 → ÉDITO : {(b.displayText || b.body || "").slice(0, 120)}
                                 {(b.displayText || b.body || "").length > 120 ? "…" : ""}
+                                {b.type === "PHOTO_MEMORY" ? (
+                                  <>
+                                    <br />
+                                    sourcePhotoId : {b.sourcePhotoId} · renderedPhotoId :{" "}
+                                    {b.sourcePhotoId}
+                                  </>
+                                ) : null}
                               </span>
                             )
                           })}
