@@ -10,6 +10,7 @@ import { getArchetype } from "@/lib/book-blueprint/archetypes"
 import { PersonalEditorialTemplate } from "@/components/book-renderer/templates/personal-editorial-template"
 import {
   blockWeight,
+  blockTextWordCount,
   collectPersonalBlocks,
   composePersonalEditorialPages,
   isTrueHeroCandidate,
@@ -24,6 +25,13 @@ import {
   type MemoryBlockV1,
   type PhotoMemoryBlockV1,
 } from "./index"
+import {
+  classifyMemoryDensity,
+  classifyPhotoMemoryDensity,
+  toMemoryPageSource,
+  toPhotoMemorySource,
+  wordCount,
+} from "@/lib/memory-pages"
 
 function profile(over: Partial<BookProfileV1> = {}): BookProfileV1 {
   return {
@@ -243,7 +251,7 @@ test("RICH réel => HERO possible", () => {
     type: "MEMORY",
     sourceMemoryId: "rich",
     title: "Long séjour",
-    body: "Texte riche détaillé ".repeat(20),
+    body: "Texte riche détaillé ".repeat(30),
     density: "RICH",
     participantIds: ["p1"],
     fullPageRecommended: true,
@@ -350,9 +358,9 @@ test("photo RICH => HERO possible", () => {
   const rich: PhotoMemoryBlockV1 = {
     ...shortPhoto("phR"),
     density: "RICH",
-    caption: "Longue légende ".repeat(8),
-    anecdote: "Anecdote détaillée ".repeat(6),
-    body: `${"Longue légende ".repeat(8)} ${"Anecdote détaillée ".repeat(6)}`,
+    caption: "Longue légende ".repeat(12),
+    anecdote: "Anecdote détaillée ".repeat(16),
+    body: `${"Longue légende ".repeat(12)} ${"Anecdote détaillée ".repeat(16)}`,
     fullPageRecommended: true,
   }
   assert.equal(isTrueHeroCandidate(rich), true)
@@ -479,4 +487,150 @@ test("memoryToBlock / photoToBlock", () => {
   })
   assert.ok(memoryToBlock(p.memories[0]!, p))
   assert.ok(photoToBlock(p.photos[0]!, p, "https://x"))
+})
+
+function wordsN(n: number, seed = "mot"): string {
+  return Array.from({ length: n }, (_, i) => `${seed}${i}`).join(" ")
+}
+
+test("memory ~30 mots => SHORT", () => {
+  const text = wordsN(30, "court")
+  assert.equal(wordCount(text), 30)
+  const source = toMemoryPageSource({
+    id: "s30",
+    text,
+    title: "Titre décoratif",
+    place: "Lieu décoratif",
+  })!
+  assert.equal(classifyMemoryDensity({ source }), "SHORT")
+})
+
+test("memory ~60 mots => MEDIUM, pas RICH", () => {
+  const text = wordsN(60, "moyen")
+  const source = toMemoryPageSource({
+    id: "s60",
+    text,
+    title: "Titre long qui ne compte pas",
+    place: "Paris",
+  })!
+  assert.equal(classifyMemoryDensity({ source }), "MEDIUM")
+})
+
+test("memory substantiel => RICH", () => {
+  const text = wordsN(100, "riche")
+  const source = toMemoryPageSource({ id: "s100", text })!
+  assert.equal(classifyMemoryDensity({ source }), "RICH")
+})
+
+test("titre/lieu seuls ne gonflent pas artificiellement la densité", () => {
+  const text = wordsN(28, "body")
+  const bare = toMemoryPageSource({ id: "a", text })!
+  const fancy = toMemoryPageSource({
+    id: "b",
+    text,
+    title: "Un très beau titre de souvenir",
+    place: "Saint-Malo",
+  })!
+  assert.equal(classifyMemoryDensity({ source: bare }), "SHORT")
+  assert.equal(classifyMemoryDensity({ source: fancy }), "SHORT")
+})
+
+test("photo + texte court ne devient pas RICH automatiquement", () => {
+  const source = toPhotoMemorySource(
+    {
+      id: "ph",
+      useAuthorized: true,
+      storagePath: "x.jpg",
+      caption: "Deux phrases courtes. Rien de plus.",
+      anecdote: "Encore une note brève.",
+    },
+    "https://x",
+  )!
+  assert.equal(classifyPhotoMemoryDensity(source), "SHORT")
+})
+
+test("3 photos + 4 petits memories => peut produire 3 pages", () => {
+  const blocks = [
+    shortPhoto("ph1"),
+    shortPhoto("ph2"),
+    mediumPhoto("ph3"),
+    shortMemory("m1", wordsN(25, "a")),
+    shortMemory("m2", wordsN(22, "b")),
+    shortMemory("m3", wordsN(18, "c")),
+    shortMemory("m4", wordsN(20, "d")),
+  ]
+  assert.equal(blocks.length, 7)
+  const pages = composePersonalEditorialPages(blocks, "3ph-4mem")
+  assert.ok(pages.length <= 3, `expected <=3 pages, got ${pages.length}`)
+  assert.ok(pages.some((p) => p.layoutId === "PHOTO_PLUS_TWO_SNIPPETS"))
+})
+
+test("PHOTO_PLUS_TWO_SNIPPETS réellement sélectionnable et zones", () => {
+  const pages = composePersonalEditorialPages(
+    [mediumPhoto("ph1"), shortMemory("m1"), shortMemory("m2")],
+    "ppt-select",
+  )
+  assert.equal(pages.length, 1)
+  assert.equal(pages[0]!.layoutId, "PHOTO_PLUS_TWO_SNIPPETS")
+  const html = renderToStaticMarkup(
+    createElement(PersonalEditorialTemplate, {
+      page: pages[0]!,
+      style: getStyleTokens("RETRO"),
+      palette: PALETTE,
+    }),
+  )
+  assert.ok(html.includes('data-layout-zone="photo-plus-two"'))
+  assert.equal((html.match(/data-source="memory"/g) ?? []).length, 2)
+})
+
+test("RICH conserve possibilité de 4 pages", () => {
+  const richBody = wordsN(95, "riche")
+  const rich: MemoryBlockV1 = {
+    type: "MEMORY",
+    sourceMemoryId: "rich",
+    title: "Long séjour",
+    body: richBody,
+    density: "RICH",
+    participantIds: ["p1"],
+    fullPageRecommended: true,
+  }
+  const blocks = [
+    mediumPhoto("ph1"),
+    mediumPhoto("ph2"),
+    shortPhoto("ph3"),
+    rich,
+    mediumMemory("m2"),
+    mediumMemory("m3"),
+    mediumMemory("m4"),
+  ]
+  const pages = composePersonalEditorialPages(blocks, "rich-keeps-pages")
+  // With a true RICH + medium companions, packing may need 4 pages
+  assert.ok(pages.length >= 3)
+  assert.ok(pages.length <= 4)
+  assert.ok(isTrueHeroCandidate(rich))
+  assert.ok(
+    pages.some(
+      (p) =>
+        p.layoutId === "HERO_MEMORY" ||
+        p.blocks.some((b) => b.type === "MEMORY" && b.sourceMemoryId === "rich"),
+    ),
+  )
+})
+
+test("variantes PHOTO_PLUS_MEMORY seed-stables", () => {
+  const a = composePersonalEditorialPages(
+    [mediumPhoto("ph1"), shortMemory("m1")],
+    "var-seed",
+  )
+  const b = composePersonalEditorialPages(
+    [mediumPhoto("ph1"), shortMemory("m1")],
+    "var-seed",
+  )
+  assert.equal(a[0]!.layoutVariant, b[0]!.layoutVariant)
+  assert.ok(a[0]!.layoutVariant === "STACK" || a[0]!.layoutVariant === "ASYMMETRIC")
+})
+
+test("blockTextWordCount expose le volume réel", () => {
+  const m = shortMemory("m", wordsN(12, "w"))
+  assert.equal(blockTextWordCount(m), 12)
 })

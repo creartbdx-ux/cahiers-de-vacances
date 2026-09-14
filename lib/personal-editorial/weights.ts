@@ -1,4 +1,5 @@
 import type { MemoryDensity } from "@/lib/memory-pages/types"
+import { wordCount } from "@/lib/memory-pages/density"
 import type { PersonalBlockV1 } from "./types"
 import { PERSONAL_PAGE_CAPACITY } from "./types"
 
@@ -10,16 +11,25 @@ export function blockWeight(block: PersonalBlockV1): number {
   return photoWeight(block.density)
 }
 
+/**
+ * MEMORY packing weights from text density:
+ * SHORT → easily combinable
+ * MEDIUM → pairs with light photo / short companion
+ * RICH → substantial page share (not automatic HERO)
+ */
 export function memoryWeight(density: MemoryDensity): number {
   if (density === "SHORT") return 1
   if (density === "MEDIUM") return 2
   return 3
 }
 
+/**
+ * PHOTO packing: base visual weight ≈ 2 for short/medium text.
+ * RICH text (+ photo) fills a page alone — visualWeight separate from textDensity.
+ */
 export function photoWeight(density: MemoryDensity): number {
-  // SHORT/MEDIUM share packing weight so two photos can share a page;
-  // density still drives layout/typography. RICH fills a page alone.
   if (density === "RICH") return 4
+  // SHORT and MEDIUM share base visual weight so two photos / photo+shorts can pack.
   return 2
 }
 
@@ -35,23 +45,28 @@ export function pageFillScore(blocks: PersonalBlockV1[]): number {
   return Math.min(1, totalWeight(blocks) / PERSONAL_PAGE_CAPACITY)
 }
 
-function wordCount(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length
+/** Displayable editorial word count (body / caption+anecdote) — debug & HERO checks. */
+export function blockTextWordCount(block: PersonalBlockV1): number {
+  if (block.type === "MEMORY") {
+    return wordCount(block.body)
+  }
+  const fromMeta = wordCount([block.caption, block.anecdote].filter(Boolean).join(" "))
+  if (fromMeta > 0) return fromMeta
+  return wordCount(block.body)
 }
 
 /**
  * True HERO candidate — rare.
- * fullPageRecommended alone never forces a dedicated page.
- * SHORT / MEDIUM almost never qualify.
+ * Requires RICH density AND real body volume.
+ * SHORT / MEDIUM never qualify; title/place alone never qualify.
  */
 export function isTrueHeroCandidate(block: PersonalBlockV1): boolean {
   if (block.density !== "RICH") return false
   if (block.type === "MEMORY") {
-    return wordCount(block.body) >= 45
+    return blockTextWordCount(block) >= 70
   }
-  // Photo: RICH density + enough editorial text (not vision)
   if (block.weakSource) return false
-  return wordCount(block.body) >= 30 || Boolean(block.caption?.trim() && block.anecdote?.trim())
+  return blockTextWordCount(block) >= 55
 }
 
 /**
@@ -64,9 +79,6 @@ export function prefersDedicatedPage(block: PersonalBlockV1): boolean {
 
 export function heroReasonForBlock(block: PersonalBlockV1): string | null {
   if (!isTrueHeroCandidate(block)) return null
-  if (block.type === "MEMORY") {
-    return "RICH + volume suffisant"
-  }
   return "RICH + volume suffisant"
 }
 

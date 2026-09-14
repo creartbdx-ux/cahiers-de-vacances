@@ -39,9 +39,9 @@ export function isHeroLayout(layoutId: PersonalEditorialLayoutId): boolean {
 /** Layout preference rank (lower = better product priority). */
 export function layoutPreferenceRank(layoutId: PersonalEditorialLayoutId): number {
   switch (layoutId) {
-    case "PHOTO_PLUS_MEMORY":
-      return 1
     case "PHOTO_PLUS_TWO_SNIPPETS":
+      return 1
+    case "PHOTO_PLUS_MEMORY":
       return 2
     case "TWO_PHOTOS":
       return 3
@@ -51,11 +51,11 @@ export function layoutPreferenceRank(layoutId: PersonalEditorialLayoutId): numbe
       return 5
     case "SINGLE_MEMORY":
     case "SINGLE_PHOTO_MEMORY":
-      return 7
+      return 8
     case "HERO_MEMORY":
     case "HERO_PHOTO_MEMORY":
       return 9
     default:
-      return 8
+      return 7
   }
 }

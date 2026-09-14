@@ -49,7 +49,12 @@ export function PersonalEditorialTemplate({
         <SinglePhoto block={page.blocks[0]} style={style} frame={frame} />
       )}
       {page.layoutId === "PHOTO_PLUS_MEMORY" && (
-        <PhotoPlusMemory blocks={page.blocks} style={style} frame={frame} />
+        <PhotoPlusMemory
+          blocks={page.blocks}
+          style={style}
+          frame={frame}
+          variant={page.layoutVariant === "ASYMMETRIC" ? "ASYMMETRIC" : "STACK"}
+        />
       )}
       {page.layoutId === "TWO_PHOTOS" && (
         <TwoPhotos blocks={page.blocks} style={style} frame={frame} />
@@ -296,26 +301,36 @@ function SinglePhoto({
 
 /**
  * PHOTO_PLUS_MEMORY — full-page: photo ~45% + caption, separator, memory zone fills rest.
+ * Variants (seed-stable): STACK (classic) vs ASYMMETRIC (slightly taller photo / offset surface).
  */
 function PhotoPlusMemory({
   blocks,
   style,
   frame,
+  variant = "STACK",
 }: {
   blocks: PersonalBlockV1[]
   style: BookStyleTokens
   frame: CSSProperties
+  variant?: "STACK" | "ASYMMETRIC"
 }) {
   const photo = blocks.find((b) => b.type === "PHOTO_MEMORY")
   const memory = blocks.find((b) => b.type === "MEMORY")
   if (!photo || photo.type !== "PHOTO_MEMORY" || !memory || memory.type !== "MEMORY") return null
 
   const portrait = (photo.aspectRatio ?? 1.4) < 0.95
+  const photoFlex = variant === "ASYMMETRIC" ? "0 0 52%" : "0 0 46%"
+  const photoWidthPortrait = variant === "ASYMMETRIC" ? "48%" : "44%"
 
   if (portrait) {
     return (
-      <div className="flex h-full" style={{ gap: 16 }} data-layout-zone="photo-plus-memory-portrait">
-        <div className="flex flex-col" style={{ width: "44%", gap: 10 }}>
+      <div
+        className="flex h-full"
+        style={{ gap: 16 }}
+        data-layout-zone="photo-plus-memory-portrait"
+        data-ppm-variant={variant}
+      >
+        <div className="flex flex-col" style={{ width: photoWidthPortrait, gap: 10 }}>
           {photo.signedUrl ? (
             <div style={{ ...frame, flex: "1 1 auto", minHeight: 280 }}>
               <PhotoImg src={photo.signedUrl} />
@@ -329,6 +344,14 @@ function PhotoPlusMemory({
             gap: 12,
             borderLeft: `1px solid color-mix(in srgb, var(--book-secondary) 40%, transparent)`,
             paddingLeft: 16,
+            ...(variant === "ASYMMETRIC"
+              ? {
+                  backgroundColor: "color-mix(in srgb, var(--book-secondary) 7%, transparent)",
+                  borderRadius: style.frameRadius,
+                  padding: 14,
+                  borderLeft: "none",
+                }
+              : {}),
           }}
           data-source="memory"
         >
@@ -349,10 +372,14 @@ function PhotoPlusMemory({
   }
 
   return (
-    <div className="flex h-full flex-col" data-layout-zone="photo-plus-memory">
-      <div className="flex flex-col" style={{ flex: "0 0 46%", gap: 8, minHeight: 0 }} data-source="photo">
+    <div
+      className="flex h-full flex-col"
+      data-layout-zone="photo-plus-memory"
+      data-ppm-variant={variant}
+    >
+      <div className="flex flex-col" style={{ flex: photoFlex, gap: 8, minHeight: 0 }} data-source="photo">
         {photo.signedUrl ? (
-          <div style={{ ...frame, flex: "1 1 auto", minHeight: 220 }}>
+          <div style={{ ...frame, flex: "1 1 auto", minHeight: variant === "ASYMMETRIC" ? 250 : 220 }}>
             <PhotoImg src={photo.signedUrl} />
           </div>
         ) : null}
@@ -361,7 +388,7 @@ function PhotoPlusMemory({
 
       <div
         style={{
-          marginBlock: 12,
+          marginBlock: variant === "ASYMMETRIC" ? 8 : 12,
           height: 1,
           backgroundColor: "color-mix(in srgb, var(--book-secondary) 45%, transparent)",
         }}
@@ -372,9 +399,12 @@ function PhotoPlusMemory({
         style={{
           minHeight: 0,
           gap: 12,
-          padding: 12,
+          padding: variant === "ASYMMETRIC" ? 16 : 12,
           borderRadius: style.frameRadius,
-          backgroundColor: "color-mix(in srgb, var(--book-secondary) 8%, transparent)",
+          backgroundColor:
+            variant === "ASYMMETRIC"
+              ? "color-mix(in srgb, var(--book-accent) 6%, transparent)"
+              : "color-mix(in srgb, var(--book-secondary) 8%, transparent)",
         }}
         data-source="memory"
       >
@@ -386,7 +416,7 @@ function PhotoPlusMemory({
           eyebrow={memory.eyebrow || memory.place}
           title={memory.title}
           body={memory.body}
-          titleSize={titleSizeFor(memory.density, 28)}
+          titleSize={titleSizeFor(memory.density, variant === "ASYMMETRIC" ? 26 : 28)}
           bodySize={bodySizeFor(memory.density, 15)}
         />
       </div>
@@ -571,36 +601,109 @@ function PhotoPlusTwoSnippets({
   const memories = blocks.filter((b) => b.type === "MEMORY")
   const portrait = photo?.type === "PHOTO_MEMORY" && (photo.aspectRatio ?? 1.4) < 0.95
 
+  // Portrait: photo column + two memory zones stacked
+  if (portrait) {
+    return (
+      <div className="flex h-full" style={{ gap: 16 }} data-layout-zone="photo-plus-two">
+        <div className="flex flex-col" style={{ width: "46%", gap: 8 }}>
+          {photo && photo.type === "PHOTO_MEMORY" && photo.signedUrl ? (
+            <div style={{ ...frame, flex: "1 1 auto", minHeight: 240 }}>
+              <PhotoImg src={photo.signedUrl} />
+            </div>
+          ) : null}
+          {photo && photo.type === "PHOTO_MEMORY" ? (
+            <PhotoCopy block={photo} style={style} titleSize={17} bodySize={12} label="Photo" />
+          ) : null}
+        </div>
+        <div
+          className="flex min-w-0 flex-1 flex-col"
+          style={{
+            gap: 0,
+            borderLeft: `1px solid color-mix(in srgb, var(--book-secondary) 35%, transparent)`,
+            paddingLeft: 14,
+          }}
+        >
+          {memories.map((m, i) =>
+            m.type === "MEMORY" ? (
+              <div
+                key={m.sourceMemoryId}
+                className="flex min-h-0 flex-1 flex-col justify-center"
+                style={{
+                  gap: 8,
+                  borderTop:
+                    i > 0
+                      ? `1px solid color-mix(in srgb, var(--book-secondary) 30%, transparent)`
+                      : undefined,
+                  paddingBlock: 10,
+                }}
+                data-source="memory"
+              >
+                <p
+                  className={style.gameLabelClassName}
+                  style={{ fontSize: 9, letterSpacing: "0.2em" }}
+                >
+                  Souvenir
+                </p>
+                <BlockText
+                  style={style}
+                  title={m.title}
+                  body={m.body}
+                  titleSize={titleSizeFor(m.density, 22)}
+                  bodySize={bodySizeFor(m.density, 13)}
+                />
+              </div>
+            ) : null,
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Landscape: photo ~45% top, then two distinct memory zones on remaining height
   return (
-    <div
-      className="flex h-full"
-      style={{ gap: 16, flexDirection: portrait ? "row" : "row" }}
-      data-layout-zone="photo-plus-two"
-    >
-      <div className="flex flex-col" style={{ width: "46%", gap: 8 }}>
+    <div className="flex h-full flex-col" data-layout-zone="photo-plus-two">
+      <div
+        className="flex flex-col"
+        style={{ flex: "0 0 44%", gap: 8, minHeight: 0 }}
+        data-source="photo"
+      >
         {photo && photo.type === "PHOTO_MEMORY" && photo.signedUrl ? (
-          <div style={{ ...frame, flex: "1 1 auto", minHeight: 240 }}>
+          <div style={{ ...frame, flex: "1 1 auto", minHeight: 200 }}>
             <PhotoImg src={photo.signedUrl} />
           </div>
         ) : null}
         {photo && photo.type === "PHOTO_MEMORY" ? (
-          <PhotoCopy block={photo} style={style} titleSize={17} bodySize={12} label="Photo" />
+          <PhotoCopy block={photo} style={style} titleSize={18} bodySize={12} label="Photo" />
         ) : null}
       </div>
+
       <div
-        className="flex min-w-0 flex-1 flex-col justify-evenly"
         style={{
-          gap: 14,
-          borderLeft: `1px solid color-mix(in srgb, var(--book-secondary) 35%, transparent)`,
-          paddingLeft: 14,
+          marginBlock: 10,
+          height: 1,
+          backgroundColor: "color-mix(in srgb, var(--book-secondary) 40%, transparent)",
         }}
-      >
-        {memories.map((m) =>
+      />
+
+      <div className="flex min-h-0 flex-1 flex-col" style={{ gap: 0 }}>
+        {memories.map((m, i) =>
           m.type === "MEMORY" ? (
-            <div key={m.sourceMemoryId} data-source="memory">
+            <div
+              key={m.sourceMemoryId}
+              className="flex min-h-0 flex-1 flex-col justify-center"
+              style={{
+                gap: 8,
+                paddingBlock: 8,
+                borderTop:
+                  i > 0
+                    ? `1px solid color-mix(in srgb, var(--book-accent) 35%, transparent)`
+                    : undefined,
+              }}
+              data-source="memory"
+            >
               <p
                 className={style.gameLabelClassName}
-                style={{ fontSize: 9, letterSpacing: "0.2em", marginBottom: 6 }}
+                style={{ fontSize: 9, letterSpacing: "0.2em" }}
               >
                 Souvenir
               </p>

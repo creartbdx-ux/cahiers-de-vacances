@@ -97,6 +97,12 @@ function makePage(
   // HERO reason only when layout is truly HERO — never "bloc isolé".
   const heroReason =
     isHero && ordered.length === 1 ? heroReasonForBlock(ordered[0]!) : null
+  const layoutVariant =
+    layoutId === "PHOTO_PLUS_MEMORY"
+      ? Math.abs(hash(`${seed}:ppm-variant:${index}`)) % 2 === 0
+        ? "STACK"
+        : "ASYMMETRIC"
+      : null
   return {
     pageKey: `pep:${seed}:${index}`,
     layoutId,
@@ -107,6 +113,7 @@ function makePage(
     pageFillScore: fill,
     isHero,
     heroReason,
+    layoutVariant,
   }
 }
 
@@ -131,16 +138,21 @@ function scoreComposition(groups: PersonalBlockV1[][], seed: string): number {
 
     score += (4 - layoutPreferenceRank(layout)) * 3
 
+    // Prefer balanced photo + two light memories when valid
+    if (layout === "PHOTO_PLUS_TWO_SNIPPETS") score += 48
+    if (layout === "PHOTO_PLUS_MEMORY") score += 10
+
     if (g.length === 1) {
       const alone = g[0]!
       if (isTrueHeroCandidate(alone)) {
         score += 8
       } else if (alone.density === "SHORT") {
-        score -= 90
+        score -= 110
       } else if (alone.density === "MEDIUM") {
-        score -= 55
+        score -= 75
       } else {
-        score -= 25
+        // Non-hero RICH leftover — still weak visually alone
+        score -= 40
       }
     } else {
       score += g.length * 6
@@ -150,6 +162,14 @@ function scoreComposition(groups: PersonalBlockV1[][], seed: string): number {
   const heroCount = layouts.filter((l) => isHeroLayout(l)).length
   score -= heroCount * 30
 
+  const twoSnippetCount = layouts.filter((l) => l === "PHOTO_PLUS_TWO_SNIPPETS").length
+  score += twoSnippetCount * 12
+
+  const singleWeak = layouts.filter(
+    (l) => l === "SINGLE_MEMORY" || l === "SINGLE_PHOTO_MEMORY",
+  ).length
+  score -= singleWeak * 35
+
   for (let i = 1; i < layouts.length; i++) {
     if (isHeroLayout(layouts[i - 1]!) && isHeroLayout(layouts[i]!)) score -= 40
     if (layouts[i] === layouts[i - 1] && !isHeroLayout(layouts[i]!)) score -= 8
@@ -158,8 +178,8 @@ function scoreComposition(groups: PersonalBlockV1[][], seed: string): number {
   const uniqueLayouts = new Set(layouts).size
   score += uniqueLayouts * 4
 
-  // Prefer fewer pages (print efficiency)
-  score -= groups.length * 22
+  // Prefer fewer pages when readability/capacity already scored well
+  score -= groups.length * 26
 
   // Tiny seed-stable tie-break
   score += (hash(`${seed}:${groups.length}:${layouts.join(",")}`) % 7) * 0.01
@@ -212,9 +232,13 @@ function bestPartitionSearch(
       }
     }
 
-    // Prefer fuller groups when exploring (still evaluate all)
+    // Prefer fuller / two-snippet groups when exploring (still evaluate all)
     candidates.sort((x, y) => {
-      const fd = pageFillScore(y) - pageFillScore(x)
+      const lx = pickPersonalEditorialLayout(stableSortIds(x))
+      const ly = pickPersonalEditorialLayout(stableSortIds(y))
+      const bonus = (l: ReturnType<typeof pickPersonalEditorialLayout>) =>
+        l === "PHOTO_PLUS_TWO_SNIPPETS" ? 0.4 : 0
+      const fd = pageFillScore(y) + bonus(ly) - (pageFillScore(x) + bonus(lx))
       if (Math.abs(fd) > 0.01) return fd > 0 ? 1 : -1
       return y.length - x.length
     })
@@ -320,15 +344,20 @@ function absorbNonHeroOrphans(groups: PersonalBlockV1[][]): PersonalBlockV1[][] 
       if (g.length !== 1) continue
       const alone = g[0]!
       if (isTrueHeroCandidate(alone)) continue
-      // Prefer absorbing into the fullest compatible page
+      // Prefer absorbing into pages that become PHOTO_PLUS_TWO_SNIPPETS, then fullest
       let bestJ = -1
-      let bestFill = -1
+      let bestScore = -Infinity
       for (let j = 0; j < out.length; j++) {
         if (i === j) continue
         if (!canAddBlock(out[j]!, alone)) continue
-        const fill = pageFillScore([...out[j]!, alone])
-        if (fill > bestFill) {
-          bestFill = fill
+        const trial = [...out[j]!, alone]
+        const fill = pageFillScore(trial)
+        const layout = pickPersonalEditorialLayout(stableSortIds(trial))
+        let s = fill
+        if (layout === "PHOTO_PLUS_TWO_SNIPPETS") s += 0.55
+        else if (layout === "PHOTO_PLUS_MEMORY") s += 0.15
+        if (s > bestScore) {
+          bestScore = s
           bestJ = j
         }
       }

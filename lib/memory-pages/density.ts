@@ -1,21 +1,50 @@
 import type { MemoryDensity, MemoryPageSource } from "./types"
 
-function wordCount(text: string): number {
+export function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
 }
 
-function sentenceCount(text: string): number {
-  const parts = text
+function paragraphCount(text: string): number {
+  return text
     .trim()
-    .split(/[.!?…]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  return Math.max(1, parts.length)
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean).length
+}
+
+/**
+ * Body-volume density thresholds (editorial packing).
+ * Title / place / eyebrow must NOT inflate density.
+ *
+ * SHORT  ≈ ≤42 words
+ * MEDIUM ≈ 43–90 words
+ * RICH   ≈ >90 words, or several real paragraphs with enough body
+ */
+export const MEMORY_DENSITY_SHORT_MAX_WORDS = 42
+export const MEMORY_DENSITY_MEDIUM_MAX_WORDS = 90
+
+/**
+ * Classify from raw body text only — shared by MEMORY and PHOTO text.
+ */
+export function classifyBodyTextDensity(text: string): MemoryDensity {
+  const trimmed = text.trim()
+  if (!trimmed) return "SHORT"
+  const words = wordCount(trimmed)
+  const paragraphs = paragraphCount(trimmed)
+
+  if (words <= MEMORY_DENSITY_SHORT_MAX_WORDS) return "SHORT"
+
+  // Several paragraphs with real substance → RICH even near the upper MEDIUM band
+  if (paragraphs >= 3 && words > 55) return "RICH"
+  if (paragraphs >= 2 && words > 75) return "RICH"
+
+  if (words > MEMORY_DENSITY_MEDIUM_MAX_WORDS) return "RICH"
+  return "MEDIUM"
 }
 
 /**
  * App-side density — never decided by the LLM.
- * SHORT ≈ one short anecdote; RICH ≈ detailed multi-sentence memory.
+ * Based on originalText volume only (not title/place).
  * MEMORY_TEXT_PAGE: no photo boost (photos are not heuristically attached).
  */
 export function classifyMemoryDensity(input: {
@@ -24,19 +53,7 @@ export function classifyMemoryDensity(input: {
   hasRenderablePhoto?: boolean
 }): MemoryDensity {
   void input.hasRenderablePhoto
-  const words = wordCount(input.source.originalText)
-  const sentences = sentenceCount(input.source.originalText)
-  let score = Math.min(60, words * 1.4)
-  if (sentences >= 2) score += 8
-  if (sentences >= 3) score += 12
-  if (input.source.title?.trim()) score += 8
-  if (input.source.place?.trim()) score += 6
-  if (words < 18) score -= 12
-  if (words < 28 && sentences === 1) score -= 8
-
-  if (score < 38) return "SHORT"
-  if (score < 72) return "MEDIUM"
-  return "RICH"
+  return classifyBodyTextDensity(input.source.originalText)
 }
 
 /**

@@ -541,10 +541,12 @@ test("souvenir court sans photo => SHORT", async () => {
 
 test("souvenir riche => RICH", async () => {
   const text = [
-    "Le premier jour, nous avons marché jusqu'au phare sous un ciel immense.",
-    "Le soir, autour d'un feu, quelqu'un a raconté l'histoire du bateau manqué.",
-    "Le lendemain, la mer était plate ; on a prolongé la journée jusqu'au crépuscule.",
-    "Ces trois jours restent le cœur discret de ce voyage, sans rien d'extraordinaire à part le temps partagé.",
+    "Le premier jour, nous avons marché jusqu'au phare sous un ciel immense et presque trop calme.",
+    "Le soir, autour d'un feu, quelqu'un a raconté l'histoire du bateau manqué et des tempêtes d'autrefois.",
+    "Le lendemain, la mer était plate ; on a prolongé la journée jusqu'au crépuscule sans regarder l'heure.",
+    "Le troisième matin, le vent est revenu et nous avons repris le sentier côtier, plus lentement.",
+    "Ces trois jours restent le cœur discret de ce voyage, sans rien d'extraordinaire à part le temps partagé,",
+    "les pauses silencieuses, et le sentiment d'avoir enfin ralenti ensemble pendant une parenthèse réelle.",
   ].join(" ")
   const result = await buildMemoryPage({
     profile: profile({

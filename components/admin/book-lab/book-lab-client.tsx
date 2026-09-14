@@ -44,6 +44,7 @@ import type { Palette, Style } from "@/lib/supabase/types"
 import { MemoryTemplate } from "@/components/book-renderer/templates/memory-template"
 import { PhotoMemoryTemplate } from "@/components/book-renderer/templates/photo-memory-template"
 import { PersonalEditorialTemplate } from "@/components/book-renderer/templates/personal-editorial-template"
+import { blockTextWordCount, blockWeight } from "@/lib/personal-editorial"
 import { resolveMemoryPageSurface } from "@/lib/memory-pages"
 
 export type BookLabProject = {
@@ -855,6 +856,7 @@ export function BookLabClient({
                         <span className="font-medium">Page personnelle {i + 1}</span>
                         <span className="mt-1 block text-xs text-muted-foreground">
                           Layout : {p.layoutId}
+                          {p.page.layoutVariant ? ` · variante ${p.page.layoutVariant}` : ""}
                           <br />
                           Poids : {p.weight} / 4 · Remplissage logique :{" "}
                           {Math.round((p.page.packingFillScore ?? p.page.pageFillScore) * 100)} %
@@ -877,6 +879,19 @@ export function BookLabClient({
                             ...p.sourcePhotoIds.map((id) => `photo ${id}`),
                             ...p.sourceMemoryIds.map((id) => `souvenir ${id}`),
                           ].join(" · ") || "—"}
+                          {p.page.blocks.map((b) => {
+                            const id =
+                              b.type === "MEMORY" ? b.sourceMemoryId : b.sourcePhotoId
+                            const words = blockTextWordCount(b)
+                            const w = blockWeight(b)
+                            return (
+                              <span key={`${b.type}:${id}`} className="mt-1 block pl-1">
+                                · {b.type === "MEMORY" ? "MEMORY" : "PHOTO"} {id.slice(0, 8)}
+                                … — Density : {b.density} · Text words : {words} · Packing
+                                weight : {w}
+                              </span>
+                            )
+                          })}
                         </span>
                       </button>
                     </li>

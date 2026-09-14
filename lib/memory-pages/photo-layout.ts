@@ -1,17 +1,5 @@
 import type { MemoryDensity, PhotoMemoryLayout, PhotoMemorySourceV1 } from "./types"
-
-function wordCount(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length
-}
-
-function sentenceCount(text: string): number {
-  const parts = text
-    .trim()
-    .split(/[.!?…]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  return Math.max(1, parts.length)
-}
+import { classifyBodyTextDensity, wordCount } from "./density"
 
 export function photoMemoryCombinedText(source: PhotoMemorySourceV1): string {
   return [source.caption, source.anecdote]
@@ -37,19 +25,13 @@ export function classifyPhotoMemoryLayout(aspectRatio?: number): PhotoMemoryLayo
   return "SQUARE"
 }
 
+/**
+ * Text density from caption+anecdote only.
+ * Having a photo does NOT make short caption/anecdote RICH —
+ * visual packing weight is handled separately in personal-editorial weights.
+ */
 export function classifyPhotoMemoryDensity(source: PhotoMemorySourceV1): MemoryDensity {
-  const text = photoMemoryCombinedText(source)
-  if (!text) return "SHORT"
-  const words = wordCount(text)
-  const sentences = sentenceCount(text)
-  let score = Math.min(60, words * 1.4)
-  if (sentences >= 2) score += 10
-  if (sentences >= 3) score += 10
-  if (source.caption?.trim() && source.anecdote?.trim()) score += 8
-  if (words < 12) score -= 10
-  if (score < 38) return "SHORT"
-  if (score < 72) return "MEDIUM"
-  return "RICH"
+  return classifyBodyTextDensity(photoMemoryCombinedText(source))
 }
 
 export function recommendFullPhotoMemoryPage(input: {

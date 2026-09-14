@@ -46,6 +46,9 @@ export type PersonalEditorialLayoutId =
   | "SINGLE_MEMORY"
   | "SINGLE_PHOTO_MEMORY"
 
+/** Deterministic visual variant for repeated PHOTO_PLUS_MEMORY pages. */
+export type PhotoPlusMemoryVariant = "STACK" | "ASYMMETRIC"
+
 /**
  * Composed personal page — real Blueprint unit.
  * Blocks share a page editorially; they are NOT fused into one narrative.
@@ -68,6 +71,8 @@ export interface PersonalEditorialPageV1 {
   isHero: boolean
   /** Why this page is HERO — never "bloc isolé". */
   heroReason: string | null
+  /** Seed-stable variant for PHOTO_PLUS_MEMORY (and similar). */
+  layoutVariant?: PhotoPlusMemoryVariant | null
 }
 
 export const PERSONAL_PAGE_CAPACITY = 4
