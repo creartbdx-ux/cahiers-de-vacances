@@ -4,9 +4,14 @@ import { useMemo, useState, useTransition } from "react"
 import { Button } from "@/components/ui/button"
 import { BookPage } from "@/components/book-renderer/book-page"
 import { PagePreview } from "@/components/book-renderer/page-preview"
+import { CrosswordTemplate } from "@/components/book-renderer/templates/crossword-template"
 import { QuizTemplate } from "@/components/book-renderer/templates/quiz-template"
 import { WordsearchTemplate } from "@/components/book-renderer/templates/wordsearch-template"
-import { QUIZ_01_SAMPLE, WORDSEARCH_01_SAMPLE } from "@/lib/book-renderer/templates"
+import {
+  CROSSWORD_01_SAMPLE,
+  QUIZ_01_SAMPLE,
+  WORDSEARCH_01_SAMPLE,
+} from "@/lib/book-renderer/templates"
 import { getStyleTokens } from "@/lib/book-renderer/styles"
 import { cn } from "@/lib/utils"
 import {
@@ -15,12 +20,15 @@ import {
   type EditorialPlanV1,
 } from "@/lib/editorial-engine"
 import { buildQuizPersonalSourceContext } from "@/lib/content-generation/source-context"
+import { buildCrosswordThemePreview } from "@/lib/content-generation/crossword-theme/preview"
 import { buildQuizThemePreview } from "@/lib/content-generation/quiz-theme/preview"
 import { buildWordSearchThemePreview } from "@/lib/content-generation/wordsearch-theme/preview"
 import {
+  generateCrosswordThemeLabAction,
   generateQuizPersonalLabAction,
   generateQuizThemeLabAction,
   generateWordsearchThemeLabAction,
+  type GenerateCrosswordThemeLabResult,
   type GenerateQuizPersonalLabResult,
   type GenerateQuizThemeLabResult,
   type GenerateWordsearchThemeLabResult,
@@ -34,6 +42,7 @@ type SlotGenResult =
   | GenerateQuizPersonalLabResult
   | GenerateQuizThemeLabResult
   | GenerateWordsearchThemeLabResult
+  | GenerateCrosswordThemeLabResult
 
 function isQuizPersonalLabOk(
   gen: SlotGenResult | undefined,
@@ -44,13 +53,19 @@ function isQuizPersonalLabOk(
 function isQuizThemeLabOk(
   gen: SlotGenResult | undefined,
 ): gen is Extract<GenerateQuizThemeLabResult, { ok: true }> {
-  return Boolean(gen?.ok && "title" in gen && "topics" in gen && !("sourceSummary" in gen))
+  return Boolean(gen?.ok && "questions" in gen && "styleDistinctCount" in gen)
 }
 
 function isWordsearchThemeLabOk(
   gen: SlotGenResult | undefined,
 ): gen is Extract<GenerateWordsearchThemeLabResult, { ok: true }> {
   return Boolean(gen?.ok && "wordCount" in gen && "words" in gen)
+}
+
+function isCrosswordThemeLabOk(
+  gen: SlotGenResult | undefined,
+): gen is Extract<GenerateCrosswordThemeLabResult, { ok: true }> {
+  return Boolean(gen?.ok && "entryCount" in gen && "entries" in gen && "gridBuildable" in gen)
 }
 
 export type EditorialLabProject = {
@@ -159,6 +174,20 @@ export function EditorialLabClient({
     })
   }
 
+  function generateCrosswordSlot(slot: EditorialGameSlot) {
+    if (!selected) return
+    setError(null)
+    startTransition(async () => {
+      const result = await generateCrosswordThemeLabAction({
+        bookProjectId: selected.id,
+        seed: seed.trim() || "lab-seed-1",
+        slotId: slot.slotId,
+      })
+      setGenBySlot((prev) => ({ ...prev, [slot.slotId]: result }))
+      if (result.ok) setPreviewSlotId(null)
+    })
+  }
+
   const previewSlot = plan?.selectedGames.find((s) => s.slotId === previewSlotId) ?? null
   const previewGen = previewSlotId ? genBySlot[previewSlotId] : null
 
@@ -183,6 +212,13 @@ export function EditorialLabClient({
     return buildWordSearchThemePreview(gen.words, gen.seed)
   }, [previewSlotId, genBySlot])
 
+  const crosswordPreview = useMemo(() => {
+    if (!previewSlotId) return null
+    const gen = genBySlot[previewSlotId]
+    if (!isCrosswordThemeLabOk(gen)) return null
+    return buildCrosswordThemePreview(gen.entries, gen.seed)
+  }, [previewSlotId, genBySlot])
+
   return (
     <div className="flex flex-col gap-6">
       <div
@@ -194,7 +230,7 @@ export function EditorialLabClient({
         )}
       >
         {aiConfigured
-          ? "Génération IA configurée (CONTENT_GENERATION_API_KEY). Disponible pour QUIZ_PERSONAL, QUIZ_THEME et WORDSEARCH_THEME."
+          ? "Génération IA configurée (CONTENT_GENERATION_API_KEY). Disponible pour QUIZ_PERSONAL, QUIZ_THEME, WORDSEARCH_THEME et CROSSWORD_THEME."
           : "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY dans les variables d'environnement serveur (Vercel), puis redéployez."}
       </div>
 
@@ -273,6 +309,7 @@ export function EditorialLabClient({
                 const isQuizPersonal = slot.gameId === "QUIZ_PERSONAL"
                 const isQuizTheme = slot.gameId === "QUIZ_THEME"
                 const isWordsearchTheme = slot.gameId === "WORDSEARCH_THEME"
+                const isCrosswordTheme = slot.gameId === "CROSSWORD_THEME"
                 const gen = genBySlot[slot.slotId]
                 const personalOk =
                   isQuizPersonal && gen?.ok && "sourceSummary" in gen ? gen : null
@@ -283,6 +320,9 @@ export function EditorialLabClient({
                 const wordsearchOk =
                   isWordsearchTheme && isWordsearchThemeLabOk(gen) ? gen : null
                 const wordsearchErr = isWordsearchTheme && gen && !gen.ok ? gen : null
+                const crosswordOk =
+                  isCrosswordTheme && isCrosswordThemeLabOk(gen) ? gen : null
+                const crosswordErr = isCrosswordTheme && gen && !gen.ok ? gen : null
                 const sourcePreview =
                   selected && isQuizPersonal
                     ? buildQuizPersonalSourceContext({
@@ -298,6 +338,10 @@ export function EditorialLabClient({
                   slot.contentRequirements.type === "WORDSEARCH_CONTENT"
                     ? slot.contentRequirements.targetWords
                     : 12
+                const crosswordTargetEntries =
+                  slot.contentRequirements.type === "CROSSWORD_CONTENT"
+                    ? slot.contentRequirements.targetEntries
+                    : 10
 
                 return (
                   <article
@@ -583,6 +627,149 @@ export function EditorialLabClient({
                                       palette={palette}
                                       assets={[]}
                                       wordsearch={wordsearchPreview.wordsearch}
+                                      mode={previewMode}
+                                    />
+                                  </BookPage>
+                                </PagePreview>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {isCrosswordTheme && (
+                      <div className="mt-4 rounded-lg border border-border bg-card/60 p-3">
+                        <h3 className="text-sm font-semibold">MOTS CROISÉS THÉMATIQUES</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Univers :{" "}
+                          <span className="text-foreground">
+                            {universeName(slot.universeId) ?? slot.universeId ?? "—"}
+                          </span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Difficulté :{" "}
+                          <span className="text-foreground">{slot.difficulty}</span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Entrées prévues :{" "}
+                          <span className="text-foreground">{crosswordTargetEntries}</span>
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={pending || !aiConfigured}
+                            onClick={() => generateCrosswordSlot(slot)}
+                          >
+                            {pending ? "Génération…" : "Générer le contenu"}
+                          </Button>
+                          {crosswordOk &&
+                            (previewSlotId === slot.slotId ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setPreviewSlotId(null)}
+                              >
+                                Masquer le rendu
+                              </Button>
+                            ) : (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setPreviewSlotId(slot.slotId)
+                                  setPreviewMode("game")
+                                }}
+                              >
+                                Voir le rendu
+                              </Button>
+                            ))}
+                        </div>
+
+                        {crosswordErr && (
+                          <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                            <p className="font-medium">{crosswordErr.message}</p>
+                            {crosswordErr.details?.length ? (
+                              <ul className="mt-2 list-disc pl-5">
+                                {crosswordErr.details.map((d) => (
+                                  <li key={d}>{d}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {crosswordOk && (
+                          <div className="mt-4 flex flex-col gap-4">
+                            <p className="text-sm font-medium">Titre : {crosswordOk.title}</p>
+                            <p className="text-sm text-muted-foreground">
+                              Validation OK · {crosswordOk.entryCount} entrée
+                              {crosswordOk.entryCount > 1 ? "s" : ""} · topicKeys :{" "}
+                              {crosswordOk.topicKeys.join(", ") || "—"} · grille constructible : Oui
+                              · {crosswordOk.durationMs} ms
+                              {crosswordOk.repaired
+                                ? ` · Réparation : ${crosswordOk.repairedCount} entrée${crosswordOk.repairedCount > 1 ? "s" : ""} remplacée${crosswordOk.repairedCount > 1 ? "s" : ""}`
+                                : ""}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              Diversité : {crosswordOk.topicDistinctCount} topicKey
+                              {crosswordOk.topicDistinctCount > 1 ? "s" : ""} distinct
+                              {crosswordOk.topicDistinctCount > 1 ? "s" : ""}
+                              {" · "}
+                              Validation diversité :{" "}
+                              {crosswordOk.topicDiversityOk ? "OK" : "KO"}
+                            </p>
+                            {crosswordOk.warnings.length > 0 && (
+                              <ul className="text-sm text-muted-foreground">
+                                {crosswordOk.warnings.map((w) => (
+                                  <li key={w}>{w}</li>
+                                ))}
+                              </ul>
+                            )}
+                            <ul className="space-y-2 text-sm">
+                              {crosswordOk.entries.map((e, ei) => (
+                                <li key={ei} className="rounded-lg border border-border p-3">
+                                  <p className="font-medium">
+                                    {ei + 1}. {e.answer}
+                                  </p>
+                                  <p className="mt-1 text-sm text-muted-foreground">
+                                    Définition : {e.clue}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    Sujet : {e.topicKey}
+                                    {e.topicLabel ? ` · ${e.topicLabel}` : ""} · normalisation :{" "}
+                                    {e.normalized}
+                                  </p>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {previewSlotId === slot.slotId && crosswordOk && (
+                          <div className="mt-4 rounded-lg border border-border bg-background p-4">
+                            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                              <h4 className="text-sm font-semibold">APERÇU</h4>
+                              <ModeToggle mode={previewMode} setMode={setPreviewMode} />
+                            </div>
+                            {crosswordPreview && !crosswordPreview.ok ? (
+                              <p className="text-sm text-destructive">{crosswordPreview.message}</p>
+                            ) : crosswordPreview?.ok ? (
+                              <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-8">
+                                <PagePreview>
+                                  <BookPage palette={palette} showSafeArea={false}>
+                                    <CrosswordTemplate
+                                      sample={{
+                                        ...CROSSWORD_01_SAMPLE,
+                                        title: crosswordOk.title,
+                                      }}
+                                      style={styleTokens}
+                                      palette={palette}
+                                      assets={[]}
+                                      crossword={crosswordPreview.crossword}
                                       mode={previewMode}
                                     />
                                   </BookPage>

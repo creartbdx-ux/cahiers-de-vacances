@@ -6,15 +6,18 @@ import { getBookProject } from "@/lib/data/books"
 import { getGames } from "@/lib/data/reference"
 import { buildEditorialPlan } from "@/lib/editorial-engine"
 import {
+  buildCrosswordThemeContext,
   buildQuizPersonalSourceContext,
   buildQuizThemeContext,
   buildWordSearchThemeContext,
+  generateCrosswordThemeContent,
   generateQuizPersonalContent,
   generateQuizThemeContent,
   generateWordSearchThemeContent,
   isContentGenerationConfigured,
   lookupSourceText,
   summarizeSourceContext,
+  type GeneratedCrosswordThemeEntry,
   type GeneratedQuizPersonalQuestion,
   type GeneratedQuizThemeQuestion,
   type GeneratedWordSearchThemeWord,
@@ -564,5 +567,174 @@ function toWordsearchLabWordView(w: GeneratedWordSearchThemeWord): WordsearchThe
     display: w.display,
     normalized: w.normalized,
     topicKey: w.topicKey,
+  }
+}
+
+export type CrosswordThemeLabEntryView = {
+  answer: string
+  normalized: string
+  clue: string
+  topicKey: string
+  topicLabel: string
+}
+
+export type GenerateCrosswordThemeLabResult =
+  | {
+      ok: true
+      configured: true
+      slotId: string
+      title: string
+      universeId: string
+      universeName: string
+      difficulty: number
+      entryCount: number
+      topicKeys: string[]
+      topicDistinctCount: number
+      topicDiversityOk: boolean
+      gridBuildable: true
+      durationMs: number
+      repaired: boolean
+      repairedCount: number
+      warnings: string[]
+      entries: CrosswordThemeLabEntryView[]
+      seed: string
+    }
+  | {
+      ok: false
+      configured: boolean
+      message: string
+      details?: string[]
+      code?: string
+    }
+
+/**
+ * Admin-only: rebuild plan server-side, generate CROSSWORD_THEME for one slot.
+ * Does not persist to generated_pages. No personal profile data sent to the LLM.
+ */
+export async function generateCrosswordThemeLabAction(input: {
+  bookProjectId: string
+  seed: string
+  slotId: string
+}): Promise<GenerateCrosswordThemeLabResult> {
+  const { user, profile: authProfile } = await getCurrentUser()
+  if (!user || authProfile?.role !== "admin") {
+    return { ok: false, configured: isContentGenerationConfigured(), message: "Accès admin requis." }
+  }
+
+  if (!isContentGenerationConfigured()) {
+    return {
+      ok: false,
+      configured: false,
+      code: "NOT_CONFIGURED",
+      message:
+        "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY dans les variables d'environnement serveur (Vercel → Settings → Environment Variables), puis redéployez.",
+    }
+  }
+
+  const project = await getBookProject(input.bookProjectId)
+  if (!project) {
+    return { ok: false, configured: true, message: "Projet introuvable." }
+  }
+
+  const parsed = parseQuestionnairePayload(project.questionnaire_data)
+  if (!parsed.profile) {
+    return { ok: false, configured: true, message: "BookProfileV1 manquant sur ce projet." }
+  }
+
+  let richnessLevel = parsed.richnessLevel
+  if (!richnessLevel && parsed.questionnaire) {
+    richnessLevel = calculateProfileRichness(parsed.questionnaire, parsed.profile).level
+  }
+  if (
+    !canUseInEditorialLab({
+      status: project.status,
+      profile: parsed.profile,
+      richnessLevel: richnessLevel ?? null,
+    })
+  ) {
+    return { ok: false, configured: true, message: "Projet non éligible à l'Editorial Lab." }
+  }
+
+  const [games, universes] = await Promise.all([getGames(), getUniverses()])
+  const plan = buildEditorialPlan({
+    profile: parsed.profile,
+    seed: input.seed.trim() || "lab-seed-1",
+    games,
+    richnessLevel: richnessLevel ?? "ENOUGH",
+    maxSlots: 8,
+  })
+
+  const slot = plan.selectedGames.find((s) => s.slotId === input.slotId)
+  if (!slot) {
+    return { ok: false, configured: true, message: "Slot introuvable dans le plan reconstruit." }
+  }
+  if (slot.gameId !== "CROSSWORD_THEME") {
+    return {
+      ok: false,
+      configured: true,
+      message: "Ce slot n'est pas CROSSWORD_THEME.",
+    }
+  }
+
+  const universe =
+    universes.find((u) => u.id === slot.universeId) ??
+    (slot.universeId
+      ? {
+          id: slot.universeId,
+          name: slot.universeId,
+          editorial_description: null,
+          allowed_topics: [],
+          excluded_topics: [],
+          quiz_guidance: null,
+        }
+      : null)
+
+  const themeContext = buildCrosswordThemeContext({ slot, universe })
+  const result = await generateCrosswordThemeContent({
+    slot,
+    universe: universe ?? undefined,
+    universeName: themeContext.universeName,
+    bookProjectId: project.id,
+  })
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      configured: result.code !== "NOT_CONFIGURED",
+      code: result.code,
+      message: result.message,
+      details: result.details,
+    }
+  }
+
+  return {
+    ok: true,
+    configured: true,
+    slotId: slot.slotId,
+    title: result.generated.title,
+    universeId: themeContext.universeId,
+    universeName: themeContext.universeName,
+    difficulty: themeContext.difficulty,
+    entryCount: result.generated.entries.length,
+    topicKeys: result.validation.topicKeys,
+    topicDistinctCount: result.validation.topicDistinctCount,
+    topicDiversityOk: result.validation.topicDiversityOk,
+    gridBuildable: true,
+    durationMs: result.durationMs,
+    repaired: result.repaired,
+    repairedCount: result.repairedCount,
+    warnings: result.validation.warnings,
+    entries: result.generated.entries.map(toCrosswordLabEntryView),
+    seed: slot.seed,
+  }
+}
+
+function toCrosswordLabEntryView(e: GeneratedCrosswordThemeEntry): CrosswordThemeLabEntryView {
+  return {
+    answer: e.answer,
+    normalized: e.normalized,
+    clue: e.clue,
+    topicKey: e.topicKey,
+    topicLabel: e.topicLabel,
   }
 }

@@ -41,6 +41,22 @@ export type {
   GeneratedWordSearchTheme,
   GeneratedWordSearchThemeWord,
 } from "./wordsearch-theme/types"
+export { generateCrosswordThemeContent } from "./crossword-theme/generate"
+export type {
+  GenerateCrosswordThemeInput,
+  GenerateCrosswordThemeResult,
+  GenerateCrosswordThemeSuccess,
+} from "./crossword-theme/generate"
+export { toCrosswordThemeEngineInput } from "./crossword-theme/adapter"
+export { validateCrosswordThemeGeneration } from "./crossword-theme/validate"
+export {
+  buildCrosswordThemeContext,
+  buildCrosswordThemeUserPayload,
+} from "./crossword-theme/context"
+export type {
+  GeneratedCrosswordTheme,
+  GeneratedCrosswordThemeEntry,
+} from "./crossword-theme/types"
 export {
   resolveUniverseEditorial,
   topicHitsExcluded,
