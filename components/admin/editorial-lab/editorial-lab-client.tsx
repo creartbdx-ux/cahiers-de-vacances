@@ -16,7 +16,9 @@ import {
 import { buildQuizPersonalSourceContext } from "@/lib/content-generation/source-context"
 import {
   generateQuizPersonalLabAction,
+  generateQuizThemeLabAction,
   type GenerateQuizPersonalLabResult,
+  type GenerateQuizThemeLabResult,
 } from "@/app/admin/editorial-lab/actions"
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
 import type { Game, Palette, Style, Universe } from "@/lib/supabase/types"
@@ -51,7 +53,7 @@ export function EditorialLabClient({
   const [plan, setPlan] = useState<EditorialPlanV1 | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [genBySlot, setGenBySlot] = useState<
-    Record<string, GenerateQuizPersonalLabResult | undefined>
+    Record<string, GenerateQuizPersonalLabResult | GenerateQuizThemeLabResult | undefined>
   >({})
   const [previewSlotId, setPreviewSlotId] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState<"game" | "solution">("game")
@@ -89,11 +91,25 @@ export function EditorialLabClient({
     setPlan(next)
   }
 
-  function generateSlot(slot: EditorialGameSlot) {
+  function generatePersonalSlot(slot: EditorialGameSlot) {
     if (!selected) return
     setError(null)
     startTransition(async () => {
       const result = await generateQuizPersonalLabAction({
+        bookProjectId: selected.id,
+        seed: seed.trim() || "lab-seed-1",
+        slotId: slot.slotId,
+      })
+      setGenBySlot((prev) => ({ ...prev, [slot.slotId]: result }))
+      if (result.ok) setPreviewSlotId(null)
+    })
+  }
+
+  function generateThemeSlot(slot: EditorialGameSlot) {
+    if (!selected) return
+    setError(null)
+    startTransition(async () => {
+      const result = await generateQuizThemeLabAction({
         bookProjectId: selected.id,
         seed: seed.trim() || "lab-seed-1",
         slotId: slot.slotId,
@@ -121,7 +137,7 @@ export function EditorialLabClient({
         )}
       >
         {aiConfigured
-          ? "Génération IA configurée (CONTENT_GENERATION_API_KEY). Disponible pour les slots QUIZ_PERSONAL."
+          ? "Génération IA configurée (CONTENT_GENERATION_API_KEY). Disponible pour QUIZ_PERSONAL et QUIZ_THEME."
           : "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY dans les variables d'environnement serveur (Vercel), puis redéployez."}
       </div>
 
@@ -198,7 +214,15 @@ export function EditorialLabClient({
             <div className="flex flex-col gap-3">
               {plan.selectedGames.map((slot, i) => {
                 const isQuizPersonal = slot.gameId === "QUIZ_PERSONAL"
+                const isQuizTheme = slot.gameId === "QUIZ_THEME"
                 const gen = genBySlot[slot.slotId]
+                const personalOk =
+                  isQuizPersonal && gen?.ok && "sourceSummary" in gen ? gen : null
+                const personalErr =
+                  isQuizPersonal && gen && !gen.ok ? gen : null
+                const themeOk =
+                  isQuizTheme && gen?.ok && "title" in gen ? gen : null
+                const themeErr = isQuizTheme && gen && !gen.ok ? gen : null
                 const sourcePreview =
                   selected && isQuizPersonal
                     ? buildQuizPersonalSourceContext({
@@ -206,6 +230,10 @@ export function EditorialLabClient({
                         slot,
                       })
                     : null
+                const themeTargetQuestions =
+                  slot.contentRequirements.type === "QUIZ_CONTENT"
+                    ? slot.contentRequirements.targetQuestions
+                    : 6
 
                 return (
                   <article
@@ -287,11 +315,11 @@ export function EditorialLabClient({
                             type="button"
                             size="sm"
                             disabled={pending || !aiConfigured}
-                            onClick={() => generateSlot(slot)}
+                            onClick={() => generatePersonalSlot(slot)}
                           >
                             {pending ? "Génération…" : "Générer le contenu"}
                           </Button>
-                          {gen?.ok && (
+                          {personalOk && (
                             <Button
                               type="button"
                               size="sm"
@@ -306,12 +334,12 @@ export function EditorialLabClient({
                           )}
                         </div>
 
-                        {gen && !gen.ok && (
+                        {personalErr && (
                           <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                            <p className="font-medium">{gen.message}</p>
-                            {gen.details?.length ? (
+                            <p className="font-medium">{personalErr.message}</p>
+                            {personalErr.details?.length ? (
                               <ul className="mt-2 list-disc pl-5">
-                                {gen.details.map((d) => (
+                                {personalErr.details.map((d) => (
                                   <li key={d}>{d}</li>
                                 ))}
                               </ul>
@@ -319,33 +347,31 @@ export function EditorialLabClient({
                           </div>
                         )}
 
-                        {gen?.ok && (
+                        {personalOk && (
                           <div className="mt-4 flex flex-col gap-4">
                             <p className="text-sm text-muted-foreground">
-                              Validation OK · {gen.questionCount} question
-                              {gen.questionCount > 1 ? "s" : ""} · {gen.durationMs} ms
-                              {gen.repaired ? " · réparation auto utilisée" : ""}
+                              Validation OK · {personalOk.questionCount} question
+                              {personalOk.questionCount > 1 ? "s" : ""} · {personalOk.durationMs} ms
+                              {personalOk.repaired ? " · réparation auto utilisée" : ""}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              Sources utilisées : {gen.usedSourceIds.factIds.length} faits,{" "}
-                              {gen.usedSourceIds.memoryIds.length} souvenirs,{" "}
-                              {gen.usedSourceIds.jokeIds.length} jokes · Non utilisées :{" "}
-                              {gen.unusedSourceIds.factIds.length} faits,{" "}
-                              {gen.unusedSourceIds.memoryIds.length} souvenirs,{" "}
-                              {gen.unusedSourceIds.jokeIds.length} jokes
+                              Sources utilisées : {personalOk.usedSourceIds.factIds.length} faits,{" "}
+                              {personalOk.usedSourceIds.memoryIds.length} souvenirs,{" "}
+                              {personalOk.usedSourceIds.jokeIds.length} jokes · Non utilisées :{" "}
+                              {personalOk.unusedSourceIds.factIds.length} faits,{" "}
+                              {personalOk.unusedSourceIds.memoryIds.length} souvenirs,{" "}
+                              {personalOk.unusedSourceIds.jokeIds.length} jokes
                             </p>
-                            {gen.warnings.length > 0 && (
+                            {personalOk.warnings.length > 0 && (
                               <ul className="text-sm text-muted-foreground">
-                                {gen.warnings.map((w) => (
+                                {personalOk.warnings.map((w) => (
                                   <li key={w}>{w}</li>
                                 ))}
                               </ul>
                             )}
-                            {gen.questions.map((q, qi) => (
+                            {personalOk.questions.map((q, qi) => (
                               <div key={q.id} className="rounded-lg border border-border p-3">
-                                <p className="text-sm font-medium">
-                                  Question {qi + 1}
-                                </p>
+                                <p className="text-sm font-medium">Question {qi + 1}</p>
                                 <p className="mt-1 text-sm">&ldquo;{q.question}&rdquo;</p>
                                 <ul className="mt-2 space-y-1 text-sm">
                                   {q.choices.map((c, ci) => (
@@ -359,6 +385,104 @@ export function EditorialLabClient({
                                 </p>
                                 <p className="mt-1 text-xs text-muted-foreground">
                                   Source : {q.sourceLabels.join(" · ")}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {isQuizTheme && (
+                      <div className="mt-4 rounded-lg border border-border bg-card/60 p-3">
+                        <h3 className="text-sm font-semibold">QUIZ THÉMATIQUE</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Univers :{" "}
+                          <span className="text-foreground">
+                            {universeName(slot.universeId) ?? slot.universeId ?? "—"}
+                          </span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Difficulté :{" "}
+                          <span className="text-foreground">{slot.difficulty}</span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Questions prévues :{" "}
+                          <span className="text-foreground">{themeTargetQuestions}</span>
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={pending || !aiConfigured}
+                            onClick={() => generateThemeSlot(slot)}
+                          >
+                            {pending ? "Génération…" : "Générer le contenu"}
+                          </Button>
+                          {themeOk && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setPreviewSlotId(slot.slotId)
+                                setPreviewMode("game")
+                              }}
+                            >
+                              Voir le rendu
+                            </Button>
+                          )}
+                        </div>
+
+                        {themeErr && (
+                          <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                            <p className="font-medium">{themeErr.message}</p>
+                            {themeErr.details?.length ? (
+                              <ul className="mt-2 list-disc pl-5">
+                                {themeErr.details.map((d) => (
+                                  <li key={d}>{d}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {themeOk && (
+                          <div className="mt-4 flex flex-col gap-4">
+                            <p className="text-sm font-medium">{themeOk.title}</p>
+                            <p className="text-sm text-muted-foreground">
+                              Validation OK · {themeOk.questionCount} question
+                              {themeOk.questionCount > 1 ? "s" : ""} · diversité :{" "}
+                              {themeOk.topics.join(", ") || "—"} · {themeOk.durationMs} ms
+                              {themeOk.repaired ? " · réparation auto utilisée" : ""}
+                            </p>
+                            {themeOk.warnings.length > 0 && (
+                              <ul className="text-sm text-muted-foreground">
+                                {themeOk.warnings.map((w) => (
+                                  <li key={w}>{w}</li>
+                                ))}
+                              </ul>
+                            )}
+                            {themeOk.questions.map((q, qi) => (
+                              <div key={q.id} className="rounded-lg border border-border p-3">
+                                <p className="text-sm font-medium">Question {qi + 1}</p>
+                                <p className="mt-1 text-sm">&ldquo;{q.question}&rdquo;</p>
+                                <ul className="mt-2 space-y-1 text-sm">
+                                  {q.choices.map((c, ci) => (
+                                    <li key={ci}>
+                                      {QUIZ_CHOICE_LABELS[ci]}. {c}
+                                    </li>
+                                  ))}
+                                </ul>
+                                <p className="mt-2 text-sm">
+                                  Bonne réponse : {QUIZ_CHOICE_LABELS[q.correctIndex]} —{" "}
+                                  {q.choices[q.correctIndex]}
+                                </p>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                  Explication : {q.explanation}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Topic : {q.topic}
                                 </p>
                               </div>
                             ))}

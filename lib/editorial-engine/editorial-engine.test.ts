@@ -338,6 +338,14 @@ test("contentRequirements corrects par moteur", () => {
   assert.equal(quiz.type, "QUIZ_CONTENT")
   if (quiz.type === "QUIZ_CONTENT") {
     assert.equal(quiz.choicesPerQuestion, 4)
+    assert.equal(quiz.targetQuestions, 8)
+  }
+  const quizTheme = buildContentRequirements("QUIZ_THEME", "THEME", "NATURE")
+  assert.equal(quizTheme.type, "QUIZ_CONTENT")
+  if (quizTheme.type === "QUIZ_CONTENT") {
+    assert.equal(quizTheme.targetQuestions, 6)
+    assert.equal(quizTheme.requirePersonalSource, false)
+    assert.equal(quizTheme.universeId, "NATURE")
   }
   const tf = buildContentRequirements("TRUE_FALSE_PERSONAL", "PERSONAL", null)
   assert.equal(tf.type, "TRUE_FALSE_CONTENT")

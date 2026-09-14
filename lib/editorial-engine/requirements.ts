@@ -37,13 +37,20 @@ export function buildContentRequirements(
         universeId: personal ? null : universeId,
       }
     case "QUIZ_PERSONAL":
-    case "QUIZ_THEME":
       return {
         type: "QUIZ_CONTENT",
         targetQuestions: 8,
         choicesPerQuestion: 4,
-        requirePersonalSource: personal,
-        universeId: personal ? null : universeId,
+        requirePersonalSource: true,
+        universeId: null,
+      }
+    case "QUIZ_THEME":
+      return {
+        type: "QUIZ_CONTENT",
+        targetQuestions: 6,
+        choicesPerQuestion: 4,
+        requirePersonalSource: false,
+        universeId,
       }
     case "TRUE_FALSE_PERSONAL":
       return {
