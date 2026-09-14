@@ -13,6 +13,9 @@ export interface MemoryPageSource {
 
 export type MemoryPageVariant = "PHOTO" | "TEXT_ONLY"
 
+/** App-computed density of the selected memory (not LLM). */
+export type MemoryDensity = "SHORT" | "MEDIUM" | "RICH"
+
 export interface MemoryPageEditorial {
   title: string
   eyebrow: string | null
@@ -21,6 +24,9 @@ export interface MemoryPageEditorial {
   sourcePhotoIds: string[]
   place: string | null
   variant: MemoryPageVariant
+  density: MemoryDensity
+  /** False for SHORT without photo — weak full-page candidate. */
+  fullPageRecommended: boolean
   /** True when LLM reformulated; false for deterministic fallback. */
   usedAi: boolean
   audience: AudienceType
@@ -37,6 +43,8 @@ export interface BuildMemoryPageResult {
   source: MemoryPageSource
   editorial: MemoryPageEditorial
   photo: MemoryPagePhotoRef | null
+  density: MemoryDensity
+  fullPageRecommended: boolean
 }
 
 export interface BuildMemoryPageFailure {
@@ -49,5 +57,5 @@ export interface BuildMemoryPageFailure {
 export type MemoryPageBuildResult = BuildMemoryPageResult | BuildMemoryPageFailure
 
 export const MEMORY_PAGE_FALLBACK_TITLE = "Un souvenir à garder"
+/** Absolute ceiling — real cap is density-proportional via maxBodyWordsForSource. */
 export const MEMORY_PAGE_MAX_BODY_WORDS = 140
-export const MEMORY_PAGE_MIN_BODY_WORDS = 12

@@ -1,21 +1,28 @@
 import type { AudienceType, BookProfileV1 } from "@/lib/questionnaire/types"
 import type { ContentGenerationProvider, JsonSchemaObject } from "@/lib/content-generation/types"
 import { createDefaultContentGenerationProvider } from "@/lib/content-generation/provider"
-import type { MemoryPageEditorial, MemoryPageSource, MemoryPageVariant } from "./types"
-import {
-  MEMORY_PAGE_FALLBACK_TITLE,
-  MEMORY_PAGE_MAX_BODY_WORDS,
+import type {
+  MemoryDensity,
+  MemoryPageEditorial,
+  MemoryPageSource,
+  MemoryPageVariant,
 } from "./types"
+import { MEMORY_PAGE_FALLBACK_TITLE } from "./types"
+import {
+  classifyMemoryDensity,
+  maxBodyWordsForSource,
+  recommendFullMemoryPage,
+} from "./density"
 import { validateMemoryEditorial } from "./validate"
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
 }
 
-function clampBody(text: string): string {
+function clampBody(text: string, maxWords: number): string {
   const words = text.trim().split(/\s+/).filter(Boolean)
-  if (words.length <= MEMORY_PAGE_MAX_BODY_WORDS) return words.join(" ")
-  return words.slice(0, MEMORY_PAGE_MAX_BODY_WORDS).join(" ")
+  if (words.length <= maxWords) return words.join(" ")
+  return words.slice(0, maxWords).join(" ")
 }
 
 function participantFirstNames(
@@ -33,15 +40,21 @@ function fallbackEditorial(input: {
   audience: AudienceType
   variant: MemoryPageVariant
   photoId: string | null
+  density: MemoryDensity
+  fullPageRecommended: boolean
+  hasRenderablePhoto: boolean
 }): MemoryPageEditorial {
+  const maxWords = maxBodyWordsForSource(input.source.originalText, input.density)
   return {
     title: input.source.title?.trim() || MEMORY_PAGE_FALLBACK_TITLE,
     eyebrow: input.source.place?.trim() || null,
-    body: clampBody(input.source.originalText),
+    body: clampBody(input.source.originalText, maxWords),
     sourceMemoryId: input.source.memoryId,
     sourcePhotoIds: input.photoId ? [input.photoId] : [],
     place: input.source.place?.trim() || null,
     variant: input.variant,
+    density: input.density,
+    fullPageRecommended: input.fullPageRecommended,
     usedAi: false,
     audience: input.audience,
   }
@@ -74,6 +87,20 @@ function audiencePrompt(audience: AudienceType): string {
   }
 }
 
+function densityBodyGuidance(density: MemoryDensity, sourceWords: number, maxWords: number): string {
+  if (density === "SHORT") {
+    return [
+      `Densité SHORT (${sourceWords} mots source) : le body doit rester très court.`,
+      "Ne jamais allonger artificiellement. Une phrase source peut rester une ou deux phrases.",
+      `Maximum strict : ${maxWords} mots. Pas de dissertation.`,
+    ].join(" ")
+  }
+  if (density === "MEDIUM") {
+    return `Densité MEDIUM : body fluide, proportionnel à la source (max ${maxWords} mots).`
+  }
+  return `Densité RICH : body peut être un peu plus développé, éventuellement 2 paragraphes si la source le justifie (max ${maxWords} mots). Ne pas inventer.`
+}
+
 /**
  * Build editorial copy for a MEMORY_PAGE.
  * Uses IA only when provider is configured; otherwise deterministic fallback.
@@ -85,19 +112,32 @@ export async function editorializeMemoryPage(input: {
   seed: string
   /** Primary photo id already chosen (or null). */
   photoId?: string | null
+  /** True when signed URL is available for rendering. */
+  hasRenderablePhoto?: boolean
   provider?: ContentGenerationProvider
   /** Force fallback even if AI is configured. */
   forceFallback?: boolean
 }): Promise<MemoryPageEditorial> {
   const audience = input.profile.audience
   const photoId = input.photoId ?? input.source.linkedPhotoIds[0] ?? null
-  const variant: MemoryPageVariant = photoId ? "PHOTO" : "TEXT_ONLY"
+  const hasRenderablePhoto = Boolean(input.hasRenderablePhoto)
+  const density = classifyMemoryDensity({
+    source: input.source,
+    hasRenderablePhoto,
+  })
+  const fullPageRecommended = recommendFullMemoryPage({ density, hasRenderablePhoto })
+  const variant: MemoryPageVariant = hasRenderablePhoto ? "PHOTO" : "TEXT_ONLY"
+  const maxWords = maxBodyWordsForSource(input.source.originalText, density)
+  const sourceWords = wordCount(input.source.originalText)
 
   const base = fallbackEditorial({
     source: input.source,
     audience,
     variant,
-    photoId,
+    photoId: hasRenderablePhoto ? photoId : null,
+    density,
+    fullPageRecommended,
+    hasRenderablePhoto,
   })
 
   if (input.forceFallback) return base
@@ -109,13 +149,13 @@ export async function editorializeMemoryPage(input: {
   const payload = {
     sourceMemoryId: input.source.memoryId,
     originalText: input.source.originalText,
+    density,
     ...(input.source.title ? { title: input.source.title } : {}),
     ...(input.source.place ? { place: input.source.place } : {}),
     ...(names.length ? { participantFirstNames: names } : {}),
     audience,
   }
 
-  // Guard: payload must not look like a full profile dump
   const rawGuard = JSON.stringify(payload).toLowerCase()
   if (
     rawGuard.includes("personalfacts") ||
@@ -131,9 +171,21 @@ export async function editorializeMemoryPage(input: {
     "Vous recevez UNIQUEMENT ce souvenir et éventuellement des prénoms.",
     "",
     "Autorisé :",
-    "- proposer un petit titre élégant",
-    "- fluidifier légèrement le texte",
-    "- proposer une courte accroche (eyebrow) si utile",
+    "- proposer un petit titre élégant et NATUREL en français",
+    "- fluidifier légèrement le texte (sans l'allonger)",
+    "- proposer une courte accroche (eyebrow) uniquement si elle repose sur des éléments déjà présents",
+    "",
+    "TITRE — règles strictes :",
+    "- naturel et idiomatique en français (vérifiez la correction idiomatique)",
+    "- utiliser uniquement les éléments présents dans la source",
+    "- ne jamais inventer un lieu, une date, une émotion ou un fait",
+    "- éviter les formulations artificielles ou calques maladroits",
+    "- si la source cite plusieurs lieux, le titre peut en retenir un clairement présent, sans les mélanger de façon incorrecte",
+    "",
+    "EYEBROW :",
+    "- strictement fondé sur la source",
+    "- aucun contexte nouveau",
+    "- null si rien de pertinent",
     "",
     "INTERDIT :",
     "- ajouter un lieu absent de la source",
@@ -143,9 +195,10 @@ export async function editorializeMemoryPage(input: {
     "- inventer ce qui s'est passé avant/après",
     "- créer du dialogue",
     "- enrichir factuellement l'histoire",
+    "- allonger artificiellement le body pour remplir la page",
     "",
     `Audience : ${audience}. ${audiencePrompt(audience)}`,
-    `Le body doit rester court (environ ${MEMORY_PAGE_MAX_BODY_WORDS} mots max).`,
+    densityBodyGuidance(density, sourceWords, maxWords),
     "sourceMemoryId dans la réponse DOIT être exactement celui fourni.",
     "Répondez uniquement via le schéma JSON.",
   ].join("\n")
@@ -171,13 +224,23 @@ export async function editorializeMemoryPage(input: {
       raw.data.eyebrow === null || raw.data.eyebrow === undefined
         ? null
         : String(raw.data.eyebrow).trim() || null,
-    body: clampBody(String(raw.data.body ?? "").trim() || base.body),
+    body: clampBody(String(raw.data.body ?? "").trim() || base.body, maxWords),
     sourceMemoryId: String(raw.data.sourceMemoryId ?? "").trim(),
-    sourcePhotoIds: photoId ? [photoId] : [],
+    sourcePhotoIds: hasRenderablePhoto && photoId ? [photoId] : [],
     place: input.source.place?.trim() || null,
     variant,
+    density,
+    fullPageRecommended,
     usedAi: true,
     audience,
+  }
+
+  // Reject AI body that inventively inflates SHORT sources
+  if (wordCount(draft.body) > maxWords) {
+    return base
+  }
+  if (density === "SHORT" && wordCount(draft.body) > sourceWords * 1.5 + 6) {
+    return base
   }
 
   const validation = validateMemoryEditorial({
@@ -188,12 +251,6 @@ export async function editorializeMemoryPage(input: {
 
   if (!validation.ok) return base
 
-  // If AI invented a place in eyebrow that isn't in source, strip place-like eyebrow only when source has no place
-  if (!input.source.place && draft.eyebrow) {
-    // keep eyebrow as creative hook — validator already blocks place field invention
-  }
-
-  void wordCount
   return draft
 }
 
@@ -202,12 +259,21 @@ export function editorializeMemoryPageFallback(input: {
   source: MemoryPageSource
   audience: AudienceType
   photoId?: string | null
+  hasRenderablePhoto?: boolean
 }): MemoryPageEditorial {
   const photoId = input.photoId ?? input.source.linkedPhotoIds[0] ?? null
+  const hasRenderablePhoto = Boolean(input.hasRenderablePhoto)
+  const density = classifyMemoryDensity({
+    source: input.source,
+    hasRenderablePhoto,
+  })
   return fallbackEditorial({
     source: input.source,
     audience: input.audience,
-    variant: photoId ? "PHOTO" : "TEXT_ONLY",
-    photoId,
+    variant: hasRenderablePhoto ? "PHOTO" : "TEXT_ONLY",
+    photoId: hasRenderablePhoto ? photoId : null,
+    density,
+    fullPageRecommended: recommendFullMemoryPage({ density, hasRenderablePhoto }),
+    hasRenderablePhoto,
   })
 }

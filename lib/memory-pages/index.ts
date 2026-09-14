@@ -1,6 +1,7 @@
 export * from "./types"
 export * from "./select-memory"
 export * from "./validate"
+export * from "./density"
 export {
   editorializeMemoryPage,
   editorializeMemoryPageFallback,

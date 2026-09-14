@@ -382,6 +382,8 @@ export type BookLabMemoryPageResult =
       originalPlace: string | null
       participantIds: string[]
       variant: "PHOTO" | "TEXT_ONLY"
+      density: "SHORT" | "MEDIUM" | "RICH"
+      fullPageRecommended: boolean
       usedAi: boolean
       title: string
       eyebrow: string | null
@@ -479,6 +481,8 @@ export async function prepareBookLabMemoryPageAction(input: {
     originalPlace: result.source.place ?? null,
     participantIds: result.source.participantIds,
     variant: result.editorial.variant,
+    density: result.density,
+    fullPageRecommended: result.fullPageRecommended,
     usedAi: result.editorial.usedAi,
     title: result.editorial.title,
     eyebrow: result.editorial.eyebrow,

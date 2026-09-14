@@ -564,8 +564,13 @@ export function BookLabClient({
                     </p>
                     <p className="mt-2 whitespace-pre-wrap">{memoryPage.originalText}</p>
                     <p className="mt-3 text-xs text-muted-foreground">
-                      Variante {memoryPage.variant}
-                      {memoryPage.usedAi ? " · IA" : " · fallback"}
+                      Densité : {memoryPage.density}
+                      <br />
+                      Variante : {memoryPage.variant}
+                      <br />
+                      Pleine page recommandée : {memoryPage.fullPageRecommended ? "Oui" : "Non"}
+                      <br />
+                      {memoryPage.usedAi ? "Éditorial : IA" : "Éditorial : fallback"}
                       {memoryPage.sourcePhotoIds.length
                         ? ` · photo ${memoryPage.sourcePhotoIds.join(", ")}`
                         : " · sans photo"}
@@ -587,6 +592,7 @@ export function BookLabClient({
                           palette={memoryPalette}
                           visualRole={memoryPage.visualRole}
                           variant={memoryPage.variant}
+                          density={memoryPage.density}
                           photoUrl={memoryPage.photoUrl}
                           photoCaption={memoryPage.photoCaption}
                         />

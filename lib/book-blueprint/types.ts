@@ -1,5 +1,9 @@
 /** Book Blueprint V1 — editorial structure only. No IA, no page generation. */
 
+import type { MemoryContentHint } from "./memory-hints"
+
+export type { MemoryContentHint }
+
 export const BOOK_BLUEPRINT_VERSION = 1 as const
 export const DEFAULT_TARGET_INTERIOR_PAGES = 50
 
@@ -144,6 +148,11 @@ export interface BookBlueprintV1 {
   pages: BlueprintPageSlot[]
   stats: BlueprintStats
   capabilityGaps: CapabilityGap[]
+  /**
+   * Per-memory full-page fitness (no regrouping yet).
+   * WEAK = SHORT without photo — better later as multi-snippet / photo page.
+   */
+  memoryContentHints: MemoryContentHint[]
 }
 
 export interface CompositionTargets {

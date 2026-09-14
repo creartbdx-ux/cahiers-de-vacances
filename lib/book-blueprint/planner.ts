@@ -15,6 +15,7 @@ import {
 } from "./audience-rules"
 import { packCorrections, type CorrectionNeed } from "./corrections"
 import { computeCapabilityGaps } from "./gaps"
+import { listMemoryContentHints } from "./memory-hints"
 import { repairRhythmSequence, type RhythmPageView } from "./rhythm"
 import { assignVisualRoles, pickScoredIntent, type ScoredIntent } from "./scoring"
 import type {
@@ -168,6 +169,7 @@ export function buildBookBlueprint(input: BuildBookBlueprintInput): BookBlueprin
     pages,
     stats,
     capabilityGaps,
+    memoryContentHints: listMemoryContentHints(input.profile),
   }
 }
 

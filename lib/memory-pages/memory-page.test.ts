@@ -15,6 +15,7 @@ import {
   memoryPayloadLooksMinimal,
   selectDistinctMemories,
   selectMemoryForPage,
+  titleLooksGroundedInSource,
   toMemoryPageSource,
   MEMORY_PAGE_FALLBACK_TITLE,
 } from "./index"
@@ -379,12 +380,14 @@ test("MemoryTemplate rend TEXT_ONLY", () => {
       palette: PALETTE,
       visualRole: "LIGHT",
       variant: "TEXT_ONLY",
+      density: "MEDIUM",
     }),
   )
   assert.ok(html.includes("SOUVENIR"))
   assert.ok(html.includes("Un souvenir à garder"))
   assert.ok(!html.includes("<img"))
   assert.ok(!html.toLowerCase().includes("manquant"))
+  assert.ok(html.includes('data-memory-layout="editorial"'))
 })
 
 test("aucune correction générée — correctionRequired false", () => {
@@ -449,6 +452,9 @@ test("Blueprint MEMORY_TEXT_PAGE READY ; PHOTO_MEMORY_PAGE PARTIAL", () => {
 
   const photoGap = bp.capabilityGaps.find((g) => g.family === "PHOTO")
   assert.ok(photoGap && photoGap.gap > 0, "PHOTO encore PARTIAL => gap PHOTO")
+
+  assert.ok(Array.isArray(bp.memoryContentHints))
+  assert.ok(bp.memoryContentHints.some((h) => h.fullPageFitness === "WEAK"))
 })
 
 test("memory inexistant => échec sans invention", async () => {
@@ -461,4 +467,245 @@ test("memory inexistant => échec sans invention", async () => {
   assert.equal(result.ok, false)
   if (result.ok) return
   assert.equal(result.code, "NO_MEMORY")
+})
+
+test("souvenir court sans photo => SHORT", async () => {
+  const text =
+    "Lors de notre voyage en Australie nous avons fait escale à Tokyo et nous avons tenté l'expérience du 'onsen' japonais !"
+  const result = await buildMemoryPage({
+    profile: profile({
+      memories: [{ id: "onsen", text }],
+      photos: [],
+    }),
+    seed: "short-1",
+    memoryId: "onsen",
+    forceFallback: true,
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.density, "SHORT")
+  assert.equal(result.editorial.variant, "TEXT_ONLY")
+})
+
+test("souvenir riche => RICH", async () => {
+  const text = [
+    "Le premier jour, nous avons marché jusqu'au phare sous un ciel immense.",
+    "Le soir, autour d'un feu, quelqu'un a raconté l'histoire du bateau manqué.",
+    "Le lendemain, la mer était plate ; on a prolongé la journée jusqu'au crépuscule.",
+    "Ces trois jours restent le cœur discret de ce voyage, sans rien d'extraordinaire à part le temps partagé.",
+  ].join(" ")
+  const result = await buildMemoryPage({
+    profile: profile({
+      memories: [
+        {
+          id: "rich",
+          title: "Trois jours au phare",
+          text,
+          place: "Ouessant",
+        },
+      ],
+    }),
+    seed: "rich-1",
+    memoryId: "rich",
+    forceFallback: true,
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.density, "RICH")
+})
+
+test("SHORT n'est pas artificiellement allongé par fallback", async () => {
+  const text =
+    "Lors de notre voyage en Australie nous avons fait escale à Tokyo et nous avons tenté l'expérience du 'onsen' japonais !"
+  const sourceWords = text.trim().split(/\s+/).length
+  const result = await buildMemoryPage({
+    profile: profile({ memories: [{ id: "onsen", text }], photos: [] }),
+    seed: "no-pad",
+    memoryId: "onsen",
+    forceFallback: true,
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  const bodyWords = result.editorial.body.trim().split(/\s+/).length
+  assert.ok(bodyWords <= sourceWords + 2)
+  assert.equal(result.editorial.body.trim(), text.trim())
+})
+
+test("fullPageRecommended=false possible pour SHORT sans photo", async () => {
+  const result = await buildMemoryPage({
+    profile: profile({
+      memories: [
+        {
+          id: "s",
+          text: "Petite escale à Tokyo pour un onsen.",
+        },
+      ],
+      photos: [],
+    }),
+    seed: "weak",
+    memoryId: "s",
+    forceFallback: true,
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.density, "SHORT")
+  assert.equal(result.fullPageRecommended, false)
+})
+
+test("photo peut rendre une source SHORT pertinente en pleine page", async () => {
+  const result = await buildMemoryPage({
+    profile: profile({
+      memories: [
+        {
+          id: "s",
+          text: "Petite escale à Tokyo pour un onsen.",
+          participantIds: ["p1"],
+        },
+      ],
+      photos: [
+        {
+          id: "ph1",
+          useAuthorized: true,
+          storagePath: "books/x/ph1.jpg",
+          participantIds: ["p1"],
+        },
+      ],
+    }),
+    seed: "short-photo",
+    memoryId: "s",
+    forceFallback: true,
+    photoSignedUrls: { ph1: "https://signed.example/ph1.jpg" },
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.density, "SHORT")
+  assert.equal(result.editorial.variant, "PHOTO")
+  assert.equal(result.fullPageRecommended, true)
+})
+
+test("titre ne contient aucune donnée extérieure à la source", async () => {
+  const text =
+    "Lors de notre voyage en Australie nous avons fait escale à Tokyo et nous avons tenté l'expérience du 'onsen' japonais !"
+  const provider = new FakeContentGenerationProvider(async () => ({
+    ok: true,
+    data: {
+      title: "Une escale à Tokyo",
+      eyebrow: "Sur le chemin de l'Australie",
+      body: text,
+      sourceMemoryId: "onsen",
+    },
+  }))
+  const result = await buildMemoryPage({
+    profile: profile({ memories: [{ id: "onsen", text }], photos: [] }),
+    seed: "title-ok",
+    memoryId: "onsen",
+    provider,
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.ok(titleLooksGroundedInSource(result.editorial.title, text))
+  assert.ok(!result.editorial.title.toLowerCase().includes("kyoto"))
+  assert.ok(!result.editorial.body.toLowerCase().includes("fuji"))
+})
+
+test("TEXT_ONLY SHORT utilise la variante de layout quote", () => {
+  const html = renderToStaticMarkup(
+    createElement(MemoryTemplate, {
+      title: "Une escale à Tokyo",
+      body: "Nous avons tenté l'expérience du onsen japonais.",
+      style: getStyleTokens("RETRO"),
+      palette: PALETTE,
+      variant: "TEXT_ONLY",
+      density: "SHORT",
+    }),
+  )
+  assert.ok(html.includes('data-memory-density="SHORT"'))
+  assert.ok(html.includes('data-memory-layout="quote"'))
+  assert.ok(html.includes("<blockquote"))
+})
+
+test("règles anti-invention inchangées — lieu inventé rejeté", async () => {
+  const provider = new FakeContentGenerationProvider(async () => ({
+    ok: true,
+    data: {
+      title: "Hack",
+      eyebrow: null,
+      body: "On a marché pieds nus jusqu'au phare, le vent était doux et la mer presque plate.",
+      sourceMemoryId: "m1",
+    },
+  }))
+  // Inject invented place via draft path: editorialize keeps place from source only.
+  // Wrong sourceMemoryId still falls back.
+  const badId = new FakeContentGenerationProvider(async () => ({
+    ok: true,
+    data: {
+      title: "Hack",
+      eyebrow: null,
+      body: "texte",
+      sourceMemoryId: "OTHER",
+    },
+  }))
+  const result = await buildMemoryPage({
+    profile: profile(),
+    seed: "anti",
+    memoryId: "m1",
+    provider: badId,
+  })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.editorial.usedAi, false)
+  assert.equal(result.editorial.place, "Belle-Île")
+  void provider
+})
+
+test("Blueprint expose memoryContentHints WEAK pour SHORT", () => {
+  const bp = buildBookBlueprint({
+    bookProjectId: "proj-hints",
+    seed: "hints",
+    profile: profile({
+      memories: [
+        {
+          id: "onsen",
+          text: "Petite escale à Tokyo pour un onsen.",
+        },
+        {
+          id: "rich",
+          title: "Long séjour",
+          place: "Kyoto",
+          text: [
+            "Premier jour au temple, puis une longue marche jusqu'à la rivière.",
+            "Le soir, un dîner simple et beaucoup de rires autour de la table.",
+            "Le lendemain, la pluie a prolongé le café jusqu'à l'après-midi entier.",
+          ].join(" "),
+        },
+      ],
+      photos: [],
+      personalFacts: [
+        { id: "f1", category: "FOOD", value: "A" },
+        { id: "f2", category: "MUSIC", value: "B" },
+        { id: "f3", category: "PLACE", value: "C" },
+      ],
+      sharedProfile: { interestUniverseIds: ["BEAUTY", "TRAVEL", "FASHION", "NATURE"] },
+    }),
+    richnessLevel: "RICH",
+    styles: [
+      {
+        id: "RETRO",
+        name: "Rétro",
+        description: null,
+        typography_title: null,
+        typography_body: null,
+        decor_density: null,
+        active: true,
+        created_at: "",
+        updated_at: "",
+      },
+    ],
+    palettes: [PALETTE],
+  })
+  assert.equal(getArchetype("MEMORY_TEXT_PAGE").implementationStatus, "READY")
+  const weak = bp.memoryContentHints.find((h) => h.memoryId === "onsen")
+  assert.ok(weak)
+  assert.equal(weak!.fullPageRecommended, false)
+  assert.equal(weak!.fullPageFitness, "WEAK")
 })

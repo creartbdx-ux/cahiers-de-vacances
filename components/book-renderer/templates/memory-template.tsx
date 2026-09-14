@@ -3,11 +3,11 @@ import { bookColor } from "@/lib/book-renderer/palette"
 import type { BookStyleTokens } from "@/lib/book-renderer/styles"
 import type { VisualRole } from "@/lib/book-blueprint/types"
 import type { Palette } from "@/lib/supabase/types"
-import type { MemoryPageVariant } from "@/lib/memory-pages/types"
+import type { MemoryDensity, MemoryPageVariant } from "@/lib/memory-pages/types"
 
 /**
  * MEMORY_PAGE V1 — editorial memory page (not a game).
- * Variants: PHOTO (hero image + text) | TEXT_ONLY (typographic composition).
+ * TEXT_ONLY adapts to density: SHORT (quote/typo), MEDIUM (classic), RICH (longer body).
  * Never shows a "photo manquante" placeholder.
  */
 export function MemoryTemplate({
@@ -19,6 +19,7 @@ export function MemoryTemplate({
   palette: _palette,
   visualRole: _visualRole = "LIGHT",
   variant = "TEXT_ONLY",
+  density = "MEDIUM",
   photoUrl,
   photoCaption,
 }: {
@@ -28,9 +29,9 @@ export function MemoryTemplate({
   place?: string | null
   style: BookStyleTokens
   palette: Palette
-  /** Blueprint visualRole — surface applied by BookPage parent. */
   visualRole?: VisualRole
   variant?: MemoryPageVariant
+  density?: MemoryDensity
   photoUrl?: string | null
   photoCaption?: string | null
 }) {
@@ -43,13 +44,18 @@ export function MemoryTemplate({
 
   if (showPhoto) {
     return (
-      <div className="flex h-full w-full flex-col" style={{ gap: 18 }}>
+      <div
+        className="flex h-full w-full flex-col"
+        style={{ gap: 18 }}
+        data-memory-variant="PHOTO"
+        data-memory-density={density}
+      >
         <div
           className="relative overflow-hidden"
           style={{
             ...decor,
             flex: "0 0 auto",
-            height: 340,
+            height: density === "SHORT" ? 380 : 340,
             border: `${style.frameBorderWidth}px solid ${bookColor.dark}`,
             backgroundColor: "color-mix(in srgb, var(--book-secondary) 12%, var(--book-light))",
           }}
@@ -86,7 +92,7 @@ export function MemoryTemplate({
         <p
           className={style.instructionClassName}
           style={{
-            fontSize: 16,
+            fontSize: density === "SHORT" ? 18 : 16,
             color: bookColor.dark,
             lineHeight: 1.55,
             maxWidth: 540,
@@ -111,9 +117,127 @@ export function MemoryTemplate({
     )
   }
 
-  // TEXT_ONLY — typographic, decorative, complete without photo
+  if (density === "SHORT") {
+    return (
+      <div
+        className="relative flex h-full w-full flex-col justify-between"
+        style={{ padding: 6 }}
+        data-memory-variant="TEXT_ONLY"
+        data-memory-density="SHORT"
+        data-memory-layout="quote"
+      >
+        <div className="flex items-start justify-between">
+          <span
+            aria-hidden
+            style={{
+              ...decor,
+              width: 56,
+              height: 56,
+              backgroundColor: "color-mix(in srgb, var(--book-accent) 45%, var(--book-light))",
+              border: `${style.frameBorderWidth}px solid ${bookColor.accent}`,
+            }}
+          />
+          <span
+            className={style.gameLabelClassName}
+            style={{
+              fontSize: 11,
+              letterSpacing: "0.28em",
+              color: "var(--book-page-band, var(--book-primary))",
+            }}
+          >
+            SOUVENIR
+          </span>
+        </div>
+
+        <div className="flex flex-1 flex-col items-center justify-center text-center" style={{ gap: 22, padding: "24px 12px" }}>
+          {(eyebrow || place) && (
+            <p
+              className={style.gameLabelClassName}
+              style={{
+                fontSize: 12,
+                letterSpacing: "0.2em",
+                color: "var(--book-page-band, var(--book-secondary))",
+                opacity: 0.85,
+              }}
+            >
+              {eyebrow || place}
+            </p>
+          )}
+          <h1
+            className={style.titleClassName}
+            style={{
+              fontSize: 52,
+              color: bookColor.primary,
+              lineHeight: 0.92,
+              maxWidth: 440,
+            }}
+          >
+            {title}
+          </h1>
+          <div
+            aria-hidden
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: "50%",
+              border: `${style.frameBorderWidth}px solid ${bookColor.accent}`,
+              backgroundColor: "color-mix(in srgb, var(--book-secondary) 25%, var(--book-light))",
+            }}
+          />
+          <blockquote
+            className={style.instructionClassName}
+            style={{
+              fontSize: 22,
+              color: bookColor.dark,
+              lineHeight: 1.45,
+              maxWidth: 460,
+              margin: 0,
+              opacity: 0.92,
+            }}
+          >
+            {body}
+          </blockquote>
+        </div>
+
+        <div className="flex items-end justify-between">
+          <span
+            aria-hidden
+            style={{
+              ...decor,
+              width: 96,
+              height: 20,
+              backgroundColor: "color-mix(in srgb, var(--book-secondary) 55%, var(--book-light))",
+            }}
+          />
+          <span
+            aria-hidden
+            style={{
+              width: 36,
+              height: 36,
+              ...decor,
+              backgroundColor: bookColor.primary,
+            }}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  const paragraphs =
+    density === "RICH"
+      ? body.split(/\n\n+/).map((p) => p.trim()).filter(Boolean)
+      : [body]
+  const bodySize = density === "RICH" ? 16 : 17
+  const titleSize = density === "RICH" ? 42 : 48
+
   return (
-    <div className="relative flex h-full w-full flex-col" style={{ gap: 20, padding: 4 }}>
+    <div
+      className="relative flex h-full w-full flex-col"
+      style={{ gap: 20, padding: 4 }}
+      data-memory-variant="TEXT_ONLY"
+      data-memory-density={density}
+      data-memory-layout={density === "RICH" ? "editorial-long" : "editorial"}
+    >
       <div className="flex items-center justify-between">
         <span
           aria-hidden
@@ -149,7 +273,7 @@ export function MemoryTemplate({
         <h1
           className={style.titleClassName}
           style={{
-            fontSize: 48,
+            fontSize: titleSize,
             color: bookColor.primary,
             lineHeight: 0.95,
             maxWidth: 460,
@@ -166,18 +290,23 @@ export function MemoryTemplate({
             backgroundColor: bookColor.accent,
           }}
         />
-        <p
-          className={style.instructionClassName}
-          style={{
-            fontSize: 17,
-            color: bookColor.dark,
-            lineHeight: 1.6,
-            maxWidth: 480,
-            opacity: 0.9,
-          }}
-        >
-          {body}
-        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 500 }}>
+          {paragraphs.map((p, i) => (
+            <p
+              key={i}
+              className={style.instructionClassName}
+              style={{
+                fontSize: bodySize,
+                color: bookColor.dark,
+                lineHeight: 1.6,
+                margin: 0,
+                opacity: 0.9,
+              }}
+            >
+              {p}
+            </p>
+          ))}
+        </div>
       </div>
 
       <div className="flex items-end justify-between">

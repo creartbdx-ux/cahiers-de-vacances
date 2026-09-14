@@ -1,6 +1,7 @@
 import type { BookProfileV1 } from "@/lib/questionnaire/types"
-import type { MemoryPageEditorial, MemoryPageSource } from "./types"
-import { MEMORY_PAGE_MAX_BODY_WORDS, MEMORY_PAGE_MIN_BODY_WORDS } from "./types"
+import type { MemoryDensity, MemoryPageEditorial, MemoryPageSource } from "./types"
+import { MEMORY_PAGE_MAX_BODY_WORDS } from "./types"
+import { maxBodyWordsForSource } from "./density"
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
@@ -17,6 +18,7 @@ function normalize(s: string): string {
 /**
  * Validate editorial output against the selected memory source.
  * Blocks factual invention of place / wrong memory id / empty body.
+ * Does not require inflating short sources.
  */
 export function validateMemoryEditorial(input: {
   editorial: MemoryPageEditorial
@@ -43,15 +45,26 @@ export function validateMemoryEditorial(input: {
     errors.push("Corps de texte manquant.")
   } else {
     const words = wordCount(editorial.body)
+    const sourceWords = wordCount(source.originalText)
+    const density: MemoryDensity = editorial.density
+    const maxWords = maxBodyWordsForSource(source.originalText, density)
+
     if (words > MEMORY_PAGE_MAX_BODY_WORDS + 20) {
       errors.push(`Body trop long (${words} mots).`)
     }
-    if (words < MEMORY_PAGE_MIN_BODY_WORDS && wordCount(source.originalText) >= MEMORY_PAGE_MIN_BODY_WORDS) {
+    if (words > maxWords + 8) {
+      errors.push(`Body disproportionné par rapport à la source (${words} > ${maxWords}).`)
+    }
+    // Only require body not to collapse a RICH/MEDIUM source; SHORT may stay short.
+    if (
+      density !== "SHORT" &&
+      sourceWords >= 20 &&
+      words < Math.min(12, Math.floor(sourceWords * 0.4))
+    ) {
       errors.push("Body trop court par rapport à la source.")
     }
   }
 
-  // Place: editorial.place must match source or be null
   if (editorial.place) {
     if (!source.place) {
       errors.push("Lieu inventé : la source n'en contient pas.")
@@ -60,28 +73,12 @@ export function validateMemoryEditorial(input: {
     }
   }
 
-  // Photos must be subset of linked candidates (or empty)
   for (const id of editorial.sourcePhotoIds) {
     if (!source.linkedPhotoIds.includes(id)) {
-      // Allow if photo exists on profile authorized — soft check
       const photo = profile.photos.find((p) => p.id === id && p.useAuthorized)
       if (!photo) {
         errors.push(`Photo ${id} non autorisée / absente.`)
       }
-    }
-  }
-
-  // Participant names in body that aren't in allowed first names — soft heuristic
-  const allowedNames = new Set(
-    profile.participants
-      .filter((p) => (source.participantIds.length ? source.participantIds.includes(p.id) : true))
-      .map((p) => normalize(p.firstName))
-      .filter(Boolean),
-  )
-  // Also allow all participant names of the book for group storytelling when memory has no tags
-  if (!source.participantIds.length) {
-    for (const p of profile.participants) {
-      if (p.firstName.trim()) allowedNames.add(normalize(p.firstName))
     }
   }
 
@@ -103,4 +100,52 @@ export function memoryPayloadLooksMinimal(payload: unknown): boolean {
     "memories\":[",
   ]
   return !forbidden.some((k) => raw.includes(k))
+}
+
+/**
+ * Soft check: title tokens should largely overlap source vocabulary
+ * (excluding stopwords). Used in tests / guards — not a hard editorial block.
+ */
+export function titleLooksGroundedInSource(title: string, sourceText: string): boolean {
+  const stop = new Set([
+    "un",
+    "une",
+    "le",
+    "la",
+    "les",
+    "de",
+    "des",
+    "du",
+    "au",
+    "aux",
+    "en",
+    "a",
+    "à",
+    "et",
+    "ou",
+    "sur",
+    "dans",
+    "pour",
+    "par",
+    "notre",
+    "nos",
+    "leur",
+    "leurs",
+    "ce",
+    "cette",
+    "ces",
+  ])
+  const sourceTokens = new Set(
+    normalize(sourceText)
+      .split(/[^a-z0-9àâäéèêëïîôùûüç]+/i)
+      .filter((t) => t.length > 2 && !stop.has(t)),
+  )
+  const titleTokens = normalize(title)
+    .split(/[^a-z0-9àâäéèêëïîôùûüç]+/i)
+    .filter((t) => t.length > 2 && !stop.has(t))
+  if (!titleTokens.length) return true
+  const grounded = titleTokens.filter((t) =>
+    [...sourceTokens].some((s) => s.includes(t) || t.includes(s)),
+  )
+  return grounded.length / titleTokens.length >= 0.5
 }
