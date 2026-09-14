@@ -107,6 +107,12 @@ export const adminNav: NavItem[] = [
     icon: PenLine,
   },
   {
+    label: 'Book Lab',
+    href: '/admin/book-lab',
+    description: 'Assemblez un mini-cahier 8 pages pour juger le produit.',
+    icon: BookOpen,
+  },
+  {
     label: 'Univers',
     href: '/admin/univers',
     description: 'Définissez les thèmes et ambiances proposés.',

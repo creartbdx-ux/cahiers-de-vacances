@@ -1,0 +1,373 @@
+"use server"
+
+import { getCurrentUser } from "@/lib/auth"
+import { canUseInEditorialLab, parseQuestionnairePayload } from "@/lib/books/lifecycle"
+import { getBookProject } from "@/lib/data/books"
+import { getGames, getUniverses } from "@/lib/data/reference"
+import { buildEditorialPlan } from "@/lib/editorial-engine"
+import type { EditorialGameSlot } from "@/lib/editorial-engine/types"
+import {
+  buildCrosswordThemeContext,
+  buildQuizThemeContext,
+  buildWordSearchThemeContext,
+  generateCrosswordThemeContent,
+  generateQuizThemeContent,
+  generateWordSearchThemeContent,
+  isContentGenerationConfigured,
+} from "@/lib/content-generation"
+import { calculateProfileRichness } from "@/lib/questionnaire/richness"
+import { resolveBookVisualIdentity } from "@/lib/mini-book/visual-identity"
+import { getActivePalettes } from "@/lib/data/assets"
+import { getStyles } from "@/lib/data/reference"
+import type { MiniBookVisualIdentity } from "@/lib/mini-book/types"
+
+export type BookLabSlotSummary = {
+  slotId: string
+  gameId: "QUIZ_THEME" | "WORDSEARCH_THEME" | "CROSSWORD_THEME"
+  universeId: string | null
+  universeName: string | null
+  difficulty: number
+  seed: string
+}
+
+export type BookLabPlanResult =
+  | {
+      ok: true
+      seed: string
+      visualIdentity: MiniBookVisualIdentity
+      slots: {
+        quiz: BookLabSlotSummary | null
+        wordsearch: BookLabSlotSummary | null
+        crossword: BookLabSlotSummary | null
+      }
+      missing: string[]
+    }
+  | { ok: false; message: string }
+
+async function requireAdminProject(input: {
+  bookProjectId: string
+  seed: string
+}) {
+  const { user, profile: authProfile } = await getCurrentUser()
+  if (!user || authProfile?.role !== "admin") {
+    return { ok: false as const, message: "Accès admin requis." }
+  }
+
+  const project = await getBookProject(input.bookProjectId)
+  if (!project) {
+    return { ok: false as const, message: "Projet introuvable." }
+  }
+
+  const parsed = parseQuestionnairePayload(project.questionnaire_data)
+  if (!parsed.profile) {
+    return { ok: false as const, message: "BookProfileV1 manquant sur ce projet." }
+  }
+
+  let richnessLevel = parsed.richnessLevel
+  if (!richnessLevel && parsed.questionnaire) {
+    richnessLevel = calculateProfileRichness(parsed.questionnaire, parsed.profile).level
+  }
+  if (
+    !canUseInEditorialLab({
+      status: project.status,
+      profile: parsed.profile,
+      richnessLevel: richnessLevel ?? null,
+    })
+  ) {
+    return { ok: false as const, message: "Projet non éligible au Book Lab." }
+  }
+
+  const [games, universes, palettes, styles] = await Promise.all([
+    getGames(),
+    getUniverses(),
+    getActivePalettes(),
+    getStyles(),
+  ])
+
+  const seed = input.seed.trim() || "lab-seed-1"
+  const plan = buildEditorialPlan({
+    profile: parsed.profile,
+    seed,
+    games,
+    richnessLevel: richnessLevel ?? "ENOUGH",
+    maxSlots: 8,
+  })
+
+  const visualIdentity = resolveBookVisualIdentity({
+    profile: parsed.profile,
+    seed,
+    styles,
+    palettes,
+  })
+
+  return {
+    ok: true as const,
+    project,
+    profile: parsed.profile,
+    plan,
+    games,
+    universes,
+    palettes,
+    styles,
+    seed,
+    visualIdentity,
+  }
+}
+
+function universeNameOf(
+  universes: Awaited<ReturnType<typeof getUniverses>>,
+  id: string | null | undefined,
+): string | null {
+  if (!id) return null
+  return universes.find((u) => u.id === id)?.name ?? id
+}
+
+function toSlotSummary(
+  slot: EditorialGameSlot,
+  universes: Awaited<ReturnType<typeof getUniverses>>,
+): BookLabSlotSummary {
+  return {
+    slotId: slot.slotId,
+    gameId: slot.gameId as BookLabSlotSummary["gameId"],
+    universeId: slot.universeId,
+    universeName: universeNameOf(universes, slot.universeId),
+    difficulty: slot.difficulty,
+    seed: slot.seed,
+  }
+}
+
+/**
+ * Build plan + visual identity only — no IA.
+ */
+export async function getBookLabPlanAction(input: {
+  bookProjectId: string
+  seed: string
+}): Promise<BookLabPlanResult> {
+  const ctx = await requireAdminProject(input)
+  if (!ctx.ok) return ctx
+
+  const quiz = ctx.plan.selectedGames.find((s) => s.gameId === "QUIZ_THEME") ?? null
+  const wordsearch = ctx.plan.selectedGames.find((s) => s.gameId === "WORDSEARCH_THEME") ?? null
+  const crossword = ctx.plan.selectedGames.find((s) => s.gameId === "CROSSWORD_THEME") ?? null
+
+  const missing: string[] = []
+  if (!quiz) missing.push("QUIZ_THEME")
+  if (!wordsearch) missing.push("WORDSEARCH_THEME")
+  if (!crossword) missing.push("CROSSWORD_THEME")
+
+  return {
+    ok: true,
+    seed: ctx.seed,
+    visualIdentity: ctx.visualIdentity,
+    slots: {
+      quiz: quiz ? toSlotSummary(quiz, ctx.universes) : null,
+      wordsearch: wordsearch ? toSlotSummary(wordsearch, ctx.universes) : null,
+      crossword: crossword ? toSlotSummary(crossword, ctx.universes) : null,
+    },
+    missing,
+  }
+}
+
+export type BookLabQuizContent = {
+  ok: true
+  slotId: string
+  title: string
+  universeId: string
+  universeName: string
+  seed: string
+  questions: Array<{
+    id: string
+    question: string
+    questionStyle: string
+    topicKey: string
+    topicLabel: string
+    choices: [string, string, string, string]
+    correctIndex: 0 | 1 | 2 | 3
+    explanation: string
+  }>
+}
+
+export type BookLabWordsearchContent = {
+  ok: true
+  slotId: string
+  title: string
+  universeId: string
+  universeName: string
+  seed: string
+  words: Array<{ display: string; normalized: string; topicKey: string }>
+}
+
+export type BookLabCrosswordContent = {
+  ok: true
+  slotId: string
+  title: string
+  universeId: string
+  universeName: string
+  seed: string
+  entries: Array<{
+    answer: string
+    normalized: string
+    clue: string
+    topicKey: string
+    topicLabel: string
+  }>
+}
+
+export type BookLabGameGenResult =
+  | BookLabQuizContent
+  | BookLabWordsearchContent
+  | BookLabCrosswordContent
+  | { ok: false; code?: string; message: string; details?: string[] }
+
+function resolveUniverse(
+  universes: Awaited<ReturnType<typeof getUniverses>>,
+  universeId: string | null,
+) {
+  return (
+    universes.find((u) => u.id === universeId) ??
+    (universeId
+      ? {
+          id: universeId,
+          name: universeId,
+          editorial_description: null,
+          allowed_topics: [],
+          excluded_topics: [],
+          quiz_guidance: null,
+        }
+      : null)
+  )
+}
+
+/**
+ * Generate one theme game for Book Lab. Does not persist.
+ */
+export async function generateBookLabGameAction(input: {
+  bookProjectId: string
+  seed: string
+  gameId: "QUIZ_THEME" | "WORDSEARCH_THEME" | "CROSSWORD_THEME"
+}): Promise<BookLabGameGenResult> {
+  if (!isContentGenerationConfigured()) {
+    return {
+      ok: false,
+      code: "NOT_CONFIGURED",
+      message:
+        "Génération IA non configurée. Ajoutez CONTENT_GENERATION_API_KEY dans les variables d'environnement serveur.",
+    }
+  }
+
+  const ctx = await requireAdminProject(input)
+  if (!ctx.ok) return { ok: false, message: ctx.message }
+
+  const slot = ctx.plan.selectedGames.find((s) => s.gameId === input.gameId)
+  if (!slot) {
+    return {
+      ok: false,
+      message: `Aucun slot ${input.gameId} dans le plan éditorial.`,
+    }
+  }
+
+  const universe = resolveUniverse(ctx.universes, slot.universeId)
+  const uName = universeNameOf(ctx.universes, slot.universeId) ?? slot.universeId ?? "—"
+
+  if (input.gameId === "QUIZ_THEME") {
+    const themeContext = buildQuizThemeContext({ slot, universe })
+    const result = await generateQuizThemeContent({
+      slot,
+      universe: universe ?? undefined,
+      universeName: themeContext.universeName,
+      bookProjectId: ctx.project.id,
+    })
+    if (!result.ok) {
+      return {
+        ok: false,
+        code: result.code,
+        message: result.message,
+        details: result.details,
+      }
+    }
+    return {
+      ok: true,
+      slotId: slot.slotId,
+      title: result.generated.title,
+      universeId: themeContext.universeId,
+      universeName: themeContext.universeName || uName,
+      seed: slot.seed,
+      questions: result.generated.questions.map((q) => ({
+        id: q.id,
+        question: q.question,
+        questionStyle: q.questionStyle,
+        topicKey: q.topicKey,
+        topicLabel: q.topicLabel,
+        choices: q.choices,
+        correctIndex: q.correctIndex,
+        explanation: q.explanation,
+      })),
+    }
+  }
+
+  if (input.gameId === "WORDSEARCH_THEME") {
+    const themeContext = buildWordSearchThemeContext({ slot, universe })
+    const result = await generateWordSearchThemeContent({
+      slot,
+      universe: universe ?? undefined,
+      universeName: themeContext.universeName,
+      bookProjectId: ctx.project.id,
+    })
+    if (!result.ok) {
+      return {
+        ok: false,
+        code: result.code,
+        message: result.message,
+        details: result.details,
+      }
+    }
+    return {
+      ok: true,
+      slotId: slot.slotId,
+      title: result.generated.title,
+      universeId: themeContext.universeId,
+      universeName: themeContext.universeName || uName,
+      seed: slot.seed,
+      words: result.generated.words.map((w) => ({
+        display: w.display,
+        normalized: w.normalized,
+        topicKey: w.topicKey,
+      })),
+    }
+  }
+
+  const themeContext = buildCrosswordThemeContext({ slot, universe })
+  const result = await generateCrosswordThemeContent({
+    slot,
+    universe: universe ?? undefined,
+    universeName: themeContext.universeName,
+    bookProjectId: ctx.project.id,
+  })
+  if (!result.ok) {
+    return {
+      ok: false,
+      code: result.code,
+      message: result.message,
+      details: result.details,
+    }
+  }
+  return {
+    ok: true,
+    slotId: slot.slotId,
+    title: result.generated.title,
+    universeId: themeContext.universeId,
+    universeName: themeContext.universeName || uName,
+    seed: slot.seed,
+    entries: result.generated.entries.map((e) => ({
+      answer: e.answer,
+      normalized: e.normalized,
+      clue: e.clue,
+      topicKey: e.topicKey,
+      topicLabel: e.topicLabel,
+    })),
+  }
+}
+
+export async function getBookLabAiStatusAction(): Promise<{ configured: boolean }> {
+  return { configured: isContentGenerationConfigured() }
+}
