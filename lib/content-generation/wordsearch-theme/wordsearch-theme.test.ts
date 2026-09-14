@@ -7,6 +7,7 @@ import { UNIVERSE_EDITORIAL_DEFAULTS } from "@/lib/universes/editorial"
 import { FakeContentGenerationProvider } from "../provider"
 import { generateQuizThemeContent } from "../quiz-theme/generate"
 import { toWordSearchThemeEngineInput } from "./adapter"
+import { buildWordSearchThemePreview, WORDSEARCH_PREVIEW_BUILD_ERROR } from "./preview"
 import {
   buildWordSearchThemeContext,
   buildWordSearchThemeUserPayload,
@@ -415,4 +416,50 @@ test("applyWordSearchThemeReplacements remplace à l'index", () => {
   ])
   assert.equal(next[1]!.display, "GLOSS")
   assert.equal(next[0]!.display, original[0]!.display)
+})
+
+test("preview Lab : résultat valide fournit grid + placements pour WordsearchTemplate", () => {
+  const preview = buildWordSearchThemePreview(VALID_BEAUTY_WORDS, "lab-preview-seed")
+  assert.equal(preview.ok, true)
+  if (preview.ok) {
+    assert.equal(preview.wordsearch.success, true)
+    assert.ok(preview.wordsearch.grid.length > 0)
+    assert.ok(preview.wordsearch.grid[0]!.length > 0)
+    assert.ok(preview.wordsearch.placements.length >= 8)
+    assert.equal(preview.wordsearch.placements.length, preview.wordsearch.stats.placed)
+  }
+})
+
+test("preview Lab : même mots + seed => même grille (pas de regénération IA)", () => {
+  const a = buildWordSearchThemePreview(VALID_BEAUTY_WORDS, "stable-preview")
+  const b = buildWordSearchThemePreview(VALID_BEAUTY_WORDS, "stable-preview")
+  assert.equal(a.ok, true)
+  assert.equal(b.ok, true)
+  if (a.ok && b.ok) {
+    assert.deepEqual(a.wordsearch.grid, b.wordsearch.grid)
+    assert.deepEqual(
+      a.wordsearch.placements.map((p) => p.normalizedWord),
+      b.wordsearch.placements.map((p) => p.normalizedWord),
+    )
+  }
+})
+
+test("preview Lab : bascule Jeu/Correction réutilise la même grille (données stables)", () => {
+  const preview = buildWordSearchThemePreview(VALID_BEAUTY_WORDS, "mode-toggle-seed")
+  assert.equal(preview.ok, true)
+  if (preview.ok) {
+    const { grid, placements } = preview.wordsearch
+    assert.ok(grid.length)
+    assert.ok(placements.length)
+    assert.deepEqual(grid, preview.wordsearch.grid)
+    assert.deepEqual(placements, preview.wordsearch.placements)
+  }
+})
+
+test("preview Lab : liste vide => message admin clair", () => {
+  const preview = buildWordSearchThemePreview([], "seed")
+  assert.equal(preview.ok, false)
+  if (!preview.ok) {
+    assert.equal(preview.message, WORDSEARCH_PREVIEW_BUILD_ERROR)
+  }
 })

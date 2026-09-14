@@ -15,6 +15,7 @@ import {
   type EditorialPlanV1,
 } from "@/lib/editorial-engine"
 import { buildQuizPersonalSourceContext } from "@/lib/content-generation/source-context"
+import { buildWordSearchThemePreview } from "@/lib/content-generation/wordsearch-theme/preview"
 import {
   generateQuizPersonalLabAction,
   generateQuizThemeLabAction,
@@ -42,7 +43,7 @@ function isQuizThemeLabOk(
 function isWordsearchThemeLabOk(
   gen: SlotGenResult | undefined,
 ): gen is Extract<GenerateWordsearchThemeLabResult, { ok: true }> {
-  return Boolean(gen?.ok && "engineWordSearch" in gen)
+  return Boolean(gen?.ok && "wordCount" in gen && "words" in gen)
 }
 
 export type EditorialLabProject = {
@@ -155,10 +156,13 @@ export function EditorialLabClient({
   const previewGen = previewSlotId ? genBySlot[previewSlotId] : null
   const previewQuestions: QuizQuestion[] | null =
     previewGen?.ok && "engineQuestions" in previewGen ? previewGen.engineQuestions : null
-  const previewWordSearch =
-    previewGen?.ok && "engineWordSearch" in previewGen ? previewGen.engineWordSearch : null
-  const previewWordsearchTitle =
-    previewGen?.ok && "engineWordSearch" in previewGen ? previewGen.title : null
+
+  const wordsearchPreview = useMemo(() => {
+    if (!previewSlotId) return null
+    const gen = genBySlot[previewSlotId]
+    if (!isWordsearchThemeLabOk(gen)) return null
+    return buildWordSearchThemePreview(gen.words, gen.seed)
+  }, [previewSlotId, genBySlot])
 
   return (
     <div className="flex flex-col gap-6">
@@ -460,19 +464,29 @@ export function EditorialLabClient({
                           >
                             {pending ? "Génération…" : "Générer le contenu"}
                           </Button>
-                          {wordsearchOk && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setPreviewSlotId(slot.slotId)
-                                setPreviewMode("game")
-                              }}
-                            >
-                              Voir le rendu
-                            </Button>
-                          )}
+                          {wordsearchOk &&
+                            (previewSlotId === slot.slotId ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setPreviewSlotId(null)}
+                              >
+                                Masquer le rendu
+                              </Button>
+                            ) : (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setPreviewSlotId(slot.slotId)
+                                  setPreviewMode("game")
+                                }}
+                              >
+                                Voir le rendu
+                              </Button>
+                            ))}
                         </div>
 
                         {wordsearchErr && (
@@ -526,6 +540,36 @@ export function EditorialLabClient({
                                 </li>
                               ))}
                             </ul>
+                          </div>
+                        )}
+
+                        {previewSlotId === slot.slotId && wordsearchOk && (
+                          <div className="mt-4 rounded-lg border border-border bg-background p-4">
+                            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                              <h4 className="text-sm font-semibold">APERÇU</h4>
+                              <ModeToggle mode={previewMode} setMode={setPreviewMode} />
+                            </div>
+                            {wordsearchPreview && !wordsearchPreview.ok ? (
+                              <p className="text-sm text-destructive">{wordsearchPreview.message}</p>
+                            ) : wordsearchPreview?.ok ? (
+                              <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-8">
+                                <PagePreview>
+                                  <BookPage palette={palette} showSafeArea={false}>
+                                    <WordsearchTemplate
+                                      sample={{
+                                        ...WORDSEARCH_01_SAMPLE,
+                                        title: wordsearchOk.title,
+                                      }}
+                                      style={styleTokens}
+                                      palette={palette}
+                                      assets={[]}
+                                      wordsearch={wordsearchPreview.wordsearch}
+                                      mode={previewMode}
+                                    />
+                                  </BookPage>
+                                </PagePreview>
+                              </div>
+                            ) : null}
                           </div>
                         )}
                       </div>
@@ -684,42 +728,6 @@ export function EditorialLabClient({
                         },
                         validation: { ok: true, errors: [] },
                       }}
-                      mode={previewMode}
-                    />
-                  </BookPage>
-                </PagePreview>
-              </div>
-            </section>
-          )}
-
-          {previewSlotId && previewSlot && previewGen?.ok && previewWordSearch && (
-            <section className="rounded-2xl border border-border bg-card p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-base font-semibold">Preview WORDSEARCH_01</h2>
-                <div className="flex items-center gap-3">
-                  <ModeToggle mode={previewMode} setMode={setPreviewMode} />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setPreviewSlotId(null)}
-                  >
-                    Fermer
-                  </Button>
-                </div>
-              </div>
-              <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-8">
-                <PagePreview>
-                  <BookPage palette={palette} showSafeArea={false}>
-                    <WordsearchTemplate
-                      sample={{
-                        ...WORDSEARCH_01_SAMPLE,
-                        title: previewWordsearchTitle ?? WORDSEARCH_01_SAMPLE.title,
-                      }}
-                      style={styleTokens}
-                      palette={palette}
-                      assets={[]}
-                      wordsearch={previewWordSearch}
                       mode={previewMode}
                     />
                   </BookPage>
