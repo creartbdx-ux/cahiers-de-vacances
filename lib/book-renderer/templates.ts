@@ -75,11 +75,13 @@ export interface WordsearchSample {
   words: string[]
 }
 
+/** Generic player instruction — never universe-specific. */
+export const CROSSWORD_01_INSTRUCTION = "Complétez la grille à l'aide des définitions."
+
 export const CROSSWORD_01_SAMPLE: CrosswordSample = {
   gameLabel: "Jeu · Mots croisés",
   title: "Les cimes en toutes lettres",
-  instruction:
-    "Complétez la grille à l'aide des définitions. Chaque mot évoque la montagne et ses trésors.",
+  instruction: CROSSWORD_01_INSTRUCTION,
   horizontal: [
     { number: 1, clue: "Randonnée sur les sentiers d'altitude." },
     { number: 2, clue: "Abri de pierre où loge le berger." },

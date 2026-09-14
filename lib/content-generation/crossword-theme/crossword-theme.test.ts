@@ -478,6 +478,16 @@ test("preview Lab : liste vide => message admin clair", () => {
   }
 })
 
+test("instructions CROSSWORD_01 génériques — jamais « montagne »", async () => {
+  const { CROSSWORD_01_INSTRUCTION, CROSSWORD_01_SAMPLE, QUIZ_01_SAMPLE, WORDSEARCH_01_SAMPLE } =
+    await import("@/lib/book-renderer/templates")
+  assert.equal(CROSSWORD_01_SAMPLE.instruction, CROSSWORD_01_INSTRUCTION)
+  assert.equal(CROSSWORD_01_INSTRUCTION, "Complétez la grille à l'aide des définitions.")
+  assert.equal(/montagne/i.test(CROSSWORD_01_SAMPLE.instruction), false)
+  assert.equal(/montagne/i.test(QUIZ_01_SAMPLE.instruction), false)
+  assert.equal(/montagne/i.test(WORDSEARCH_01_SAMPLE.instruction), false)
+})
+
 test("applyCrosswordThemeReplacements remplace à l'index", () => {
   const next = applyCrosswordThemeReplacements(VALID_ENTRIES.slice(0, 3), [
     {

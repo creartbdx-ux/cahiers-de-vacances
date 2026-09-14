@@ -8,6 +8,7 @@ import { CrosswordTemplate } from "@/components/book-renderer/templates/crosswor
 import { QuizTemplate } from "@/components/book-renderer/templates/quiz-template"
 import { WordsearchTemplate } from "@/components/book-renderer/templates/wordsearch-template"
 import {
+  CROSSWORD_01_INSTRUCTION,
   CROSSWORD_01_SAMPLE,
   QUIZ_01_SAMPLE,
   WORDSEARCH_01_SAMPLE,
@@ -765,6 +766,7 @@ export function EditorialLabClient({
                                       sample={{
                                         ...CROSSWORD_01_SAMPLE,
                                         title: crosswordOk.title,
+                                        instruction: CROSSWORD_01_INSTRUCTION,
                                       }}
                                       style={styleTokens}
                                       palette={palette}
