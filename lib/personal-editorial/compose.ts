@@ -93,17 +93,18 @@ function makePage(
   const isHero = isHeroLayout(layoutId)
   const roleIndex =
     Math.abs(hash(`${seed}:page:${index}:${layoutId}`)) % VISUAL_ROLES.length
-  let heroReason: string | null = null
-  if (isHero && ordered.length === 1) {
-    heroReason = heroReasonForBlock(ordered[0]!) ?? "Raison HERO : bloc isolé (aucune combinaison restante)"
-  }
+  const fill = pageFillScore(ordered)
+  // HERO reason only when layout is truly HERO — never "bloc isolé".
+  const heroReason =
+    isHero && ordered.length === 1 ? heroReasonForBlock(ordered[0]!) : null
   return {
     pageKey: `pep:${seed}:${index}`,
     layoutId,
     blocks: ordered,
     visualRole: VISUAL_ROLES[roleIndex]!,
     weight: totalWeight(ordered),
-    pageFillScore: pageFillScore(ordered),
+    packingFillScore: fill,
+    pageFillScore: fill,
     isHero,
     heroReason,
   }
@@ -298,10 +299,48 @@ export function composePersonalEditorialPages(
       ? bestPartitionSearch(blocks, seed)
       : greedyPack(blocks, seed)
 
-  // Soft reorder: avoid consecutive heroes when a swap helps (stable, local)
-  const reordered = avoidConsecutiveHeroes(groups)
+  // Soft: absorb leftover non-HERO singles into compatible pages when possible.
+  const absorbed = absorbNonHeroOrphans(groups)
+  const reordered = avoidConsecutiveHeroes(absorbed)
 
   return reordered.map((g, i) => makePage(g, seed, i))
+}
+
+/**
+ * If a SHORT/MEDIUM block ended alone, try merging it into another page.
+ * Does not change the general packing search — only rescues false HERO leftovers.
+ */
+function absorbNonHeroOrphans(groups: PersonalBlockV1[][]): PersonalBlockV1[][] {
+  const out = groups.map((g) => [...g])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (let i = 0; i < out.length; i++) {
+      const g = out[i]!
+      if (g.length !== 1) continue
+      const alone = g[0]!
+      if (isTrueHeroCandidate(alone)) continue
+      // Prefer absorbing into the fullest compatible page
+      let bestJ = -1
+      let bestFill = -1
+      for (let j = 0; j < out.length; j++) {
+        if (i === j) continue
+        if (!canAddBlock(out[j]!, alone)) continue
+        const fill = pageFillScore([...out[j]!, alone])
+        if (fill > bestFill) {
+          bestFill = fill
+          bestJ = j
+        }
+      }
+      if (bestJ >= 0) {
+        out[bestJ] = [...out[bestJ]!, alone]
+        out.splice(i, 1)
+        changed = true
+        break
+      }
+    }
+  }
+  return out
 }
 
 function avoidConsecutiveHeroes(groups: PersonalBlockV1[][]): PersonalBlockV1[][] {

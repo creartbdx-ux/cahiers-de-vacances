@@ -42,6 +42,9 @@ export type PersonalEditorialLayoutId =
   | "PHOTO_PLUS_TWO_SNIPPETS"
   | "HERO_MEMORY"
   | "HERO_PHOTO_MEMORY"
+  /** Alone but not HERO — editorial full-page treatment without claiming richness. */
+  | "SINGLE_MEMORY"
+  | "SINGLE_PHOTO_MEMORY"
 
 /**
  * Composed personal page — real Blueprint unit.
@@ -54,11 +57,16 @@ export interface PersonalEditorialPageV1 {
   visualRole: VisualRole
   /** Sum of block weights. */
   weight: number
-  /** 0–1 fill vs PERSONAL_PAGE_CAPACITY. */
+  /**
+   * Packing fill vs PERSONAL_PAGE_CAPACITY (0–1).
+   * Not a visual fill measure — templates own spatial composition.
+   */
+  packingFillScore: number
+  /** @deprecated Alias of packingFillScore — packing only. */
   pageFillScore: number
-  /** True when a single true-HERO block occupies the page. */
+  /** True only for true HERO layouts (RICH + volume). */
   isHero: boolean
-  /** Why this page is HERO, if applicable. */
+  /** Why this page is HERO — never "bloc isolé". */
   heroReason: string | null
 }
 

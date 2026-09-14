@@ -856,13 +856,19 @@ export function BookLabClient({
                         <span className="mt-1 block text-xs text-muted-foreground">
                           Layout : {p.layoutId}
                           <br />
-                          Poids : {p.weight} / 4 · Fill :{" "}
-                          {Math.round(p.page.pageFillScore * 100)} %
+                          Poids : {p.weight} / 4 · Remplissage logique :{" "}
+                          {Math.round((p.page.packingFillScore ?? p.page.pageFillScore) * 100)} %
                           {p.isHero ? (
                             <>
                               <br />
                               HERO
                               {p.page.heroReason ? ` — ${p.page.heroReason}` : ""}
+                            </>
+                          ) : p.layoutId === "SINGLE_MEMORY" ||
+                            p.layoutId === "SINGLE_PHOTO_MEMORY" ? (
+                            <>
+                              <br />
+                              Layout simple (pas HERO)
                             </>
                           ) : null}
                           <br />

@@ -65,7 +65,12 @@ export function prefersDedicatedPage(block: PersonalBlockV1): boolean {
 export function heroReasonForBlock(block: PersonalBlockV1): string | null {
   if (!isTrueHeroCandidate(block)) return null
   if (block.type === "MEMORY") {
-    return "Raison HERO : souvenir RICH + texte substantiel"
+    return "RICH + volume suffisant"
   }
-  return "Raison HERO : photo RICH + texte RICH"
+  return "RICH + volume suffisant"
+}
+
+/** Alias — packing fill only (not visual). */
+export function packingFillScore(blocks: PersonalBlockV1[]): number {
+  return pageFillScore(blocks)
 }

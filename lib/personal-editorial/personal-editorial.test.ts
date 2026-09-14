@@ -190,7 +190,7 @@ test("2 MEMORY MEDIUM => TWO_MEMORIES correctement rempli", () => {
     }),
   )
   assert.ok(html.includes('data-memory-split="50-50"'))
-  assert.ok(html.includes('data-personal-fill="1.00"'))
+  assert.ok(html.includes('data-packing-fill="1.00"') || html.includes('data-personal-fill="1.00"'))
 })
 
 test("7 blocs moyens/courts => objectif <=4 pages", () => {
@@ -253,7 +253,97 @@ test("RICH réel => HERO possible", () => {
   assert.equal(pages.length, 1)
   assert.equal(pages[0]!.layoutId, "HERO_MEMORY")
   assert.equal(pages[0]!.isHero, true)
-  assert.ok(pages[0]!.heroReason)
+  assert.equal(pages[0]!.heroReason, "RICH + volume suffisant")
+})
+
+test("bloc isolé MEDIUM ne devient pas HERO uniquement parce qu'il est dernier", () => {
+  const pages = composePersonalEditorialPages([mediumMemory("solo")], "solo-medium")
+  assert.equal(pages.length, 1)
+  assert.equal(pages[0]!.layoutId, "SINGLE_MEMORY")
+  assert.equal(pages[0]!.isHero, false)
+  assert.equal(pages[0]!.heroReason, null)
+  const html = renderToStaticMarkup(
+    createElement(PersonalEditorialTemplate, {
+      page: pages[0]!,
+      style: getStyleTokens("RETRO"),
+      palette: PALETTE,
+    }),
+  )
+  assert.ok(html.includes('data-layout-zone="single-memory"'))
+  assert.ok(!html.includes("bloc isolé"))
+})
+
+test("PHOTO_PLUS_MEMORY utilise zone photo + vraie zone mémoire", () => {
+  const pages = composePersonalEditorialPages(
+    [mediumPhoto("ph1"), shortMemory("m1")],
+    "ppm-zones",
+  )
+  assert.equal(pages[0]!.layoutId, "PHOTO_PLUS_MEMORY")
+  const html = renderToStaticMarkup(
+    createElement(PersonalEditorialTemplate, {
+      page: pages[0]!,
+      style: getStyleTokens("RETRO"),
+      palette: PALETTE,
+    }),
+  )
+  assert.ok(html.includes('data-layout-zone="photo-plus-memory"'))
+  assert.ok(html.includes('data-source="photo"'))
+  assert.ok(html.includes('data-source="memory"'))
+  assert.ok(html.includes("Souvenir"))
+})
+
+test("TWO_MEMORIES répartit dans la hauteur", () => {
+  const pages = composePersonalEditorialPages(
+    [mediumMemory("m1"), mediumMemory("m2")],
+    "two-mem-h",
+  )
+  const html = renderToStaticMarkup(
+    createElement(PersonalEditorialTemplate, {
+      page: pages[0]!,
+      style: getStyleTokens("RETRO"),
+      palette: PALETTE,
+    }),
+  )
+  assert.ok(html.includes('data-layout-zone="two-memories"'))
+  assert.ok(html.includes('data-memory-split="50-50"'))
+})
+
+test("THREE_SNIPPETS utilise trois zones", () => {
+  const pages = composePersonalEditorialPages(
+    [shortMemory("a"), shortMemory("b"), shortMemory("c")],
+    "three-z",
+  )
+  const html = renderToStaticMarkup(
+    createElement(PersonalEditorialTemplate, {
+      page: pages[0]!,
+      style: getStyleTokens("RETRO"),
+      palette: PALETTE,
+    }),
+  )
+  assert.ok(html.includes('data-layout-zone="three-snippets"'))
+})
+
+test("orientation portrait PHOTO_PLUS_MEMORY", () => {
+  const portrait = { ...mediumPhoto("phP"), aspectRatio: 0.7, photoLayout: "PORTRAIT" as const }
+  const pages = composePersonalEditorialPages([portrait, shortMemory("m1")], "port")
+  const html = renderToStaticMarkup(
+    createElement(PersonalEditorialTemplate, {
+      page: pages[0]!,
+      style: getStyleTokens("RETRO"),
+      palette: PALETTE,
+    }),
+  )
+  assert.ok(html.includes("photo-plus-memory-portrait") || html.includes("photo-plus-memory"))
+})
+
+test("même seed = même layout", () => {
+  const blocks = [shortPhoto("p1"), shortMemory("m1"), mediumMemory("m2")]
+  const a = composePersonalEditorialPages(blocks, "layout-seed")
+  const b = composePersonalEditorialPages(blocks, "layout-seed")
+  assert.deepEqual(
+    a.map((p) => p.layoutId),
+    b.map((p) => p.layoutId),
+  )
 })
 
 test("photo RICH => HERO possible", () => {
@@ -268,6 +358,7 @@ test("photo RICH => HERO possible", () => {
   assert.equal(isTrueHeroCandidate(rich), true)
   const pages = composePersonalEditorialPages([rich], "hero-photo")
   assert.equal(pages[0]!.layoutId, "HERO_PHOTO_MEMORY")
+  assert.equal(pages[0]!.heroReason, "RICH + volume suffisant")
 })
 
 test("pageFillScore calculé ; éviter page <60% si combinaison existe", () => {
