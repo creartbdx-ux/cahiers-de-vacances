@@ -24,6 +24,11 @@ export class OpenAICompatibleProvider implements ContentGenerationProvider {
       apiKey: string
       baseUrl?: string
       model?: string
+      /**
+       * Optional. Omitted from the HTTP payload unless explicitly set —
+       * some models (e.g. gpt-5.6-luna) reject non-default temperature.
+       */
+      temperature?: number
       fetchImpl?: typeof fetch
     },
   ) {}
@@ -50,9 +55,8 @@ export class OpenAICompatibleProvider implements ContentGenerationProvider {
       this.options.model ?? process.env.CONTENT_GENERATION_MODEL?.trim() ?? DEFAULT_MODEL
     const fetchImpl = this.options.fetchImpl ?? fetch
 
-    const body = {
+    const body: Record<string, unknown> = {
       model,
-      temperature: 0.7,
       messages: [
         { role: "system", content: request.system },
         {
@@ -71,6 +75,11 @@ export class OpenAICompatibleProvider implements ContentGenerationProvider {
           schema: request.schema,
         },
       },
+    }
+
+    // Only send temperature when explicitly requested by the caller.
+    if (this.options.temperature !== undefined) {
+      body.temperature = this.options.temperature
     }
 
     try {
