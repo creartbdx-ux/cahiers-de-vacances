@@ -856,7 +856,16 @@ export function BookLabClient({
                         <span className="font-medium">Page personnelle {i + 1}</span>
                         <span className="mt-1 block text-xs text-muted-foreground">
                           Layout : {p.layoutId}
+                          {p.page.editorialFamily ? ` · ${p.page.editorialFamily}` : ""}
                           {p.page.layoutVariant ? ` · variante ${p.page.layoutVariant}` : ""}
+                          <br />
+                          Page theme : {p.page.theme?.title ?? "—"}
+                          <br />
+                          Compatibility :{" "}
+                          {Math.round((p.page.compatibilityScore ?? 0) * 100)} %
+                          {p.page.theme?.groupingReason
+                            ? ` — ${p.page.theme.groupingReason}`
+                            : ""}
                           <br />
                           Poids : {p.weight} / 4 · Remplissage logique :{" "}
                           {Math.round((p.page.packingFillScore ?? p.page.pageFillScore) * 100)} %
@@ -887,8 +896,21 @@ export function BookLabClient({
                             return (
                               <span key={`${b.type}:${id}`} className="mt-1 block pl-1">
                                 · {b.type === "MEMORY" ? "MEMORY" : "PHOTO"} {id.slice(0, 8)}
-                                … — Density : {b.density} · Text words : {words} · Packing
-                                weight : {w}
+                                …
+                                <br />
+                                Density : {b.density} · Text words : {words} · Packing weight :{" "}
+                                {w}
+                                <br />
+                                Perspective : {b.perspective} · Category : {b.semanticCategory}
+                                {b.semanticTags.length
+                                  ? ` · Tags : ${b.semanticTags.join(", ")}`
+                                  : ""}
+                                <br />
+                                SOURCE : {(b.originalText || "").slice(0, 120)}
+                                {(b.originalText || "").length > 120 ? "…" : ""}
+                                <br />
+                                → ÉDITO : {(b.displayText || b.body || "").slice(0, 120)}
+                                {(b.displayText || b.body || "").length > 120 ? "…" : ""}
                               </span>
                             )
                           })}

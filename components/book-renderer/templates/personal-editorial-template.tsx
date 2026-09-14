@@ -32,10 +32,38 @@ export function PersonalEditorialTemplate({
       className="flex h-full w-full flex-col"
       style={{ gap: 0, minHeight: "100%" }}
       data-personal-layout={page.layoutId}
+      data-editorial-family={page.editorialFamily}
+      data-page-theme={page.theme.title}
+      data-compat={page.compatibilityScore.toFixed(2)}
       data-personal-weight={page.weight}
       data-packing-fill={page.packingFillScore.toFixed(2)}
       data-personal-hero={page.isHero ? "1" : "0"}
     >
+      {!page.isHero && page.blocks.length > 1 ? (
+        <header style={{ marginBottom: 14, flex: "0 0 auto" }} data-page-theme-header="1">
+          <h1
+            className={style.titleClassName}
+            style={{
+              fontSize: page.editorialFamily === "FEATURE_NOTES" ? 26 : 24,
+              color: bookColor.primary,
+              margin: 0,
+              lineHeight: 1.15,
+            }}
+          >
+            {page.theme.title}
+          </h1>
+          {page.theme.subtitle ? (
+            <p
+              className={style.instructionClassName}
+              style={{ fontSize: 12, margin: "6px 0 0", opacity: 0.75 }}
+            >
+              {page.theme.subtitle}
+            </p>
+          ) : null}
+        </header>
+      ) : null}
+
+      <div className="flex min-h-0 flex-1 flex-col">
       {page.layoutId === "HERO_MEMORY" && page.blocks[0]?.type === "MEMORY" && (
         <HeroMemory block={page.blocks[0]} style={style} />
       )}
@@ -64,6 +92,7 @@ export function PersonalEditorialTemplate({
       {page.layoutId === "PHOTO_PLUS_TWO_SNIPPETS" && (
         <PhotoPlusTwoSnippets blocks={page.blocks} style={style} frame={frame} />
       )}
+      </div>
     </div>
   )
 }
@@ -120,7 +149,7 @@ function HeroMemory({
             whiteSpace: "pre-wrap",
           }}
         >
-          {block.body}
+          {block.displayText || block.body}
         </p>
       </div>
       <DecorFooter style={style} />
@@ -192,7 +221,7 @@ function SingleMemory({
             whiteSpace: "pre-wrap",
           }}
         >
-          {block.body}
+          {block.displayText || block.body}
         </blockquote>
       </div>
 
@@ -362,7 +391,7 @@ function PhotoPlusMemory({
             style={style}
             eyebrow={memory.eyebrow || memory.place}
             title={memory.title}
-            body={memory.body}
+            body={memory.displayText || memory.body}
             titleSize={titleSizeFor(memory.density, 28)}
             bodySize={bodySizeFor(memory.density, 15)}
           />
@@ -415,7 +444,7 @@ function PhotoPlusMemory({
           style={style}
           eyebrow={memory.eyebrow || memory.place}
           title={memory.title}
-          body={memory.body}
+          body={memory.displayText || memory.body}
           titleSize={titleSizeFor(memory.density, variant === "ASYMMETRIC" ? 26 : 28)}
           bodySize={bodySizeFor(memory.density, 15)}
         />
@@ -504,7 +533,7 @@ function TwoMemories({
               style={style}
               eyebrow={m.eyebrow || m.place || "Souvenir"}
               title={m.title}
-              body={m.body}
+              body={m.displayText || m.body}
               titleSize={titleSizeFor(m.density, 28)}
               bodySize={bodySizeFor(m.density, 15)}
             />
@@ -534,7 +563,7 @@ function ThreeSnippets({
           <BlockText
             style={style}
             title={top.title}
-            body={top.body}
+            body={top.displayText || top.body}
             titleSize={28}
             bodySize={15}
             eyebrow={top.type === "MEMORY" ? top.eyebrow || top.place : top.eyebrow}
@@ -559,7 +588,7 @@ function ThreeSnippets({
                     : undefined,
               }}
             >
-              <BlockText style={style} title={b.title} body={b.body} titleSize={20} bodySize={13} />
+              <BlockText style={style} title={b.title} body={b.displayText || b.body} titleSize={20} bodySize={13} />
             </div>
           ))}
         </div>
@@ -581,7 +610,7 @@ function ThreeSnippets({
             paddingBlock: 10,
           }}
         >
-          <BlockText style={style} title={b.title} body={b.body} titleSize={22} bodySize={13} />
+          <BlockText style={style} title={b.title} body={b.displayText || b.body} titleSize={22} bodySize={13} />
         </div>
       ))}
     </div>
@@ -647,7 +676,7 @@ function PhotoPlusTwoSnippets({
                 <BlockText
                   style={style}
                   title={m.title}
-                  body={m.body}
+                  body={m.displayText || m.body}
                   titleSize={titleSizeFor(m.density, 22)}
                   bodySize={bodySizeFor(m.density, 13)}
                 />
@@ -710,7 +739,7 @@ function PhotoPlusTwoSnippets({
               <BlockText
                 style={style}
                 title={m.title}
-                body={m.body}
+                body={m.displayText || m.body}
                 titleSize={titleSizeFor(m.density, 22)}
                 bodySize={bodySizeFor(m.density, 13)}
               />
@@ -735,20 +764,24 @@ function PhotoCopy({
   bodySize: number
   label?: string
 }) {
+  const body = block.displayText || block.body
+  const showTitle = Boolean(block.shortTitle || block.locations[0])
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {(label || block.eyebrow) && (
+      {(block.kicker || label) && (
         <p className={style.gameLabelClassName} style={{ fontSize: 10, letterSpacing: "0.2em" }}>
-          {label || block.eyebrow}
+          {block.kicker || label}
         </p>
       )}
-      <h2
-        className={style.titleClassName}
-        style={{ fontSize: titleSize, color: bookColor.primary, lineHeight: 1.1, margin: 0 }}
-      >
-        {block.title}
-      </h2>
-      {block.body.trim() ? (
+      {showTitle ? (
+        <h2
+          className={style.titleClassName}
+          style={{ fontSize: titleSize, color: bookColor.primary, lineHeight: 1.1, margin: 0 }}
+        >
+          {block.shortTitle || block.locations[0] || block.title}
+        </h2>
+      ) : null}
+      {body.trim() ? (
         <p
           className={style.instructionClassName}
           style={{
@@ -758,9 +791,10 @@ function PhotoCopy({
             margin: 0,
             whiteSpace: "pre-wrap",
             opacity: 0.92,
+            fontStyle: block.attributedQuote ? "italic" : undefined,
           }}
         >
-          {block.body}
+          {block.attributedQuote ? `« ${body} »` : body}
         </p>
       ) : null}
     </div>
@@ -792,6 +826,8 @@ function BlockText({
   body,
   titleSize,
   bodySize,
+  kicker,
+  attributedQuote,
 }: {
   style: BookStyleTokens
   eyebrow?: string | null
@@ -799,10 +835,17 @@ function BlockText({
   body: string
   titleSize: number
   bodySize: number
+  kicker?: string | null
+  attributedQuote?: boolean
 }) {
+  const showBigTitle = Boolean(title && title !== "Moment" && title !== "Citation")
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {eyebrow ? (
+      {kicker ? (
+        <p className={style.gameLabelClassName} style={{ fontSize: 10, letterSpacing: "0.18em" }}>
+          {kicker}
+        </p>
+      ) : eyebrow ? (
         <p
           className={style.gameLabelClassName}
           style={{ fontSize: 10, letterSpacing: "0.18em", opacity: 0.75 }}
@@ -810,17 +853,19 @@ function BlockText({
           {eyebrow}
         </p>
       ) : null}
-      <h2
-        className={style.titleClassName}
-        style={{
-          fontSize: titleSize,
-          color: bookColor.primary,
-          lineHeight: 1.1,
-          margin: 0,
-        }}
-      >
-        {title}
-      </h2>
+      {showBigTitle ? (
+        <h2
+          className={style.titleClassName}
+          style={{
+            fontSize: titleSize,
+            color: bookColor.primary,
+            lineHeight: 1.1,
+            margin: 0,
+          }}
+        >
+          {title}
+        </h2>
+      ) : null}
       {body.trim() ? (
         <p
           className={style.instructionClassName}
@@ -831,13 +876,24 @@ function BlockText({
             margin: 0,
             whiteSpace: "pre-wrap",
             opacity: 0.92,
+            fontStyle: attributedQuote ? "italic" : undefined,
           }}
         >
-          {body}
+          {attributedQuote ? `« ${body} »` : body}
         </p>
       ) : null}
     </div>
   )
+}
+
+function memoryProps(block: Extract<PersonalBlockV1, { type: "MEMORY" }>) {
+  return {
+    title: block.shortTitle || block.locations[0] || block.title,
+    body: block.displayText || block.body,
+    eyebrow: block.eyebrow || block.place,
+    kicker: block.kicker,
+    attributedQuote: block.attributedQuote,
+  }
 }
 
 function Rule({ wide }: { wide?: boolean } = {}) {

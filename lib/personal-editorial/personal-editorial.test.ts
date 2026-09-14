@@ -19,6 +19,7 @@ import {
   pageProvenance,
   photoToBlock,
   prefersDedicatedPage,
+  semanticCompatibilityScore,
   PERSONAL_PAGE_CAPACITY,
   PERSONAL_PAGE_MAX_BLOCKS,
   PERSONAL_PAGE_MAX_PHOTOS,
@@ -83,31 +84,50 @@ const STYLES = [
   },
 ]
 
+function editorialDefaults(text: string) {
+  return {
+    originalText: text,
+    displayText: text,
+    semanticCategory: "OTHER" as const,
+    semanticTags: [] as string[],
+    locations: [] as string[],
+    trips: [] as string[],
+    perspective: "SHARED_FACT" as const,
+    attributedQuote: false,
+    usedAi: false,
+  }
+}
+
 function shortMemory(id: string, text = "Petite anecdote."): MemoryBlockV1 {
   return {
     type: "MEMORY",
     sourceMemoryId: id,
-    title: "Un souvenir à garder",
+    title: "Moment",
     body: text,
     density: "SHORT",
     participantIds: ["p1"],
     fullPageRecommended: false,
+    ...editorialDefaults(text),
   }
 }
 
 function mediumMemory(id: string): MemoryBlockV1 {
+  const text =
+    "Une anecdote un peu plus longue pour un souvenir de densité moyenne, sans être un récit riche."
   return {
     type: "MEMORY",
     sourceMemoryId: id,
-    title: "Moment partagé",
-    body: "Une anecdote un peu plus longue pour un souvenir de densité moyenne, sans être un récit riche.",
+    title: "Moment",
+    body: text,
     density: "MEDIUM",
     participantIds: ["p1"],
-    fullPageRecommended: true, // may be true — must NOT force HERO
+    fullPageRecommended: true,
+    ...editorialDefaults(text),
   }
 }
 
 function shortPhoto(id: string): PhotoMemoryBlockV1 {
+  const text = "Petite légende"
   return {
     type: "PHOTO_MEMORY",
     sourcePhotoId: id,
@@ -115,16 +135,18 @@ function shortPhoto(id: string): PhotoMemoryBlockV1 {
     caption: "Petite légende",
     anecdote: null,
     title: "Petite légende",
-    body: "Petite légende",
+    body: text,
     density: "SHORT",
     photoLayout: "LANDSCAPE",
     participantIds: ["p1"],
-    fullPageRecommended: true, // typical photo flag — must NOT force HERO
+    fullPageRecommended: true,
     weakSource: false,
+    ...editorialDefaults(text),
   }
 }
 
 function mediumPhoto(id: string): PhotoMemoryBlockV1 {
+  const text = "Légende un peu plus détaillée de la photo. Petite note"
   return {
     type: "PHOTO_MEMORY",
     sourcePhotoId: id,
@@ -132,12 +154,13 @@ function mediumPhoto(id: string): PhotoMemoryBlockV1 {
     caption: "Légende un peu plus détaillée de la photo",
     anecdote: "Petite note",
     title: "Légende un peu plus détaillée",
-    body: "Légende un peu plus détaillée de la photo. Petite note",
+    body: text,
     density: "MEDIUM",
     photoLayout: "LANDSCAPE",
     participantIds: ["p1"],
     fullPageRecommended: true,
     weakSource: false,
+    ...editorialDefaults(text),
   }
 }
 
@@ -215,9 +238,8 @@ test("7 blocs moyens/courts => objectif <=4 pages", () => {
   const pages = composePersonalEditorialPages(blocks, "seven-blocks")
   assert.ok(pages.length <= 4, `expected <=4 pages, got ${pages.length}`)
   assert.ok(pages.filter((p) => p.isHero).length <= 1)
-  // Most pages should be reasonably filled
-  const underfilled = pages.filter((p) => p.pageFillScore < 0.6 && !p.isHero)
-  assert.ok(underfilled.length === 0 || pages.length === 1)
+  // Coherence > fill : underfilled pages allowed when thematic split is better
+  assert.ok(pages.every((p) => p.theme?.title))
 })
 
 test("MEMORY SHORT seul + autres blocs => pas HERO", () => {
@@ -247,14 +269,16 @@ test("HERO non automatique avec fullPageRecommended=true", () => {
 })
 
 test("RICH réel => HERO possible", () => {
+  const body = "Texte riche détaillé ".repeat(30)
   const rich: MemoryBlockV1 = {
     type: "MEMORY",
     sourceMemoryId: "rich",
     title: "Long séjour",
-    body: "Texte riche détaillé ".repeat(30),
+    body,
     density: "RICH",
     participantIds: ["p1"],
     fullPageRecommended: true,
+    ...editorialDefaults(body),
   }
   assert.equal(isTrueHeroCandidate(rich), true)
   const pages = composePersonalEditorialPages([rich], "hero-mem")
@@ -355,12 +379,15 @@ test("même seed = même layout", () => {
 })
 
 test("photo RICH => HERO possible", () => {
+  const body = `${"Longue légende ".repeat(12)} ${"Anecdote détaillée ".repeat(16)}`
   const rich: PhotoMemoryBlockV1 = {
     ...shortPhoto("phR"),
     density: "RICH",
     caption: "Longue légende ".repeat(12),
     anecdote: "Anecdote détaillée ".repeat(16),
-    body: `${"Longue légende ".repeat(12)} ${"Anecdote détaillée ".repeat(16)}`,
+    body,
+    originalText: body,
+    displayText: body,
     fullPageRecommended: true,
   }
   assert.equal(isTrueHeroCandidate(rich), true)
@@ -593,6 +620,7 @@ test("RICH conserve possibilité de 4 pages", () => {
     density: "RICH",
     participantIds: ["p1"],
     fullPageRecommended: true,
+    ...editorialDefaults(richBody),
   }
   const blocks = [
     mediumPhoto("ph1"),
@@ -604,7 +632,6 @@ test("RICH conserve possibilité de 4 pages", () => {
     mediumMemory("m4"),
   ]
   const pages = composePersonalEditorialPages(blocks, "rich-keeps-pages")
-  // With a true RICH + medium companions, packing may need 4 pages
   assert.ok(pages.length >= 3)
   assert.ok(pages.length <= 4)
   assert.ok(isTrueHeroCandidate(rich))
@@ -633,4 +660,157 @@ test("variantes PHOTO_PLUS_MEMORY seed-stables", () => {
 test("blockTextWordCount expose le volume réel", () => {
   const m = shortMemory("m", wordsN(12, "w"))
   assert.equal(blockTextWordCount(m), 12)
+})
+
+test("OTHER_PERSON : Sami et moi ne reste pas en voix questionnaire", () => {
+  const p = profile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "sami", firstName: "Sami" }],
+    memories: [
+      {
+        id: "wh",
+        text: "Sami et moi lors de notre voyage en Australie, sur la plage de Whitehaven Beach. J'ai adoré cette plage, c'est mon moment préféré de notre voyage.",
+      },
+    ],
+  })
+  const block = memoryToBlock(p.memories[0]!, p, { creatorName: "Emma" })!
+  assert.ok(!/^Sami et moi/i.test(block.displayText))
+  assert.ok(!block.displayText.toLowerCase().includes("sami et moi"))
+  assert.equal(block.perspective, "CREATOR_PERSPECTIVE_FACT")
+  assert.ok(
+    /emma/i.test(block.displayText) || block.attributedQuote,
+    "préférence reste attribuée à Emma",
+  )
+  assert.ok(!/votre plage préférée/i.test(block.displayText))
+})
+
+test("OTHER_PERSON : notre voyage → votre voyage", () => {
+  const p = profile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "sami", firstName: "Sami" }],
+    memories: [
+      { id: "v", text: "Notre voyage en Australie reste inoubliable." },
+    ],
+  })
+  const block = memoryToBlock(p.memories[0]!, p, { creatorName: "Emma" })!
+  assert.match(block.displayText, /votre voyage/i)
+  assert.doesNotMatch(block.displayText, /notre voyage/i)
+})
+
+test("SHARED : dernier jour conservé", () => {
+  const p = profile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "sami", firstName: "Sami" }],
+    photos: [
+      {
+        id: "ph1",
+        useAuthorized: true,
+        storagePath: "x.jpg",
+        caption: "Sami et moi tout en haut de la Sydney Tower Eye.",
+        anecdote: "C'était notre dernier jour en Australie.",
+      },
+    ],
+  })
+  const block = photoToBlock(p.photos[0]!, p, "https://x", undefined, {
+    creatorName: "Emma",
+  })!
+  assert.match(block.displayText, /dernier jour/i)
+  assert.ok(!/Sami et moi/i.test(block.displayText))
+})
+
+test("compatibilité sémantique Australie positive", () => {
+  const a = shortMemory(
+    "a",
+    "Whitehaven Beach pendant notre voyage en Australie, moment préféré.",
+  )
+  a.semanticCategory = "TRAVEL"
+  a.locations = ["Whitehaven Beach", "Australie"]
+  a.trips = ["Australie"]
+  a.semanticTags = ["voyage", "plage"]
+  const b = shortMemory(
+    "b",
+    "Sydney Tower Eye, notre dernier jour en Australie.",
+  )
+  b.semanticCategory = "TRAVEL"
+  b.locations = ["Sydney", "Australie"]
+  b.trips = ["Australie"]
+  b.semanticTags = ["voyage", "dernier-jour"]
+  assert.ok(semanticCompatibilityScore(a, b) >= 0.6)
+})
+
+test("voyage + rendez-vous pro : pas de faux thème forcé", () => {
+  const travel = shortMemory("t", "Voyage en Australie sur la plage.")
+  travel.semanticCategory = "TRAVEL"
+  travel.trips = ["Australie"]
+  travel.locations = ["Australie"]
+  const work = shortMemory("w", "Premier rendez-vous professionnel pour l'entreprise.")
+  work.semanticCategory = "WORK"
+  work.semanticTags = ["professionnel", "entreprise"]
+  const pages = composePersonalEditorialPages([travel, work], "no-false-theme")
+  for (const page of pages) {
+    if (page.blocks.length > 1) {
+      assert.equal(page.theme.themeType, "NEUTRAL_MOMENTS")
+    }
+  }
+})
+
+test("fixture Emma → Sami : perspective + thèmes", () => {
+  const p = profile({
+    audience: "OTHER_PERSON",
+    creatorIsParticipant: false,
+    participants: [{ id: "sami", firstName: "Sami" }],
+    memories: [
+      {
+        id: "wh",
+        text: "Sami et moi lors de notre voyage en Australie, sur la plage de Whitehaven Beach. J'ai adoré cette plage, c'est mon moment préféré de notre voyage.",
+      },
+      {
+        id: "kiss",
+        text: "Notre premier bisou, un soir d'été.",
+      },
+      {
+        id: "work",
+        text: "Les premiers rendez-vous professionnels pour lancer notre entreprise.",
+      },
+    ],
+    photos: [
+      {
+        id: "sydney",
+        useAuthorized: true,
+        storagePath: "s.jpg",
+        caption: "Sami et moi lors de notre voyage en Australie tout en haut de la Sydney Tower Eye.",
+        anecdote: "C'était notre dernier jour en Australie.",
+      },
+      {
+        id: "tokyo",
+        useAuthorized: true,
+        storagePath: "t.jpg",
+        caption: "Escale à Tokyo, expérience de l'onsen japonais.",
+        anecdote: "Pendant notre voyage en Australie.",
+      },
+      {
+        id: "portugal",
+        useAuthorized: true,
+        storagePath: "p.jpg",
+        caption: "Portugal, une balade en bord de mer.",
+      },
+    ],
+  })
+  const blocks = collectPersonalBlocks({ profile: p, creatorName: "Emma" })
+  for (const b of blocks) {
+    assert.ok(!/Sami et moi/i.test(b.displayText), b.displayText)
+  }
+  const pages = composePersonalEditorialPages(blocks, "emma-sami")
+  assert.ok(pages.length >= 3)
+  assert.ok(pages.length <= 5)
+  assert.ok(pages.every((pg) => pg.theme?.title))
+  const a = composePersonalEditorialPages(blocks, "emma-sami")
+  const b = composePersonalEditorialPages(blocks, "emma-sami")
+  assert.deepEqual(
+    a.map((x) => x.layoutId),
+    b.map((x) => x.layoutId),
+  )
 })

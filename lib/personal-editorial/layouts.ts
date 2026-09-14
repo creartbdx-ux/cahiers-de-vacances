@@ -1,8 +1,13 @@
-import type { PersonalBlockV1, PersonalEditorialLayoutId } from "./types"
+import type {
+  PersonalBlockV1,
+  PersonalEditorialFamily,
+  PersonalEditorialLayoutId,
+} from "./types"
 import { isTrueHeroCandidate } from "./weights"
+import { groupCompatibilityScore, isNeutralGrouping } from "./compatibility"
 
 /**
- * Deterministic layout pick from the block mix.
+ * Deterministic packing layout from the block mix.
  * Does not invent narrative links between blocks.
  * HERO only when the lone block truly merits a full page.
  */
@@ -12,14 +17,11 @@ export function pickPersonalEditorialLayout(
   const photos = blocks.filter((b) => b.type === "PHOTO_MEMORY")
   const memories = blocks.filter((b) => b.type === "MEMORY")
 
-  // Prefer composite layouts
   if (photos.length === 1 && memories.length === 2) return "PHOTO_PLUS_TWO_SNIPPETS"
   if (photos.length === 1 && memories.length === 1) return "PHOTO_PLUS_MEMORY"
   if (photos.length === 2 && memories.length === 0) return "TWO_PHOTOS"
   if (photos.length === 0 && memories.length === 2) return "TWO_MEMORIES"
   if (photos.length === 0 && memories.length === 3) return "THREE_SNIPPETS"
-
-  // Fallbacks (still within max 3 / max 2 photos)
   if (photos.length === 2 && memories.length === 1) return "PHOTO_PLUS_TWO_SNIPPETS"
 
   if (photos.length === 1 && memories.length === 0) {
@@ -34,6 +36,38 @@ export function pickPersonalEditorialLayout(
 
 export function isHeroLayout(layoutId: PersonalEditorialLayoutId): boolean {
   return layoutId === "HERO_MEMORY" || layoutId === "HERO_PHOTO_MEMORY"
+}
+
+/**
+ * Map packing shape → editorial visual family.
+ * STORY_STRIP only when semantic coherence exists.
+ */
+export function pickEditorialFamily(
+  blocks: PersonalBlockV1[],
+  layoutId: PersonalEditorialLayoutId,
+): PersonalEditorialFamily {
+  if (isHeroLayout(layoutId)) return "HERO"
+  if (layoutId === "SINGLE_MEMORY" || layoutId === "SINGLE_PHOTO_MEMORY") return "SINGLE"
+
+  const photos = blocks.filter((b) => b.type === "PHOTO_MEMORY").length
+  const coherent = !isNeutralGrouping(blocks) && groupCompatibilityScore(blocks) >= 0.55
+
+  if (
+    layoutId === "PHOTO_PLUS_TWO_SNIPPETS" ||
+    layoutId === "PHOTO_PLUS_MEMORY" ||
+    (photos === 1 && blocks.length >= 2)
+  ) {
+    return "FEATURE_NOTES"
+  }
+
+  if (
+    coherent &&
+    (layoutId === "TWO_MEMORIES" || layoutId === "THREE_SNIPPETS")
+  ) {
+    return "STORY_STRIP"
+  }
+
+  return "MOSAIC_EDITORIAL"
 }
 
 /** Layout preference rank (lower = better product priority). */

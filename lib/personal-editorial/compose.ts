@@ -2,6 +2,7 @@ import type { VisualRole } from "@/lib/book-blueprint/types"
 import {
   isHeroLayout,
   layoutPreferenceRank,
+  pickEditorialFamily,
   pickPersonalEditorialLayout,
 } from "./layouts"
 import type { PersonalBlockV1, PersonalEditorialPageV1 } from "./types"
@@ -18,6 +19,13 @@ import {
   photoCount,
   totalWeight,
 } from "./weights"
+import {
+  groupCompatibilityScore,
+  isNeutralGrouping,
+  semanticCompatibilityScore,
+} from "./compatibility"
+import { buildPageTheme } from "./theme"
+import { categoriesClash } from "./semantic"
 
 const VISUAL_ROLES: VisualRole[] = ["LIGHT", "SECONDARY", "ACCENT", "NEUTRAL"]
 const SEARCH_LIMIT = 12
@@ -40,14 +48,12 @@ export function canAddBlock(
   if (totalWeight(current) + blockWeight(candidate) > PERSONAL_PAGE_CAPACITY) {
     return false
   }
-  // True RICH photo hero: alone only (don't crush with companions)
   if (isTrueHeroCandidate(candidate) && candidate.type === "PHOTO_MEMORY") {
     return current.length === 0
   }
   if (current.some((b) => isTrueHeroCandidate(b) && b.type === "PHOTO_MEMORY")) {
     return false
   }
-  // True RICH memory: alone, or with at most one SHORT companion if capacity allows
   if (isTrueHeroCandidate(candidate) && candidate.type === "MEMORY") {
     return current.length === 0 || (current.length === 1 && blockWeight(current[0]!) <= 1)
   }
@@ -61,7 +67,6 @@ function groupIsValid(blocks: PersonalBlockV1[]): boolean {
   if (!blocks.length || blocks.length > PERSONAL_PAGE_MAX_BLOCKS) return false
   if (photoCount(blocks) > PERSONAL_PAGE_MAX_PHOTOS) return false
   if (totalWeight(blocks) > PERSONAL_PAGE_CAPACITY) return false
-  // Rebuild incrementally to reuse canAdd rules
   const acc: PersonalBlockV1[] = []
   for (const b of blocks) {
     if (!canAddBlock(acc, b)) return false
@@ -91,10 +96,15 @@ function makePage(
   const ordered = stableSortIds(blocks)
   const layoutId = pickPersonalEditorialLayout(ordered)
   const isHero = isHeroLayout(layoutId)
+  const editorialFamily = pickEditorialFamily(ordered, layoutId)
+  const theme = buildPageTheme(ordered, {
+    isHero,
+    isSingle:
+      layoutId === "SINGLE_MEMORY" || layoutId === "SINGLE_PHOTO_MEMORY",
+  })
   const roleIndex =
     Math.abs(hash(`${seed}:page:${index}:${layoutId}`)) % VISUAL_ROLES.length
   const fill = pageFillScore(ordered)
-  // HERO reason only when layout is truly HERO — never "bloc isolé".
   const heroReason =
     isHero && ordered.length === 1 ? heroReasonForBlock(ordered[0]!) : null
   const layoutVariant =
@@ -106,6 +116,8 @@ function makePage(
   return {
     pageKey: `pep:${seed}:${index}`,
     layoutId,
+    editorialFamily,
+    theme,
     blocks: ordered,
     visualRole: VISUAL_ROLES[roleIndex]!,
     weight: totalWeight(ordered),
@@ -114,9 +126,13 @@ function makePage(
     isHero,
     heroReason,
     layoutVariant,
+    compatibilityScore: groupCompatibilityScore(ordered),
   }
 }
 
+/**
+ * Priorities: provenance → editorial coherence → readability → visual fill → page economy.
+ */
 function scoreComposition(groups: PersonalBlockV1[][], seed: string): number {
   let score = 0
   const layouts = groups.map((g) => pickPersonalEditorialLayout(stableSortIds(g)))
@@ -126,70 +142,60 @@ function scoreComposition(groups: PersonalBlockV1[][], seed: string): number {
     const fill = pageFillScore(g)
     const fillPct = fill * 100
     const layout = layouts[i]!
+    const compat = groupCompatibilityScore(g)
 
-    if (fillPct >= 70 && fillPct <= 90) score += 35
-    else if (fillPct > 90 && fillPct <= 100) score += 28
-    else if (fillPct >= 60) score += 12
-    else score -= 55
+    score += compat * 80
+    if (compat >= 0.7) score += 25
+    else if (compat < 0.45 && g.length > 1) score -= 45
+
+    for (let a = 0; a < g.length; a++) {
+      for (let b = a + 1; b < g.length; b++) {
+        if (categoriesClash(g[a]!.semanticCategory, g[b]!.semanticCategory)) {
+          score -= 40
+        }
+        score += (semanticCompatibilityScore(g[a]!, g[b]!) - 0.45) * 20
+      }
+    }
+
+    if (fillPct >= 60) score += 12
+    else if (fillPct < 40 && !isHeroLayout(layout)) score -= 20
 
     const hasPhoto = g.some((b) => b.type === "PHOTO_MEMORY")
     const hasMemory = g.some((b) => b.type === "MEMORY")
-    if (hasPhoto && hasMemory) score += 18
+    if (hasPhoto && hasMemory && compat >= 0.5) score += 16
 
-    score += (4 - layoutPreferenceRank(layout)) * 3
+    score += (4 - layoutPreferenceRank(layout)) * 2
 
-    // Prefer balanced photo + two light memories when valid
-    if (layout === "PHOTO_PLUS_TWO_SNIPPETS") score += 48
-    if (layout === "PHOTO_PLUS_MEMORY") score += 10
+    if (layout === "PHOTO_PLUS_TWO_SNIPPETS" && compat >= 0.55) score += 30
+    if (layout === "PHOTO_PLUS_MEMORY" && compat >= 0.5) score += 12
+    if (g.length > 1 && isNeutralGrouping(g)) score += 4
 
     if (g.length === 1) {
       const alone = g[0]!
-      if (isTrueHeroCandidate(alone)) {
-        score += 8
-      } else if (alone.density === "SHORT") {
-        score -= 110
-      } else if (alone.density === "MEDIUM") {
-        score -= 75
-      } else {
-        // Non-hero RICH leftover — still weak visually alone
-        score -= 40
-      }
+      if (isTrueHeroCandidate(alone)) score += 10
+      else if (alone.density === "SHORT") score -= 55
+      else if (alone.density === "MEDIUM") score -= 30
+      else score -= 15
     } else {
-      score += g.length * 6
+      score += g.length * 4
     }
   }
 
-  const heroCount = layouts.filter((l) => isHeroLayout(l)).length
-  score -= heroCount * 30
-
-  const twoSnippetCount = layouts.filter((l) => l === "PHOTO_PLUS_TWO_SNIPPETS").length
-  score += twoSnippetCount * 12
-
-  const singleWeak = layouts.filter(
-    (l) => l === "SINGLE_MEMORY" || l === "SINGLE_PHOTO_MEMORY",
-  ).length
-  score -= singleWeak * 35
+  score -= layouts.filter((l) => isHeroLayout(l)).length * 20
+  score -=
+    layouts.filter((l) => l === "SINGLE_MEMORY" || l === "SINGLE_PHOTO_MEMORY")
+      .length * 20
 
   for (let i = 1; i < layouts.length; i++) {
-    if (isHeroLayout(layouts[i - 1]!) && isHeroLayout(layouts[i]!)) score -= 40
-    if (layouts[i] === layouts[i - 1] && !isHeroLayout(layouts[i]!)) score -= 8
+    if (isHeroLayout(layouts[i - 1]!) && isHeroLayout(layouts[i]!)) score -= 30
   }
 
-  const uniqueLayouts = new Set(layouts).size
-  score += uniqueLayouts * 4
-
-  // Prefer fewer pages when readability/capacity already scored well
-  score -= groups.length * 26
-
-  // Tiny seed-stable tie-break
+  // Page economy last and lighter — coherence > compression
+  score -= groups.length * 12
   score += (hash(`${seed}:${groups.length}:${layouts.join(",")}`) % 7) * 0.01
-
   return score
 }
 
-/**
- * Enumerate partitions for small n — compose first, isolate last.
- */
 function bestPartitionSearch(
   blocks: PersonalBlockV1[],
   seed: string,
@@ -212,7 +218,6 @@ function bestPartitionSearch(
     const hit = memo.get(k)
     if (hit) return hit
     if (++nodes > MAX_NODES) {
-      // Fallback slice: greedy from here
       const g = greedyPack(remaining, `${seed}:overflow`)
       const result = { groups: g, score: scoreComposition(g, seed) }
       memo.set(k, result)
@@ -232,28 +237,21 @@ function bestPartitionSearch(
       }
     }
 
-    // Prefer fuller / two-snippet groups when exploring (still evaluate all)
     candidates.sort((x, y) => {
-      const lx = pickPersonalEditorialLayout(stableSortIds(x))
-      const ly = pickPersonalEditorialLayout(stableSortIds(y))
-      const bonus = (l: ReturnType<typeof pickPersonalEditorialLayout>) =>
-        l === "PHOTO_PLUS_TWO_SNIPPETS" ? 0.4 : 0
-      const fd = pageFillScore(y) + bonus(ly) - (pageFillScore(x) + bonus(lx))
-      if (Math.abs(fd) > 0.01) return fd > 0 ? 1 : -1
+      const cx = groupCompatibilityScore(x) + pageFillScore(x) * 0.3
+      const cy = groupCompatibilityScore(y) + pageFillScore(y) * 0.3
+      if (Math.abs(cy - cx) > 0.01) return cy > cx ? 1 : -1
       return y.length - x.length
     })
 
     let bestLocal: { groups: PersonalBlockV1[][]; score: number } | null = null
-
     for (const group of candidates) {
       const ids = new Set(group.map(blockId))
       const nextRem = remaining.filter((b) => !ids.has(blockId(b)))
       const sub = bestFor(nextRem)
       const groups = [group, ...sub.groups]
       const score = scoreComposition(groups, seed)
-      if (!bestLocal || score > bestLocal.score) {
-        bestLocal = { groups, score }
-      }
+      if (!bestLocal || score > bestLocal.score) bestLocal = { groups, score }
     }
 
     const result = bestLocal ?? { groups: remaining.map((b) => [b]), score: -Infinity }
@@ -264,12 +262,8 @@ function bestPartitionSearch(
   return bestFor(ordered).groups
 }
 
-/**
- * Greedy fallback for larger sets: pack for fill, never force HERO from fullPageRecommended.
- */
 function greedyPack(blocks: PersonalBlockV1[], seed: string): PersonalBlockV1[][] {
   const remaining = stableSortIds(blocks)
-  // Heavier first for packing density
   remaining.sort((a, b) => {
     const dw = blockWeight(b) - blockWeight(a)
     if (dw !== 0) return dw
@@ -282,16 +276,15 @@ function greedyPack(blocks: PersonalBlockV1[], seed: string): PersonalBlockV1[][
     let progressed = true
     while (progressed && pageBlocks.length < PERSONAL_PAGE_MAX_BLOCKS) {
       progressed = false
-      // Prefer candidate that maximizes resulting fill without exceeding
       let bestIdx = -1
-      let bestFill = pageFillScore(pageBlocks)
+      let bestScore = -Infinity
       for (let i = 0; i < remaining.length; i++) {
         const cand = remaining[i]!
         if (!canAddBlock(pageBlocks, cand)) continue
         const trial = [...pageBlocks, cand]
-        const fill = pageFillScore(trial)
-        if (fill > bestFill || (fill === bestFill && bestIdx < 0)) {
-          bestFill = fill
+        const s = groupCompatibilityScore(trial) * 2 + pageFillScore(trial)
+        if (s > bestScore) {
+          bestScore = s
           bestIdx = i
         }
       }
@@ -300,8 +293,6 @@ function greedyPack(blocks: PersonalBlockV1[], seed: string): PersonalBlockV1[][
         progressed = true
       }
     }
-    // If fill < 60% and remaining items could have helped but didn't fit this group,
-    // leave as-is — next iteration packs them.
     void seed
     groups.push(pageBlocks)
   }
@@ -309,8 +300,8 @@ function greedyPack(blocks: PersonalBlockV1[], seed: string): PersonalBlockV1[][
 }
 
 /**
- * Pack personal editorial blocks into composite pages.
- * Deterministic. No IA. Compose first; HERO only for true RICH content or leftovers.
+ * Pack editorialized blocks into pages.
+ * Deterministic. Coherence before compression.
  */
 export function composePersonalEditorialPages(
   blocks: PersonalBlockV1[],
@@ -323,17 +314,11 @@ export function composePersonalEditorialPages(
       ? bestPartitionSearch(blocks, seed)
       : greedyPack(blocks, seed)
 
-  // Soft: absorb leftover non-HERO singles into compatible pages when possible.
   const absorbed = absorbNonHeroOrphans(groups)
   const reordered = avoidConsecutiveHeroes(absorbed)
-
   return reordered.map((g, i) => makePage(g, seed, i))
 }
 
-/**
- * If a SHORT/MEDIUM block ended alone, try merging it into another page.
- * Does not change the general packing search — only rescues false HERO leftovers.
- */
 function absorbNonHeroOrphans(groups: PersonalBlockV1[][]): PersonalBlockV1[][] {
   const out = groups.map((g) => [...g])
   let changed = true
@@ -344,18 +329,17 @@ function absorbNonHeroOrphans(groups: PersonalBlockV1[][]): PersonalBlockV1[][] 
       if (g.length !== 1) continue
       const alone = g[0]!
       if (isTrueHeroCandidate(alone)) continue
-      // Prefer absorbing into pages that become PHOTO_PLUS_TWO_SNIPPETS, then fullest
       let bestJ = -1
       let bestScore = -Infinity
       for (let j = 0; j < out.length; j++) {
         if (i === j) continue
         if (!canAddBlock(out[j]!, alone)) continue
         const trial = [...out[j]!, alone]
-        const fill = pageFillScore(trial)
+        let s = groupCompatibilityScore(trial) + pageFillScore(trial) * 0.4
         const layout = pickPersonalEditorialLayout(stableSortIds(trial))
-        let s = fill
-        if (layout === "PHOTO_PLUS_TWO_SNIPPETS") s += 0.55
-        else if (layout === "PHOTO_PLUS_MEMORY") s += 0.15
+        if (layout === "PHOTO_PLUS_TWO_SNIPPETS") s += 0.3
+        // Don't absorb into a strongly clashing page
+        if (groupCompatibilityScore(trial) < 0.35) continue
         if (s > bestScore) {
           bestScore = s
           bestJ = j
@@ -378,7 +362,6 @@ function avoidConsecutiveHeroes(groups: PersonalBlockV1[][]): PersonalBlockV1[][
     const prevHero = out[i - 1]!.length === 1 && isTrueHeroCandidate(out[i - 1]![0]!)
     const curHero = out[i]!.length === 1 && isTrueHeroCandidate(out[i]![0]!)
     if (prevHero && curHero) {
-      // swap with next non-hero if any
       for (let j = i + 1; j < out.length; j++) {
         const jHero = out[j]!.length === 1 && isTrueHeroCandidate(out[j]![0]!)
         if (!jHero) {

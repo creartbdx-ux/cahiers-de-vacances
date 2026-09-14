@@ -680,6 +680,7 @@ export async function prepareBookLabPersonalEditorialAction(input: {
   const blocks = collectPersonalBlocks({
     profile: parsed.profile,
     photoSignedUrls,
+    creatorName: null,
   })
   const pages = composePersonalEditorialPages(blocks, `${seed}:personal-editorial-lab`)
 

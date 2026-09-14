@@ -48,11 +48,11 @@ export function pageFillScore(blocks: PersonalBlockV1[]): number {
 /** Displayable editorial word count (body / caption+anecdote) — debug & HERO checks. */
 export function blockTextWordCount(block: PersonalBlockV1): number {
   if (block.type === "MEMORY") {
-    return wordCount(block.body)
+    return wordCount(block.originalText || block.displayText || block.body)
   }
   const fromMeta = wordCount([block.caption, block.anecdote].filter(Boolean).join(" "))
   if (fromMeta > 0) return fromMeta
-  return wordCount(block.body)
+  return wordCount(block.originalText || block.displayText || block.body)
 }
 
 /**
