@@ -24,11 +24,10 @@ import {
   MAX_GROUP_SIZE,
   MAX_PHOTOS,
   MIN_GROUP_SIZE,
-  PERSONAL_FACT_CATEGORIES,
   PERSONALITY_TRAIT_OPTIONS,
   PHOTO_UPLOAD_USER_ERROR,
   applyAudienceDefaults,
-  audienceHumanLabel,
+  buildAudienceCopyContext,
   buildJourneySteps,
   calculateProfileRichness,
   clearGroupParticularity,
@@ -38,12 +37,17 @@ import {
   getStepCopy,
   hasPhotosUploading,
   allPhotosSaved,
+  personalFactCategoryLabel,
+  personalFactCategoryOptions,
+  photoCopy,
   photoUploadBannerCopy,
   photoUploadBannerMessage,
   isPhotoPersisted,
   listGroupParticularities,
   memorySuggestions,
   newId,
+  recapCopy,
+  resolveFactTarget,
   richnessClientMessage,
   truncateTagList,
   validatePhotoFile,
@@ -669,7 +673,7 @@ export function QuestionnaireWizard({
         {step === "personalFacts" && <PersonalFactsStep q={q} copy={copy} setQ={setQ} />}
         {step === "memories" && <MemoriesStep q={q} copy={copy} setQ={setQ} />}
         {step === "insideJokes" && <InsideJokesStep q={q} copy={copy} setQ={setQ} />}
-        {step === "games" && <GamesStep q={q} copy={copy} setQ={setQ} />}
+        {step === "game" && <GamesStep q={q} copy={copy} setQ={setQ} />}
         {step === "photos" && (
           <PhotosStep
             q={q}
@@ -1100,7 +1104,15 @@ function PersonalityStep({
       {(q.audience === "ME" || q.audience === "OTHER_PERSON") && soloId && (
         <div>
           <FieldLabel>
-            {q.audience === "ME" ? "Quels traits vous ressemblent ?" : "Quels traits lui ressemblent ?"}{" "}
+            {q.audience === "ME"
+              ? "Quels traits vous ressemblent ?"
+              : q.audience === "OTHER_PERSON"
+                ? `Quels traits ${
+                    q.participants[0]?.firstName.trim()
+                      ? `ressemblent à ${q.participants[0].firstName.trim()}`
+                      : "lui ressemblent"
+                  } ?`
+                : "Quels traits lui ressemblent ?"}{" "}
             (3 à 6)
           </FieldLabel>
           <div className="flex flex-wrap gap-2">
@@ -1453,18 +1465,24 @@ function PersonalFactsStep({
 }) {
   const showWho = q.audience === "DUO" || q.audience === "GROUP"
   const everyoneLabel = q.audience === "DUO" ? "Tout le duo" : "Tout le groupe"
+  const ctx = buildAudienceCopyContext(q)
+  const defaultOptions = personalFactCategoryOptions(ctx)
 
   return (
     <div className="flex flex-col gap-5">
       <StepHeader title={copy.title} subtitle={copy.subtitle} />
       {q.personalFacts.map((f, i) => {
-        const cat = PERSONAL_FACT_CATEGORIES.find((c) => c.value === f.category)
+        const target = resolveFactTarget(ctx, f.participantIds, q.participants)
+        const label = personalFactCategoryLabel(f.category, ctx, target)
+        const catMeta = defaultOptions.find((c) => c.value === f.category)
         return (
           <div key={f.id} className="flex flex-col gap-3 rounded-xl border border-border p-4">
+            <p className="text-sm font-medium text-foreground">{label}</p>
             <div className="flex flex-col gap-2 sm:flex-row">
               <select
                 className="h-10 rounded-lg border border-input bg-background px-2 text-sm sm:w-56"
                 value={f.category}
+                aria-label={label}
                 onChange={(e) =>
                   setQ((prev) => ({
                     ...prev,
@@ -1476,7 +1494,7 @@ function PersonalFactsStep({
                   }))
                 }
               >
-                {PERSONAL_FACT_CATEGORIES.map((c) => (
+                {defaultOptions.map((c) => (
                   <option key={c.value} value={c.value}>
                     {c.label}
                   </option>
@@ -1493,7 +1511,7 @@ function PersonalFactsStep({
                     ),
                   }))
                 }
-                placeholder={cat?.placeholder ?? "Ex. …"}
+                placeholder={catMeta?.placeholder ?? "Ex. …"}
               />
               <button
                 type="button"
@@ -1536,12 +1554,10 @@ function PersonalFactsStep({
                             ...prev,
                             personalFacts: prev.personalFacts.map((x, idx) => {
                               if (idx !== i) return x
-                              const ids = x.participantIds ?? []
+                              // Single target at a time for clear labels
                               return {
                                 ...x,
-                                participantIds: active
-                                  ? ids.filter((id) => id !== p.id)
-                                  : [...ids, p.id],
+                                participantIds: active ? undefined : [p.id],
                               }
                             }),
                           }))
@@ -1862,6 +1878,7 @@ function PhotosStep({
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
   const [brokenPreviewIds, setBrokenPreviewIds] = useState<string[]>([])
   const showWho = q.audience === "DUO" || q.audience === "GROUP"
+  const photoLabels = photoCopy(buildAudienceCopyContext(q))
 
   function pushUploadError(message: string) {
     setUploadErrors((prev) => [...prev, message])
@@ -2146,7 +2163,7 @@ function PhotosStep({
               )}
               {showWho && (
                 <div>
-                  <FieldLabel>Qui apparaît sur cette photo ?</FieldLabel>
+                  <FieldLabel>{photoLabels.whoLabel}</FieldLabel>
                   <div className="flex flex-wrap gap-2">
                     {q.participants.map((p) => {
                       const active = photo.participantIds?.includes(p.id) ?? false
@@ -2179,7 +2196,7 @@ function PhotosStep({
               )}
               <input
                 className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-                placeholder="Une petite légende ?"
+                placeholder={photoLabels.captionPlaceholder}
                 value={photo.caption ?? ""}
                 onChange={(e) =>
                   setQ((prev) => ({
@@ -2192,7 +2209,7 @@ function PhotosStep({
               />
               <input
                 className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-                placeholder="Une anecdote liée à cette photo ?"
+                placeholder={photoLabels.anecdotePlaceholder}
                 value={photo.anecdote ?? ""}
                 onChange={(e) =>
                   setQ((prev) => ({
@@ -2583,7 +2600,7 @@ function RecapStep({
   submitOk,
   pending,
   onSubmit,
-  onEdit,
+  onEdit: goToEditStep,
 }: {
   q: QuestionnaireV1
   copy: { title: string; subtitle?: string }
@@ -2598,13 +2615,8 @@ function RecapStep({
   onSubmit: () => void
   onEdit: (step: StepId) => void
 }) {
-  const names = q.participants.map((p) => p.firstName).filter(Boolean)
-  const forLabel =
-    q.audience === "ME"
-      ? `Pour vous${names[0] ? `, ${names[0]}` : ""}`
-      : names.length
-        ? names.join(" · ")
-        : audienceHumanLabel(q.audience)
+  const ctx = buildAudienceCopyContext(q)
+  const rcopy = recapCopy(ctx)
 
   const universeNames = q.interestUniverseIds
     .map((id) => universes.find((u) => u.id === id)?.name ?? null)
@@ -2631,44 +2643,28 @@ function RecapStep({
     <div className="flex flex-col gap-5">
       <StepHeader title={copy.title} subtitle={copy.subtitle} />
 
-      <RecapBlock title={forLabel} onEdit={() => onEdit("participants")}>
-        {audienceHumanLabel(q.audience)}
-        {q.audience !== "ME" && q.creatorFirstName?.trim() ? (
-          <p className="mt-1 text-muted-foreground">Créé par {q.creatorFirstName.trim()}</p>
+      <RecapBlock title={rcopy.forTitle} onEdit={() => goToEditStep("participants")}>
+        <p>{rcopy.forSubtitle}</p>
+        {rcopy.createdBy ? (
+          <p className="mt-1 text-muted-foreground">{rcopy.createdBy}</p>
         ) : null}
-        {q.audience !== "ME" &&
-        q.creatorIsParticipant === true &&
-        q.creatorParticipantId
-          ? (() => {
-              const me = q.participants.find((p) => p.id === q.creatorParticipantId)
-              return me?.firstName.trim() ? (
-                <p className="mt-1 text-muted-foreground">Créé par {me.firstName.trim()}</p>
-              ) : null
-            })()
-          : null}
       </RecapBlock>
 
-      <RecapBlock title={q.audience === "ME" ? "Vos univers" : "Univers"} onEdit={() => onEdit("interests")}>
+      <RecapBlock title={rcopy.universesTitle} onEdit={() => goToEditStep("interests")}>
         <RecapTagList items={universeNames} />
       </RecapBlock>
 
-      <RecapBlock title={q.audience === "ME" ? "Vos jeux" : "Jeux"} onEdit={() => onEdit("games")}>
+      <RecapBlock title={rcopy.gamesTitle} onEdit={() => goToEditStep("game")}>
         <RecapTagList items={gameLabels} />
         <p className="mt-2">Niveau : {difficultyLabel(q.gamePreferences.difficulty)}</p>
       </RecapBlock>
 
-      <RecapBlock
-        title={q.audience === "ME" ? "Votre univers graphique" : "Univers graphique"}
-        onEdit={() => onEdit("style")}
-      >
+      <RecapBlock title={rcopy.visualTitle} onEdit={() => goToEditStep("style")}>
         <p>{styleLabel}</p>
         <p className="mt-1">{paletteLabel}</p>
       </RecapBlock>
 
-      <RecapBlock
-        title={q.audience === "ME" ? "Votre personnalisation" : "Personnalisation"}
-        onEdit={() => onEdit("personalFacts")}
-      >
+      <RecapBlock title={rcopy.personalizationTitle} onEdit={() => goToEditStep("personalFacts")}>
         {factsCount} petit{factsCount > 1 ? "s" : ""} détail{factsCount > 1 ? "s" : ""}
         {" · "}
         {memoriesCount} souvenir{memoriesCount > 1 ? "s" : ""}
@@ -2677,6 +2673,9 @@ function RecapStep({
         {q.photos.some((p) => p.uploadStatus === "error")
           ? " (certaines non enregistrées)"
           : ""}
+        {rcopy.personalizationHint ? (
+          <p className="mt-2 text-muted-foreground">{rcopy.personalizationHint}</p>
+        ) : null}
       </RecapBlock>
 
       <div

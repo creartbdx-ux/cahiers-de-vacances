@@ -1,6 +1,7 @@
 export * from "./types"
 export * from "./audience"
 export * from "./creator"
+export * from "./audience-copy"
 export * from "./journey"
 export * from "./photos"
 export {

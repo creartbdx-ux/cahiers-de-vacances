@@ -54,16 +54,28 @@ test("ME copy : 2e personne, pas de wording duo/groupe/cadeau", () => {
   assert.ok(!/message|cadeau|mot personnel/i.test(finale.title))
 })
 
-test("OTHER_PERSON copy : formulations à la 3e personne", () => {
+test("OTHER_PERSON copy : formulations destinataire (prénom si connu)", () => {
   const q = createEmptyQuestionnaire()
   q.audience = "OTHER_PERSON"
   q.creatorIsParticipant = false
+  q.creatorFirstName = "Emma"
+  q.participants = [{ id: newId("p"), firstName: "Sami", ageBracket: "26-35", relationship: "ami" }]
 
+  assert.match(getStepCopy("participants", q).title, /Sami/i)
+  assert.match(getStepCopy("personality", q).title, /personnalité de Sami/i)
+  assert.match(getStepCopy("interests", q).title, /Ce que Sami aime/i)
+  assert.match(getStepCopy("memories", q).title, /souvenirs avec Sami/i)
+  assert.match(getStepCopy("personalFacts", q).title, /détails sur Sami/i)
+  assert.match(getStepCopy("finale", q).subtitle ?? "", /mot personnel|précision|Sami/i)
+})
+
+test("OTHER_PERSON sans prénom : fallback 3e personne", () => {
+  const q = createEmptyQuestionnaire()
+  q.audience = "OTHER_PERSON"
+  q.creatorIsParticipant = false
   assert.match(getStepCopy("participants", q).title, /cette personne/i)
   assert.match(getStepCopy("personality", q).title, /sa personnalité/i)
   assert.match(getStepCopy("interests", q).title, /il\/elle aime/i)
-  assert.match(getStepCopy("memories", q).title, /souvenirs à son sujet/i)
-  assert.match(getStepCopy("finale", q).subtitle ?? "", /mot personnel|précision/i)
 })
 
 test("DUO participant : wording vous / vos", () => {
@@ -89,7 +101,7 @@ test("DUO non participant : wording elles / leurs", () => {
   assert.match(getStepCopy("participants", q).subtitle ?? "", /leur duo/i)
   assert.match(getStepCopy("personality", q).title, /leur duo/i)
   assert.match(getStepCopy("interests", q).title, /elles aiment ensemble/i)
-  assert.match(getStepCopy("memories", q).title, /leurs souvenirs à deux/i)
+  assert.match(getStepCopy("memories", q).title, /souvenirs sur eux/i)
   assert.match(getStepCopy("finale", q).title, /cadeau/i)
   assert.ok(memorySuggestions("DUO").some((s) => /rencontre/i.test(s)))
 })

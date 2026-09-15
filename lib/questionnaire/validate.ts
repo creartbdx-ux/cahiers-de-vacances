@@ -121,7 +121,7 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
     case "memories":
     case "insideJokes":
       break
-    case "games": {
+    case "game": {
       if (!q.gamePreferences.likedTypes?.length) {
         errors.push("Choisissez au moins un type de jeu.")
       }

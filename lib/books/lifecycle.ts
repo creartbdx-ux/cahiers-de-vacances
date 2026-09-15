@@ -76,7 +76,7 @@ export function questionnaireProgressPercent(q: QuestionnaireV1 | null): number 
     } else if (step === "interests" && q.interestUniverseIds.length >= 3) done += 1
     else if (step === "personalFacts" && q.personalFacts.filter((f) => f.value.trim()).length >= 3) {
       done += 1
-    } else if (step === "games" && q.gamePreferences.likedTypes?.length && q.gamePreferences.difficulty) {
+    } else if (step === "game" && q.gamePreferences.likedTypes?.length && q.gamePreferences.difficulty) {
       done += 1
     } else if (step === "forbidden" && q.forbiddenTopics?.answered) done += 1
     else if (
