@@ -13,6 +13,11 @@ function profile(over: Partial<BookProfileV1> = {}): BookProfileV1 {
     schemaVersion: 1,
     audience: "OTHER_PERSON",
     creatorIsParticipant: false,
+    creator: {
+      firstName: "Emma",
+      isParticipant: false,
+      participantId: null,
+    },
     participants: [{ id: "sami", firstName: "Sami" }],
     sharedProfile: { interestUniverseIds: ["TRAVEL"] },
     individualProfiles: [],
@@ -55,6 +60,29 @@ function profile(over: Partial<BookProfileV1> = {}): BookProfileV1 {
   }
 }
 
+test("PERSONAL_EDITORIAL reçoit creatorName depuis profile.creator", async () => {
+  const result = await composePersonalEditorialWithAi({
+    profile: profile(),
+    seed: "profile-creator",
+    provider: new UnconfiguredProvider(),
+    // pas de creatorName injecté — doit venir du BookProfile
+  })
+  assert.equal(result.aiConfigured, false)
+  assert.equal(result.overallMode, "FALLBACK")
+
+  const ctx = buildPersonalEditorialAudienceContext(profile())
+  assert.equal(ctx.creatorName, "Emma")
+  assert.equal(ctx.creatorParticipantId, null)
+
+  const blocks = collectPersonalBlocks({ profile: profile() })
+  const opinionBlock = blocks.find((b) =>
+    b.originalText.toLowerCase().includes("whitehaven"),
+  )
+  assert.ok(opinionBlock)
+  assert.ok(opinionBlock!.facts.creatorOpinions.some((o) => /Emma/i.test(o)))
+  assert.ok(!/créateur|personne qui/i.test(opinionBlock!.displayText))
+})
+
 test("provider absent => FALLBACK explicite", async () => {
   const result = await composePersonalEditorialWithAi({
     profile: profile(),
@@ -68,6 +96,7 @@ test("provider absent => FALLBACK explicite", async () => {
   assert.equal(result.fallbackBanner, true)
   assert.ok(result.pages.every((p) => p.editorialMode === "FALLBACK"))
 })
+
 
 test("provider configuré => mode AI used ; 1 appel par page max sans repair", async () => {
   let calls = 0

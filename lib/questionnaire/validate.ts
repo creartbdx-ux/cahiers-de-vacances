@@ -10,6 +10,10 @@ import {
   type QuestionnaireV1,
 } from "./types"
 import { deriveCreatorIsParticipant } from "./audience"
+import {
+  needsCreatorFirstNameField,
+  needsCreatorParticipantChoice,
+} from "./creator"
 import { buildJourneySteps, type StepId } from "./journey"
 
 export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
@@ -56,6 +60,19 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
         q.participants.forEach((p, i) => {
           if (!p.firstName.trim()) errors.push(`Prénom obligatoire pour le participant ${i + 1}.`)
         })
+      }
+
+      if (needsCreatorFirstNameField(q.audience, q.creatorIsParticipant)) {
+        if (!q.creatorFirstName?.trim()) {
+          errors.push("Indiquez votre prénom.")
+        }
+      } else if (needsCreatorParticipantChoice(q.audience, q.creatorIsParticipant)) {
+        const id = q.creatorParticipantId?.trim()
+        if (!id) {
+          errors.push("Indiquez qui vous êtes parmi les personnes du cahier.")
+        } else if (!q.participants.some((p) => p.id === id)) {
+          errors.push("Le choix « qui êtes-vous » doit correspondre à une personne du cahier.")
+        }
       }
       break
     }

@@ -131,6 +131,17 @@ export interface QuestionnaireV1 {
   schemaVersion: typeof QUESTIONNAIRE_SCHEMA_VERSION
   audience: AudienceType | null
   creatorIsParticipant: boolean | null
+  /**
+   * Explicit creator first name when the creator is NOT a participant
+   * (OTHER_PERSON, or DUO/GROUP with creatorIsParticipant=false).
+   * Optional on legacy drafts — required for new completions.
+   */
+  creatorFirstName?: string | null
+  /**
+   * Which participant is the creator when creatorIsParticipant=true (DUO/GROUP).
+   * ME derives from participants[0]; OTHER_PERSON leaves null.
+   */
+  creatorParticipantId?: string | null
   duoType?: DuoType
   groupName?: string
   participants: QuestionnaireParticipant[]
@@ -159,10 +170,22 @@ export interface BookProfileParticipant {
   personalTrait?: string
 }
 
+/** Explicit creator identity — firstName null on legacy profiles only. */
+export interface BookProfileCreator {
+  firstName: string | null
+  isParticipant: boolean
+  participantId: string | null
+}
+
 export interface BookProfileV1 {
   schemaVersion: 1
   audience: AudienceType
   creatorIsParticipant: boolean
+  /**
+   * Explicit creator identity. Optional only for legacy stored profiles;
+   * buildBookProfile always emits it. Readers should use normalizeBookProfileCreator().
+   */
+  creator?: BookProfileCreator
   duoType?: DuoType
   groupName?: string
   participants: BookProfileParticipant[]
@@ -334,6 +357,8 @@ export function createEmptyQuestionnaire(): QuestionnaireV1 {
     schemaVersion: QUESTIONNAIRE_SCHEMA_VERSION,
     audience: null,
     creatorIsParticipant: null,
+    creatorFirstName: null,
+    creatorParticipantId: null,
     participants: [],
     personality: { traitsByParticipantId: {} },
     interestUniverseIds: [],

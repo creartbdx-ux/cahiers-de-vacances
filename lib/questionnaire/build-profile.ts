@@ -1,4 +1,5 @@
 import { deriveCreatorIsParticipant } from "./audience"
+import { resolveCreatorFromQuestionnaire } from "./creator"
 import { isPhotoPersisted } from "./photos"
 import type {
   BookProfileV1,
@@ -38,6 +39,7 @@ export function buildBookProfile(questionnaire: QuestionnaireV1): BookProfileV1 
     audience,
     questionnaire.creatorIsParticipant,
   )
+  const creator = resolveCreatorFromQuestionnaire(questionnaire, creatorIsParticipant)
 
   const gamePreferences: GamePreferences = {
     likedTypes: [...questionnaire.gamePreferences.likedTypes],
@@ -62,6 +64,7 @@ export function buildBookProfile(questionnaire: QuestionnaireV1): BookProfileV1 
     schemaVersion: 1,
     audience,
     creatorIsParticipant,
+    creator,
     participants: questionnaire.participants.map((p) => ({
       id: p.id,
       firstName: p.firstName.trim(),

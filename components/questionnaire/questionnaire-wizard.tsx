@@ -355,6 +355,9 @@ export function QuestionnaireWizard({
         participants,
         creatorIsParticipant:
           audience === "ME" ? true : audience === "OTHER_PERSON" ? false : prev.creatorIsParticipant,
+        // Reset creator identity when audience changes — avoid stale names/ids
+        creatorFirstName: null,
+        creatorParticipantId: null,
       })
     })
   }
@@ -647,7 +650,13 @@ export function QuestionnaireWizard({
               ensureParticipantsForAudience(a)
               setStepIndex(0)
             }}
-            onCreator={(v) => update({ creatorIsParticipant: v })}
+            onCreator={(v) =>
+              update({
+                creatorIsParticipant: v,
+                creatorFirstName: null,
+                creatorParticipantId: null,
+              })
+            }
           />
         )}
         {step === "participants" && (
@@ -1000,6 +1009,8 @@ function ParticipantsStep({
                 setQ((prev) => ({
                   ...prev,
                   participants: prev.participants.filter((_, idx) => idx !== i),
+                  creatorParticipantId:
+                    prev.creatorParticipantId === p.id ? null : prev.creatorParticipantId,
                 }))
               }
             >
@@ -1008,6 +1019,47 @@ function ParticipantsStep({
           )}
         </div>
       ))}
+
+      {q.audience === "OTHER_PERSON" ||
+      ((q.audience === "DUO" || q.audience === "GROUP") &&
+        q.creatorIsParticipant === false) ? (
+        <div className="rounded-xl border border-border p-4">
+          <FieldLabel>Et vous, comment vous appelez-vous ?</FieldLabel>
+          <label className="mt-2 flex flex-col gap-1 text-sm">
+            Votre prénom *
+            <input
+              className="h-10 rounded-lg border border-input bg-background px-3"
+              value={q.creatorFirstName ?? ""}
+              onChange={(e) => update({ creatorFirstName: e.target.value })}
+              autoComplete="given-name"
+            />
+          </label>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Il pourra être utilisé dans quelques clins d&apos;œil du cahier.
+          </p>
+        </div>
+      ) : null}
+
+      {(q.audience === "DUO" || q.audience === "GROUP") &&
+      q.creatorIsParticipant === true ? (
+        <div className="rounded-xl border border-border p-4">
+          <FieldLabel>Et vous, qui êtes-vous ?</FieldLabel>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Choisissez votre prénom parmi les personnes du cahier.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {q.participants.map((p) => (
+              <Chip
+                key={p.id}
+                active={q.creatorParticipantId === p.id}
+                onClick={() => update({ creatorParticipantId: p.id })}
+              >
+                {p.firstName.trim() || "Sans prénom"}
+              </Chip>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -2581,6 +2633,19 @@ function RecapStep({
 
       <RecapBlock title={forLabel} onEdit={() => onEdit("participants")}>
         {audienceHumanLabel(q.audience)}
+        {q.audience !== "ME" && q.creatorFirstName?.trim() ? (
+          <p className="mt-1 text-muted-foreground">Créé par {q.creatorFirstName.trim()}</p>
+        ) : null}
+        {q.audience !== "ME" &&
+        q.creatorIsParticipant === true &&
+        q.creatorParticipantId
+          ? (() => {
+              const me = q.participants.find((p) => p.id === q.creatorParticipantId)
+              return me?.firstName.trim() ? (
+                <p className="mt-1 text-muted-foreground">Créé par {me.firstName.trim()}</p>
+              ) : null
+            })()
+          : null}
       </RecapBlock>
 
       <RecapBlock title={q.audience === "ME" ? "Vos univers" : "Univers"} onEdit={() => onEdit("interests")}>

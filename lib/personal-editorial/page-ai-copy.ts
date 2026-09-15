@@ -258,13 +258,10 @@ function secureAttributedFallback(
   page: PersonalEditorialPageV1,
   ctx: PersonalEditorialAudienceContext,
 ): PersonalEditorialPageV1 {
-  const who = ctx.creatorName || "Créateur"
+  const who = ctx.creatorName || null
   const blocks = page.blocks.map((b) => {
     const copy = buildEditorialCopyFromFacts({ facts: b.facts, ctx })
-    // Force attributed if still risky
-    const text = copy.attributedQuote
-      ? copy.displayText
-      : copy.displayText
+    const text = copy.displayText
     return {
       ...b,
       title: copy.shortTitle || b.title,

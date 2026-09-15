@@ -1,4 +1,5 @@
 import type { AudienceType, BookProfileV1 } from "@/lib/questionnaire/types"
+import { normalizeBookProfileCreator } from "@/lib/questionnaire/creator"
 
 export type PersonalAddressMode =
   | "SECOND_PERSON" // s'adresser au lecteur (ME / OTHER)
@@ -12,24 +13,21 @@ export type PersonalAddressMode =
 export interface PersonalEditorialAudienceContext {
   audience: AudienceType
   creatorIsParticipant: boolean
-  /** Creator first name when known from profile (often absent for OTHER_PERSON). */
+  /** Creator first name when known from profile.creator — never from email. */
   creatorName: string | null
+  /** Stable participant id when creator is a participant. */
+  creatorParticipantId: string | null
   recipientNames: string[]
   participantNames: string[]
   addressMode: PersonalAddressMode
 }
 
 /**
- * Resolve creator display name if present in participants or questionnaire meta.
- * OTHER_PERSON: creator is typically NOT in participants — may be null.
+ * Resolve creator display name from BookProfile.creator (or legacy ME participant).
+ * Never invents; never uses email / auth metadata.
  */
 function resolveCreatorName(profile: BookProfileV1): string | null {
-  // Optional convention: some profiles store creator as non-participant metadata — none in V1.
-  // When creatorIsParticipant, first participant is often the creator for ME.
-  if (profile.audience === "ME" && profile.participants[0]?.firstName.trim()) {
-    return profile.participants[0]!.firstName.trim()
-  }
-  return null
+  return normalizeBookProfileCreator(profile).firstName
 }
 
 export function buildPersonalEditorialAudienceContext(
@@ -40,8 +38,12 @@ export function buildPersonalEditorialAudienceContext(
     .map((p) => p.firstName.trim())
     .filter(Boolean)
   const recipientNames = [...participantNames]
+  const normalized = normalizeBookProfileCreator(profile)
+  // Explicit override only for tests / lab — never invent from auth in callers.
   const creatorName =
-    options?.creatorName?.trim() || resolveCreatorName(profile)
+    options?.creatorName !== undefined
+      ? options.creatorName?.trim() || null
+      : resolveCreatorName(profile)
 
   let addressMode: PersonalAddressMode = "SECOND_PERSON"
   if (profile.audience === "DUO" || profile.audience === "GROUP") {
@@ -52,6 +54,7 @@ export function buildPersonalEditorialAudienceContext(
     audience: profile.audience,
     creatorIsParticipant: profile.creatorIsParticipant,
     creatorName,
+    creatorParticipantId: normalized.participantId,
     recipientNames,
     participantNames,
     addressMode,

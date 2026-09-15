@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import { deriveCreatorIsParticipant } from "./audience"
 import { buildBookProfile } from "./build-profile"
+import { normalizeBookProfileCreator } from "./creator"
 import { calculateProfileRichness } from "./richness"
 import {
   createEmptyQuestionnaire,
@@ -10,6 +11,8 @@ import {
   type QuestionnaireV1,
 } from "./types"
 import { validateQuestionnaireComplete, validateStep } from "./validate"
+import { buildPersonalEditorialAudienceContext } from "../personal-editorial/audience-context"
+import { extractPersonalSourceFacts } from "../personal-editorial/facts"
 
 function baseSolo(audience: "ME" | "OTHER_PERSON"): QuestionnaireV1 {
   const pid = newId("p")
@@ -17,6 +20,7 @@ function baseSolo(audience: "ME" | "OTHER_PERSON"): QuestionnaireV1 {
     ...createEmptyQuestionnaire(),
     audience,
     creatorIsParticipant: audience === "ME",
+    ...(audience === "OTHER_PERSON" ? { creatorFirstName: "Emma" } : {}),
     participants: [
       {
         id: pid,
@@ -47,6 +51,7 @@ function baseDuo(): QuestionnaireV1 {
     ...createEmptyQuestionnaire(),
     audience: "DUO",
     creatorIsParticipant: true,
+    creatorParticipantId: a,
     duoType: "COUPLE",
     participants: [
       { id: a, firstName: "Léa", ageBracket: "26-35" },
@@ -82,6 +87,7 @@ function baseGroup(count: number): QuestionnaireV1 {
     ...createEmptyQuestionnaire(),
     audience: "GROUP",
     creatorIsParticipant: false,
+    creatorFirstName: "Emma",
     groupName: "La bande",
     participants,
     personality: {
@@ -105,6 +111,17 @@ test("schemaVersion = 1", () => {
   assert.equal(QUESTIONNAIRE_SCHEMA_VERSION, 1)
 })
 
+test("OTHER_PERSON valide", () => {
+  const q = baseSolo("OTHER_PERSON")
+  assert.deepEqual(validateQuestionnaireComplete(q), [])
+  const profile = buildBookProfile(q)
+  assert.equal(profile.creatorIsParticipant, false)
+  assert.equal(profile.participants[0].relationship, "ami")
+  assert.equal(profile.creator?.firstName, "Emma")
+  assert.equal(profile.creator?.isParticipant, false)
+  assert.equal(profile.creator?.participantId, null)
+})
+
 test("ME valide", () => {
   const q = baseSolo("ME")
   assert.deepEqual(validateQuestionnaireComplete(q), [])
@@ -112,15 +129,10 @@ test("ME valide", () => {
   assert.equal(profile.audience, "ME")
   assert.equal(profile.creatorIsParticipant, true)
   assert.equal(profile.schemaVersion, 1)
+  assert.equal(profile.creator?.firstName, "Alex")
+  assert.equal(profile.creator?.isParticipant, true)
+  assert.equal(profile.creator?.participantId, q.participants[0]!.id)
   assert.equal(calculateProfileRichness(q, profile).level === "ENOUGH" || calculateProfileRichness(q, profile).level === "RICH", true)
-})
-
-test("OTHER_PERSON valide", () => {
-  const q = baseSolo("OTHER_PERSON")
-  assert.deepEqual(validateQuestionnaireComplete(q), [])
-  const profile = buildBookProfile(q)
-  assert.equal(profile.creatorIsParticipant, false)
-  assert.equal(profile.participants[0].relationship, "ami")
 })
 
 test("DUO valide", () => {
@@ -131,6 +143,9 @@ test("DUO valide", () => {
   assert.equal(profile.duoType, "COUPLE")
   assert.equal(profile.sharedProfile.duoDescription, "Un duo voyageur et taquin.")
   assert.equal(profile.individualProfiles.length, 2)
+  assert.equal(profile.creator?.firstName, "Léa")
+  assert.equal(profile.creator?.participantId, q.participants[0]!.id)
+  assert.equal(profile.creator?.isParticipant, true)
 })
 
 test("GROUP valide", () => {
@@ -139,6 +154,9 @@ test("GROUP valide", () => {
   const profile = buildBookProfile(q)
   assert.equal(profile.participants.length, 4)
   assert.equal(profile.sharedProfile.groupTraits?.length, 3)
+  assert.equal(profile.creator?.firstName, "Emma")
+  assert.equal(profile.creator?.isParticipant, false)
+  assert.equal(profile.creator?.participantId, null)
 })
 
 test("GROUP > 10 refusé", () => {
@@ -223,4 +241,90 @@ test("calculateProfileRichness", () => {
   const insuff = calculateProfileRichness(q)
   assert.equal(insuff.level, "INSUFFICIENT")
   assert.ok(insuff.missing.length > 0)
+})
+
+test("OTHER_PERSON exige creatorFirstName", () => {
+  const q = baseSolo("OTHER_PERSON")
+  q.creatorFirstName = null
+  assert.ok(validateStep("participants", q).some((e) => /prénom/i.test(e)))
+})
+
+test("DUO participant exige creatorParticipantId", () => {
+  const q = baseDuo()
+  q.creatorParticipantId = null
+  assert.ok(validateStep("participants", q).some((e) => /qui êtes-vous|personnes/i.test(e)))
+})
+
+test("GROUP participant sélectionne creator participant", () => {
+  const q = baseGroup(3)
+  q.creatorIsParticipant = true
+  q.creatorFirstName = null
+  q.creatorParticipantId = q.participants[1]!.id
+  assert.deepEqual(validateStep("participants", q), [])
+  const profile = buildBookProfile(q)
+  assert.equal(profile.creator?.firstName, "P2")
+  assert.equal(profile.creator?.participantId, q.participants[1]!.id)
+})
+
+test("DUO non participant demande prénom créateur", () => {
+  const q = baseDuo()
+  q.creatorIsParticipant = false
+  q.creatorParticipantId = null
+  q.creatorFirstName = null
+  assert.ok(validateStep("participants", q).some((e) => /prénom/i.test(e)))
+  q.creatorFirstName = "Camille"
+  assert.deepEqual(validateStep("participants", q), [])
+  const profile = buildBookProfile(q)
+  assert.equal(profile.creator?.firstName, "Camille")
+  assert.equal(profile.creator?.participantId, null)
+})
+
+test("anciens BookProfile sans creator restent lisibles", () => {
+  const legacy = {
+    ...buildBookProfile(baseSolo("ME")),
+  }
+  delete (legacy as { creator?: unknown }).creator
+  const normalized = normalizeBookProfileCreator(legacy)
+  assert.equal(normalized.firstName, "Alex")
+  assert.equal(normalized.isParticipant, true)
+
+  const legacyOther = {
+    ...buildBookProfile(baseSolo("OTHER_PERSON")),
+  }
+  delete (legacyOther as { creator?: unknown }).creator
+  const n2 = normalizeBookProfileCreator(legacyOther)
+  assert.equal(n2.firstName, null)
+  assert.equal(n2.isParticipant, false)
+})
+
+test("creatorName jamais inventé depuis email", () => {
+  const profile = buildBookProfile(baseSolo("OTHER_PERSON"))
+  profile.creator = { firstName: null, isParticipant: false, participantId: null }
+  const ctx = buildPersonalEditorialAudienceContext(profile)
+  assert.equal(ctx.creatorName, null)
+})
+
+test("fixture Emma → Sami : creator opinion owner correct", () => {
+  const q = baseSolo("OTHER_PERSON")
+  q.creatorFirstName = "Emma"
+  q.participants[0]!.firstName = "Sami"
+  q.memories = [
+    {
+      id: "wh",
+      text: "J'ai adoré Whitehaven Beach, c'est mon moment préféré de notre voyage.",
+    },
+  ]
+  const profile = buildBookProfile(q)
+  assert.equal(profile.creator?.firstName, "Emma")
+  const ctx = buildPersonalEditorialAudienceContext(profile)
+  assert.equal(ctx.creatorName, "Emma")
+  assert.deepEqual(ctx.recipientNames, ["Sami"])
+  const facts = extractPersonalSourceFacts({
+    sourceId: "wh",
+    sourceType: "MEMORY",
+    rawText: q.memories[0]!.text,
+    ctx,
+  })
+  assert.ok(facts.creatorOpinions.some((o) => /Emma/i.test(o)))
+  assert.ok(!facts.creatorOpinions.some((o) => /créateur/i.test(o)))
 })

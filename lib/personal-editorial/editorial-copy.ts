@@ -45,7 +45,18 @@ export function buildEditorialCopyFromFacts(input: {
   if (facts.creatorOpinions.length && ctx.audience === "OTHER_PERSON") {
     const opinion = facts.creatorOpinions[0]!
     claimsUsed.push(opinion)
-    const creator = ctx.creatorName || "Créateur"
+    if (!ctx.creatorName) {
+      // Legacy profile without creator name — neutral / citation, never invent
+      return {
+        kicker: null,
+        shortTitle: leadPlace,
+        displayText: facts.quotes[0] || facts.rawText,
+        perspective: "CREATOR_ATTRIBUTED",
+        attributedQuote: true,
+        claimsUsed: [...claimsUsed, "citation-sans-prenom"],
+      }
+    }
+    const creator = ctx.creatorName
     let displayText: string
     if (leadPlace && trip) {
       displayText = `${leadPlace}, le moment préféré ${de(creator)} pendant votre voyage en ${trip}.`
@@ -171,7 +182,7 @@ export function buildEditorialCopyFromFacts(input: {
     ctx.audience === "OTHER_PERSON" &&
     /j['\u2019]|je\s+|mon\s+|ma\s+|mes\s+|moi\b/i.test(facts.rawText)
   ) {
-    const who = ctx.creatorName || "Créateur"
+    const who = ctx.creatorName
     claimsUsed.push("citation-createur")
     return {
       kicker: who,
@@ -195,7 +206,7 @@ export function buildEditorialCopyFromFacts(input: {
     }
   }
 
-  const who = ctx.creatorName || "Souvenir"
+  const who = ctx.creatorName || null
   return {
     kicker: who,
     shortTitle: null,

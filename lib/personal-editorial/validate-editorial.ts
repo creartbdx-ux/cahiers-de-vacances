@@ -44,7 +44,7 @@ export const EVALUATIVE_OR_CULTURAL_PATTERNS: Array<{ id: string; re: RegExp }> 
 ]
 
 const GENERIC_CREATOR_RE =
-  /la\s+personne\s+qui\s+a\s+(cr[eé][eé]|rempli|choisi|saisi|ajout[eé])/i
+  /la\s+personne\s+qui\s+a\s+(cr[eé][eé]|rempli|choisi|saisi|ajout[eé])|(?:le|la)\s+cr[eé]at(?:eur|rice)\b/i
 
 const ABSTRACT_PAGE_TITLE_RE =
   /souvenirs?\s+en\s+suspens|instants?\s+suspendus?|m[eé]moire\s+vivante|moments?\s+pr[eé]cieux|histoire\s+partag[eé]e/i
@@ -90,11 +90,14 @@ export function findUnsupportedClaims(input: {
   const blob = supportBlob(input.facts)
 
   if (GENERIC_CREATOR_RE.test(combined)) {
-    unsupported.push(
-      input.creatorName
-        ? `creator-generique (utiliser « ${input.creatorName} »)`
-        : "creator-generique",
-    )
+    if (input.creatorName) {
+      unsupported.push(`creator-generique (utiliser « ${input.creatorName} »)`)
+    } else if (/la\s+personne\s+qui/i.test(combined)) {
+      unsupported.push("creator-generique")
+    } else if (/(?:le|la)\s+cr[eé]at(?:eur|rice)/i.test(combined)) {
+      // Prefer neutral / citation over "le créateur" even without a known first name
+      unsupported.push("creator-generique")
+    }
   }
 
   for (const p of UNSUPPORTED_POETIC_PATTERNS) {

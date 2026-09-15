@@ -17,6 +17,7 @@ import {
   createDefaultContentGenerationProvider,
 } from "@/lib/content-generation"
 import { calculateProfileRichness } from "@/lib/questionnaire/richness"
+import { normalizeBookProfileCreator } from "@/lib/questionnaire/creator"
 import { resolveBookVisualIdentity } from "@/lib/mini-book/visual-identity"
 import { getActivePalettes } from "@/lib/data/assets"
 import { getStyles } from "@/lib/data/reference"
@@ -685,14 +686,8 @@ async function loadBookLabPersonalContext(input: {
     }
   }
 
-  // OTHER_PERSON: creator display name from auth metadata when available
-  const meta = user.user_metadata as Record<string, unknown> | undefined
-  const metaFirst =
-    (typeof meta?.first_name === "string" && meta.first_name.trim()) ||
-    (typeof meta?.full_name === "string" && meta.full_name.trim().split(/\s+/)[0]) ||
-    null
-  const creatorName =
-    parsed.profile.audience === "OTHER_PERSON" ? metaFirst : null
+  // Creator first name from BookProfile — never from email / auth metadata
+  const creatorName = normalizeBookProfileCreator(parsed.profile).firstName
 
   return {
     ok: true as const,

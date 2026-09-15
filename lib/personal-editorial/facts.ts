@@ -79,7 +79,7 @@ export function extractPersonalSourceFacts(input: {
     creatorOpinions.push(
       creator
         ? `${creator} a adoré ${place}`
-        : `Le créateur a adoré ${place}`,
+        : `Coup de cœur pour ${place}`,
     )
   }
   if (
@@ -98,7 +98,9 @@ export function extractPersonalSourceFacts(input: {
         ? place
           ? `Pour ${creator}, ${place} est son moment préféré ${tripLabel}`
           : `Moment préféré de ${creator} ${tripLabel}`
-        : `Moment préféré du créateur ${tripLabel}`,
+        : place
+          ? `${place} : moment préféré ${tripLabel}`
+          : `Moment préféré ${tripLabel}`,
     )
   }
 
@@ -128,7 +130,7 @@ export function extractPersonalSourceFacts(input: {
       sharedFacts.push(
         creator
           ? `Présence de ${creator} et ${name}`
-          : `Présence de ${name} et du créateur`,
+          : `Présence partagée avec ${name}`,
       )
     }
   }

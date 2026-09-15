@@ -1,5 +1,6 @@
 export * from "./types"
 export * from "./audience"
+export * from "./creator"
 export * from "./journey"
 export * from "./photos"
 export {
