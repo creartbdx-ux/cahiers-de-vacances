@@ -901,7 +901,13 @@ export function BookLabClient({
                         <span className="font-medium">Page personnelle {i + 1}</span>
                         <span className="mt-1 block text-xs text-muted-foreground">
                           Editorial mode : {p.editorialMode}
-                          {p.validationOk ? "" : " · validation partielle"}
+                          {p.usedRepair ? " · repair" : ""}
+                          {p.validationOk ? "" : " · validation échouée"}
+                          <br />
+                          Unsupported claims :{" "}
+                          {p.unsupportedClaims?.length
+                            ? p.unsupportedClaims.join(" · ")
+                            : "[]"}
                           <br />
                           Layout : {p.layoutId}
                           {p.page.editorialFamily ? ` · ${p.page.editorialFamily}` : ""}
@@ -958,19 +964,22 @@ export function BookLabClient({
                                 SOURCE : {(b.originalText || "").slice(0, 120)}
                                 {(b.originalText || "").length > 120 ? "…" : ""}
                                 <br />
-                                FACT :{" "}
+                                FACT MODEL :{" "}
                                 {[
                                   ...(b.facts?.creatorOpinions ?? []),
                                   ...(b.facts?.sharedFacts ?? []),
+                                  ...(b.facts?.locations ?? []),
                                 ]
-                                  .slice(0, 3)
+                                  .slice(0, 4)
                                   .join(" · ") || "—"}
                                 <br />
-                                AI COPY / ÉDITO : {(b.displayText || b.body || "").slice(0, 140)}
+                                AI COPY : {(b.displayText || b.body || "").slice(0, 140)}
                                 {(b.displayText || b.body || "").length > 140 ? "…" : ""}
                                 <br />
-                                VALIDATION : usedAi={b.usedAi ? "1" : "0"} · claims :{" "}
-                                {(b.claimsUsed ?? []).join(" · ") || "—"}
+                                CLAIMS : {(b.claimsUsed ?? []).join(" · ") || "—"}
+                                <br />
+                                VALIDATION : usedAi={b.usedAi ? "1" : "0"}
+                                  · mode={p.editorialMode}
                                 {b.type === "PHOTO_MEMORY" ? (
                                   <>
                                     <br />

@@ -310,3 +310,189 @@ test("sourceIds imposés préservés après AI", async () => {
   )
   assert.deepEqual([...before].sort(), [...after].sort())
 })
+
+async function rejectBadCopy(opts: {
+  memoryText: string
+  memoryId?: string
+  pageTitle: string
+  pageIntro?: string | null
+  title: string | null
+  text: string
+  seed: string
+}): Promise<Awaited<ReturnType<typeof editorializePersonalEditorialPage>>> {
+  const blocks = collectPersonalBlocks({
+    profile: profile({
+      memories: [{ id: opts.memoryId ?? "m1", text: opts.memoryText }],
+      photos: [],
+    }),
+    creatorName: "Emma",
+  })
+  const packed = composePersonalEditorialPages(blocks, opts.seed)
+  const provider = new FakeContentGenerationProvider(async () => ({
+    ok: true,
+    data: {
+      pageTitle: opts.pageTitle,
+      pageKicker: null,
+      pageIntro: opts.pageIntro ?? null,
+      blocks: [
+        {
+          sourceId: opts.memoryId ?? "m1",
+          kicker: null,
+          title: opts.title,
+          text: opts.text,
+        },
+      ],
+    },
+  }))
+  const ctx = buildPersonalEditorialAudienceContext(profile(), {
+    creatorName: "Emma",
+  })
+  return editorializePersonalEditorialPage({
+    page: packed[0]!,
+    ctx,
+    seed: opts.seed,
+    provider,
+  })
+}
+
+test("rejette poésie générique non supportée", async () => {
+  const result = await rejectBadCopy({
+    memoryText: "Petite balade en ville.",
+    pageTitle: "En ville",
+    title: null,
+    text: "Un instant précieux gravé dans votre mémoire.",
+    seed: "poetry",
+  })
+  assert.equal(result.mode, "FALLBACK")
+  assert.ok(result.usedRepair)
+  assert.ok(
+    result.unsupportedClaims.some((c) => /poesie|instant|memoire/i.test(c)),
+    result.unsupportedClaims.join("|"),
+  )
+})
+
+test("rejette opinion réattribuée au destinataire", async () => {
+  const result = await rejectBadCopy({
+    memoryText:
+      "Sami et moi sur Whitehaven Beach. J'ai adoré cette plage, c'est mon moment préféré.",
+    pageTitle: "Whitehaven Beach",
+    title: "Whitehaven Beach",
+    text: "Votre plage préférée.",
+    seed: "opinion-flip",
+  })
+  assert.equal(result.mode, "FALLBACK")
+  assert.ok(
+    result.unsupportedClaims.some((c) => /préférence|reattribu/i.test(c)) ||
+      result.validationReasons.some((r) => /opinion-reattribuee/i.test(r)),
+  )
+})
+
+test("rejette savoir général onsen", async () => {
+  const result = await rejectBadCopy({
+    memoryText: "Nous avons testé un onsen au Japon.",
+    pageTitle: "Au Japon",
+    title: "L'expérience du onsen",
+    text: "Un spa traditionnel où l'on se baigne nu.",
+    seed: "onsen-knowledge",
+  })
+  assert.equal(result.mode, "FALLBACK")
+  assert.ok(
+    result.unsupportedClaims.some((c) => /enrichissement|spa|nu/i.test(c)),
+    result.unsupportedClaims.join("|"),
+  )
+})
+
+test("rejette adjectif inventé restaurant réputé", async () => {
+  const result = await rejectBadCopy({
+    memoryText: "On va souvent au restaurant Penha au Portugal.",
+    pageTitle: "Portugal",
+    title: "Penha",
+    text: "Un restaurant portugais réputé pour sa cuisine savoureuse.",
+    seed: "portugal-adj",
+  })
+  assert.equal(result.mode, "FALLBACK")
+  assert.ok(
+    result.unsupportedClaims.some((c) => /repute|savoureux|enrichissement/i.test(c)),
+    result.unsupportedClaims.join("|"),
+  )
+})
+
+test("rejette creator générique alors que creatorName=Emma", async () => {
+  const result = await rejectBadCopy({
+    memoryText:
+      "Whitehaven Beach. J'ai adoré cette plage, c'est mon moment préféré de notre voyage.",
+    pageTitle: "Whitehaven Beach",
+    title: "Whitehaven Beach",
+    text: "Pour la personne qui a créé ce souvenir, cette plage reste le moment préféré du séjour.",
+    seed: "creator-generic",
+  })
+  assert.equal(result.mode, "FALLBACK")
+  assert.ok(
+    result.unsupportedClaims.some((c) => /creator-generique/i.test(c)),
+    result.unsupportedClaims.join("|"),
+  )
+})
+
+test("rejette intro inutile / poétique", async () => {
+  const result = await rejectBadCopy({
+    memoryText: "Premier baiser à Eysines.",
+    pageTitle: "Souvenirs en suspens",
+    pageIntro:
+      "Deux instants précieux, chacun avec sa date, son décor et sa place particulière dans la mémoire.",
+    title: "Le premier baiser",
+    text: "Votre premier baiser, à Eysines.",
+    seed: "useless-intro",
+  })
+  assert.equal(result.mode, "FALLBACK")
+  assert.ok(
+    result.validationReasons.some((r) =>
+      /intro|titre-abstrait/i.test(r),
+    ) ||
+      result.unsupportedClaims.some((c) => /intro|abstrait|poesie/i.test(c)),
+    [...result.validationReasons, ...result.unsupportedClaims].join("|"),
+  )
+})
+
+test("accepte copy Emma→Sami courte et attribuée", async () => {
+  const blocks = collectPersonalBlocks({
+    profile: profile({
+      memories: [
+        {
+          id: "wh",
+          text: "Sami et moi lors de notre voyage en Australie, sur la plage de Whitehaven Beach. J'ai adoré cette plage, c'est mon moment préféré de notre voyage.",
+        },
+      ],
+      photos: [],
+    }),
+    creatorName: "Emma",
+  })
+  const packed = composePersonalEditorialPages(blocks, "good-emma")
+  const provider = new FakeContentGenerationProvider(async () => ({
+    ok: true,
+    data: {
+      pageTitle: "Whitehaven Beach",
+      pageKicker: null,
+      pageIntro: null,
+      blocks: [
+        {
+          sourceId: "wh",
+          kicker: null,
+          title: "Whitehaven Beach",
+          text: "Le moment préféré d'Emma pendant votre voyage en Australie.",
+        },
+      ],
+    },
+  }))
+  const ctx = buildPersonalEditorialAudienceContext(profile(), {
+    creatorName: "Emma",
+  })
+  const result = await editorializePersonalEditorialPage({
+    page: packed[0]!,
+    ctx,
+    seed: "good-emma",
+    provider,
+  })
+  assert.equal(result.mode, "AI")
+  assert.equal(result.page.blocks[0]!.displayText, "Le moment préféré d'Emma pendant votre voyage en Australie.")
+  assert.deepEqual(result.unsupportedClaims, [])
+})

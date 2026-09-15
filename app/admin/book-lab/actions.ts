@@ -621,6 +621,9 @@ export type BookLabPersonalEditorialResult =
         isHero: boolean
         editorialMode: "AI" | "FALLBACK"
         validationOk: boolean
+        unsupportedClaims: string[]
+        validationReasons: string[]
+        usedRepair: boolean
         sourceMemoryIds: string[]
         sourcePhotoIds: string[]
         page: PersonalEditorialPageV1
@@ -742,6 +745,9 @@ export async function prepareBookLabPersonalEditorialAction(input: {
           | "AI"
           | "FALLBACK",
         validationOk: result?.validationOk ?? true,
+        unsupportedClaims: result?.unsupportedClaims ?? [],
+        validationReasons: result?.validationReasons ?? [],
+        usedRepair: result?.usedRepair ?? false,
         sourceMemoryIds: prov.sourceMemoryIds,
         sourcePhotoIds: prov.sourcePhotoIds,
         page,
@@ -794,6 +800,9 @@ export async function regenerateBookLabPersonalEditorialCopyAction(input: {
           | "AI"
           | "FALLBACK",
         validationOk: result?.validationOk ?? true,
+        unsupportedClaims: result?.unsupportedClaims ?? [],
+        validationReasons: result?.validationReasons ?? [],
+        usedRepair: result?.usedRepair ?? false,
         sourceMemoryIds: prov.sourceMemoryIds,
         sourcePhotoIds: prov.sourcePhotoIds,
         page,

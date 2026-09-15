@@ -2,7 +2,7 @@ import type { ContentGenerationProvider, JsonSchemaObject } from "@/lib/content-
 import { createDefaultContentGenerationProvider } from "@/lib/content-generation/provider"
 import type { PersonalEditorialAudienceContext } from "./audience-context"
 import type { PersonalBlockV1, PersonalEditorialPageV1 } from "./types"
-import { validateEditorialCopy, validatePageTitle } from "./validate-editorial"
+import { validatePageLevelCopy } from "./validate-editorial"
 import { buildEditorialCopyFromFacts } from "./editorial-copy"
 import { assertPagePhotoProvenance } from "./provenance"
 
@@ -25,6 +25,7 @@ export interface PageEditorialResult {
   mode: PersonalEditorialMode
   validationOk: boolean
   validationReasons: string[]
+  unsupportedClaims: string[]
   usedRepair: boolean
 }
 
@@ -88,37 +89,88 @@ function buildPageAiPayload(
   }
 }
 
-function systemPrompt(): string {
+function systemPrompt(ctx: PersonalEditorialAudienceContext): string {
+  const creator = ctx.creatorName?.trim() || null
+  const recipients = ctx.recipientNames.filter(Boolean).join(", ") || null
   return [
     "Vous êtes le rédacteur d'un cahier personnalisé destiné à être offert.",
     "Les textes fournis proviennent d'un questionnaire rempli par le créateur.",
     "Ils ne doivent PAS être recopiés tels quels.",
     "",
-    "Mission : transformer ces informations en une page éditoriale naturelle,",
-    "concise, élégante et agréable à lire pour le destinataire.",
+    "=== MONDE FERMÉ (CLOSED WORLD) — RÈGLE ABSOLUE ===",
+    "Vous travaillez en monde fermé.",
+    "Vous ne devez utiliser aucune connaissance extérieure aux informations",
+    "fournies dans les sources.",
+    "Même si vous connaissez un lieu, une pratique, un pays ou un événement,",
+    "vous ne devez ajouter aucune précision qui n'est pas présente dans les faits fournis.",
+    "Votre rôle est d'éditer, condenser et reformuler. Pas d'enrichir.",
+    "Interdit : culture générale, tourisme, histoire, caractéristiques connues",
+    "d'un lieu / pratique / produit / pays (ex. onsen = spa, nudité, eau chaude).",
+    "Interdit : adjectifs évaluatifs non supportés (réputé, savoureux, typique,",
+    "authentique, incontournable) s'ils ne figurent pas dans la source.",
     "",
-    "Vous devez conserver strictement les faits.",
-    "Vous pouvez : condenser, reformuler, changer la structure, choisir un angle,",
-    "créer un titre / mini-titre, supprimer des répétitions,",
-    "transformer un récit brut en légende ou fragment,",
-    "attribuer explicitement une opinion à son auteur.",
+    "Mission : page éditoriale NATURELLE, COURTE, PRÉCISE pour le destinataire.",
+    "Si une formulation simple fonctionne, préférez-la à une formulation",
+    "métaphorique, sentimentale ou littéraire.",
+    "Cahier ludique et élégant — pas un album lyrique.",
     "",
-    "Vous ne pouvez pas : inventer un événement, une émotion, une date, un lieu,",
-    "une personne ; attribuer à un destinataire une opinion du créateur ;",
-    "créer un lien entre deux événements non supporté par les sources.",
+    "Évitez (sauf si littéralement dans les sources) :",
+    "« votre histoire a connu… », « un instant suspendu », « gravé dans la mémoire »,",
+    "« un moment précieux », « ces instants qui racontent… »,",
+    "« une place particulière dans la mémoire », « souvenirs en suspens ».",
+    "",
+    creator
+      ? `Créateur connu : ${creator}. Attribuez ses opinions avec ce prénom.`
+      : "Créateur : prénom inconnu — restez neutre sans périphrase.",
+    "N'écrivez JAMAIS « la personne qui a créé ce souvenir »,",
+    "« la personne qui a rempli le questionnaire », « la personne qui a choisi cette photo ».",
+    recipients ? `Destinataire(s) : ${recipients}.` : "",
+    "",
+    "Opinions / goûts / émotions / préférences :",
+    "restent attribués à leur auteur (Fact Model). Jamais « votre moment préféré »",
+    "si la préférence est celle du créateur.",
+    "",
+    "Longueur : beaucoup de blocs = titre + une ligne (≈ 15–35 mots).",
+    "Ne conservez pas toute la longueur du questionnaire.",
+    "N'embellissez pas pour remplir l'espace (pas d'adjectifs décoratifs,",
+    "pas d'interprétation émotionnelle, pas de savoir général).",
+    "",
+    "Titres de page : naturels, concrets, liés à la matière",
+    "(ex. « En Australie », phrase tirée du souvenir). Pas de titre abstrait",
+    "inventé pour « faire joli ». Sans thème fort → titre sobre.",
+    "Titres de blocs : concrets (lieu, événement) plutôt que formules éditoriales.",
+    "",
+    "pageIntro : OPTIONNEL. Si aucune information utile, pageIntro = null.",
+    "Ne produisez pas d'intro poétique automatique.",
     "",
     "OTHER_PERSON : écrivez POUR le destinataire. Évitez « X et moi », « J'ai adoré »",
-    "non attribué, et le ton documentaire « Vous êtes allé… » répété.",
-    "Une source peut devenir titre + une ligne (pas obligatoirement un paragraphe).",
+    "non attribué. Une source peut devenir titre + une ligne.",
     "",
     "Si les sources n'ont pas de lien narratif certain,",
-    "utilisez un titre de page neutre plutôt qu'inventer une histoire commune.",
-    "Interdit : concaténer des tags avec « & », titres génériques répétés",
+    "titre de page neutre — pas d'histoire commune inventée.",
+    "Interdit : concaténer des tags avec « & », titres génériques",
     "(« Un moment à garder », « Souvenir partagé »).",
     "",
     "Retournez EXACTEMENT un block par sourceId fourni — ni plus, ni moins.",
     "sourceId de chaque block DOIT matcher exactement un sourceId d'entrée.",
-  ].join("\n")
+  ]
+    .filter(Boolean)
+    .join("\n")
+}
+
+function repairInstruction(unsupportedClaims: string[]): string {
+  return [
+    "REPAIR : la copie précédente a été rejetée (monde fermé).",
+    "Simplifiez. Supprimez tout élément non supporté par les facts.",
+    "Utilisez les prénoms pour l'attribution. Préférez phrases courtes et concrètes.",
+    "pageIntro = null si inutile. Titres concrets, pas de poésie.",
+    unsupportedClaims.length
+      ? `Claims non supportés à éliminer : ${unsupportedClaims.join(" | ")}`
+      : "",
+    "Retournez exactement un block par requiredSourceIds.",
+  ]
+    .filter(Boolean)
+    .join("\n")
 }
 
 function applyDeterministicFallback(page: PersonalEditorialPageV1): PersonalEditorialPageV1 {
@@ -135,43 +187,34 @@ function validatePageCopy(
   copy: PersonalEditorialPageCopyV1,
   page: PersonalEditorialPageV1,
   ctx: PersonalEditorialAudienceContext,
-): { ok: boolean; reasons: string[] } {
+): { ok: boolean; reasons: string[]; unsupportedClaims: string[] } {
   const reasons: string[] = []
+  const unsupportedClaims: string[] = []
   const expectedIds = page.blocks.map(blockSourceId).sort()
   const gotIds = copy.blocks.map((b) => b.sourceId).sort()
   if (expectedIds.length !== gotIds.length || expectedIds.some((id, i) => id !== gotIds[i])) {
     reasons.push("sourceIds-mismatch")
+    unsupportedClaims.push("sourceIds mismatch (ajout ou suppression)")
   }
 
-  const titleCheck = validatePageTitle(copy.pageTitle)
-  if (!titleCheck.ok) reasons.push(...titleCheck.reasons)
+  const factsBySourceId = new Map(
+    page.blocks.map((b) => [blockSourceId(b), b.facts] as const),
+  )
+  const level = validatePageLevelCopy({
+    pageTitle: copy.pageTitle,
+    pageIntro: copy.pageIntro,
+    blocks: copy.blocks,
+    factsBySourceId,
+    ctx,
+  })
+  reasons.push(...level.reasons)
+  unsupportedClaims.push(...(level.unsupportedClaims ?? []))
 
-  if (/un moment à garder|souvenir partagé|un souvenir à garder/i.test(copy.pageTitle)) {
-    reasons.push("titre-generique")
+  return {
+    ok: reasons.length === 0,
+    reasons: [...new Set(reasons)],
+    unsupportedClaims: [...new Set(unsupportedClaims)],
   }
-
-  for (const blockCopy of copy.blocks) {
-    const block = page.blocks.find((b) => blockSourceId(b) === blockCopy.sourceId)
-    if (!block) {
-      reasons.push(`unknown-source:${blockCopy.sourceId}`)
-      continue
-    }
-    const v = validateEditorialCopy({
-      copy: {
-        kicker: blockCopy.kicker,
-        shortTitle: blockCopy.title,
-        displayText: blockCopy.text,
-        perspective: "NEUTRAL_EDITORIAL",
-        attributedQuote: false,
-        claimsUsed: [],
-      },
-      facts: block.facts,
-      recipientNames: ctx.recipientNames,
-    })
-    if (!v.ok) reasons.push(...v.reasons.map((r) => `${blockCopy.sourceId}:${r}`))
-  }
-
-  return { ok: reasons.length === 0, reasons }
 }
 
 function mergeAiCopyOntoPage(
@@ -266,6 +309,7 @@ export async function editorializePersonalEditorialPage(input: {
       mode: "FALLBACK",
       validationOk: true,
       validationReasons: ["force-fallback"],
+      unsupportedClaims: [],
       usedRepair: false,
     }
   }
@@ -277,21 +321,32 @@ export async function editorializePersonalEditorialPage(input: {
       mode: "FALLBACK",
       validationOk: true,
       validationReasons: ["provider-not-configured"],
+      unsupportedClaims: [],
       usedRepair: false,
     }
   }
 
   const payload = buildPageAiPayload(base, input.ctx)
   const expectedIds = base.blocks.map(blockSourceId)
+  const system = systemPrompt(input.ctx)
 
-  async function callOnce(seed: string): Promise<PersonalEditorialPageCopyV1 | null> {
+  async function callOnce(
+    seed: string,
+    extraInstruction?: string,
+  ): Promise<PersonalEditorialPageCopyV1 | null> {
     const raw = await provider.generateStructured<PersonalEditorialPageCopyV1>({
-      system: systemPrompt(),
+      system,
       input: {
         ...payload,
         requiredSourceIds: expectedIds,
-        instruction:
+        instruction: [
           "Retournez exactement un block pour chaque requiredSourceIds, dans n'importe quel ordre.",
+          "pageIntro = null si aucune info utile.",
+          "Textes courts (souvent 15–35 mots). Titres concrets.",
+          extraInstruction ?? "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
       },
       schemaName: "personal_editorial_page_copy_v1",
       schema: PAGE_COPY_SCHEMA,
@@ -325,20 +380,27 @@ export async function editorializePersonalEditorialPage(input: {
 
   let copy = await callOnce(input.seed)
   let usedRepair = false
+  let lastUnsupported: string[] = []
 
   if (copy) {
     let validation = validatePageCopy(copy, base, input.ctx)
+    lastUnsupported = validation.unsupportedClaims
     if (!validation.ok) {
       usedRepair = true
-      copy = await callOnce(`${input.seed}:repair`)
+      copy = await callOnce(
+        `${input.seed}:repair`,
+        repairInstruction(validation.unsupportedClaims),
+      )
       if (copy) {
         validation = validatePageCopy(copy, base, input.ctx)
+        lastUnsupported = validation.unsupportedClaims
         if (validation.ok) {
           return {
             page: mergeAiCopyOntoPage(base, copy),
             mode: "AI",
             validationOk: true,
             validationReasons: [],
+            unsupportedClaims: [],
             usedRepair: true,
           }
         }
@@ -348,6 +410,7 @@ export async function editorializePersonalEditorialPage(input: {
         mode: "FALLBACK",
         validationOk: false,
         validationReasons: validation.reasons,
+        unsupportedClaims: lastUnsupported,
         usedRepair: true,
       }
     }
@@ -356,6 +419,7 @@ export async function editorializePersonalEditorialPage(input: {
       mode: "AI",
       validationOk: true,
       validationReasons: [],
+      unsupportedClaims: [],
       usedRepair: false,
     }
   }
@@ -365,6 +429,7 @@ export async function editorializePersonalEditorialPage(input: {
     mode: "FALLBACK",
     validationOk: false,
     validationReasons: ["provider-error"],
+    unsupportedClaims: [],
     usedRepair: false,
   }
 }
