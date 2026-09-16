@@ -825,6 +825,7 @@ export type BookLabPhotoPagesResult =
         pageKey: string
         kind: "COLLAGE" | "TIMELINE"
         layoutId?: string
+        templateId?: string
         sourcePhotoIds: string[]
         page: import("@/lib/photo-pages").PhotoPageV1
       }>
@@ -858,6 +859,7 @@ export async function prepareBookLabPhotoPagesAction(input: {
       pageKey: page.pageKey,
       kind: page.kind,
       layoutId: page.kind === "COLLAGE" ? page.layoutId : undefined,
+      templateId: page.templateId,
       sourcePhotoIds: page.photos.map((p) => p.sourcePhotoId),
       page,
     })),

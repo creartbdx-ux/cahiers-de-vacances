@@ -51,7 +51,11 @@ import { PhotoCollageTemplate } from "@/components/book-renderer/templates/photo
 import { PhotoTimelineTemplate } from "@/components/book-renderer/templates/photo-timeline-template"
 import { blockTextWordCount, blockWeight } from "@/lib/personal-editorial"
 import { resolveMemoryPageSurface } from "@/lib/memory-pages"
-import { resolveCollageComposition } from "@/lib/photo-pages"
+import {
+  listCompatiblePhotoTemplates,
+  selectPhotoTemplate,
+  type PhotoTemplateId,
+} from "@/lib/photo-pages/templates"
 
 export type BookLabProject = {
   id: string
@@ -125,6 +129,7 @@ export function BookLabClient({
   const [photoPagesError, setPhotoPagesError] = useState<string | null>(null)
   const [photoPagesPending, startPhotoPagesTransition] = useTransition()
   const [photoPageIndex, setPhotoPageIndex] = useState(0)
+  const [labTemplateOverride, setLabTemplateOverride] = useState<PhotoTemplateId | "">("")
 
   const selected = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
@@ -193,15 +198,23 @@ export function BookLabClient({
     [memoryPage, photoMemoryPage, photoPagesLab, personalEditorial, visualIdentity, styles],
   )
 
-  const activePhotoComposition = useMemo(() => {
+  const activePhotoSelection = useMemo(() => {
     const entry = photoPagesLab?.pages[photoPageIndex]
-    if (!entry || entry.page.kind !== "COLLAGE") return null
-    return resolveCollageComposition({
-      layoutId: entry.page.layoutId,
+    if (!entry) return null
+    return selectPhotoTemplate({
       photos: entry.page.photos,
+      pageType: entry.page.kind,
       seed: `${seed.trim() || "lab-seed-1"}:photo-pages:${entry.pageKey}`,
+      forceTemplateId:
+        labTemplateOverride || entry.page.templateId || null,
     })
-  }, [photoPagesLab, photoPageIndex, seed])
+  }, [photoPagesLab, photoPageIndex, seed, labTemplateOverride])
+
+  const compatibleLabTemplates = useMemo(() => {
+    const entry = photoPagesLab?.pages[photoPageIndex]
+    if (!entry) return []
+    return listCompatiblePhotoTemplates(entry.page.kind, entry.page.photos.length)
+  }, [photoPagesLab, photoPageIndex])
 
   const memorySurface = memoryPage
     ? resolveMemoryPageSurface(memoryPalette, memoryPage.visualRole)
@@ -906,14 +919,12 @@ export function BookLabClient({
                 </p>
                 <ul className="space-y-2">
                   {photoPagesLab.pages.map((p, i) => {
-                    const comp =
-                      p.page.kind === "COLLAGE"
-                        ? resolveCollageComposition({
-                            layoutId: p.page.layoutId,
-                            photos: p.page.photos,
-                            seed: `${seed.trim() || "lab-seed-1"}:photo-pages:${p.pageKey}`,
-                          })
-                        : null
+                    const sel = selectPhotoTemplate({
+                      photos: p.page.photos,
+                      pageType: p.page.kind,
+                      seed: `${seed.trim() || "lab-seed-1"}:photo-pages:${p.pageKey}`,
+                      forceTemplateId: p.page.templateId ?? null,
+                    })
                     return (
                       <li key={p.pageKey}>
                         <button
@@ -924,51 +935,89 @@ export function BookLabClient({
                               ? "border-foreground bg-muted/50"
                               : "border-border bg-background",
                           )}
-                          onClick={() => setPhotoPageIndex(i)}
+                          onClick={() => {
+                            setPhotoPageIndex(i)
+                            setLabTemplateOverride("")
+                          }}
                         >
                           <span className="font-medium">
-                            Page photo {i + 1} · {p.kind}
-                            {p.layoutId ? ` · ${p.layoutId}` : ""}
-                            {comp ? ` · ${comp.variant}` : ""}
+                            Page photo {i + 1} · Template : {sel.templateId}
                           </span>
                           <span className="mt-1 block text-xs text-muted-foreground">
-                            layout : {p.layoutId ?? p.kind}
-                            {comp ? (
-                              <>
-                                <br />
-                                variant : {comp.variant}
-                                <br />
-                                heroPhotoId : {comp.heroPhotoId ?? "—"}
-                                <br />
-                                title :{" "}
-                                {comp.showPageTitle ? comp.pageTitle ?? "—" : "(hidden)"}
-                              </>
-                            ) : null}
+                            type : {p.kind}
                             <br />
-                            sourcePhotoIds : {p.sourcePhotoIds.join(", ")}
-                            <br />
-                            {p.page.photos.map((ph) => {
-                              const orientation =
-                                comp?.photos.find((x) => x.sourcePhotoId === ph.sourcePhotoId)
-                                  ?.orientation ?? "—"
+                            Photos :
+                            {sel.assignments.map((a) => {
+                              const ph = sel.orderedPhotos.find(
+                                (x) => x.sourcePhotoId === a.sourcePhotoId,
+                              )
                               return (
-                                <span
-                                  key={ph.sourcePhotoId}
-                                  className="mt-1 block pl-1"
-                                >
-                                  · {ph.sourcePhotoId.slice(0, 10)}… · {orientation}
-                                  <br />
-                                  caption : {ph.kicker ? `${ph.kicker} — ` : ""}
-                                  {ph.caption || "—"}
+                                <span key={a.slotId} className="mt-0.5 block pl-1">
+                                  {a.slotId} →{" "}
+                                  {ph?.kicker ||
+                                    ph?.caption?.slice(0, 20) ||
+                                    a.sourcePhotoId.slice(0, 8)}
+                                  {" · "}
+                                  {ph?.orientation ?? "—"}
                                 </span>
                               )
                             })}
+                            <br />
+                            sourcePhotoIds : {p.sourcePhotoIds.join(", ")}
                           </span>
                         </button>
                       </li>
                     )
                   })}
                 </ul>
+
+                {compatibleLabTemplates.length > 1 ? (
+                  <div className="rounded-lg border border-border p-3">
+                    <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                      Template Lab (comparaison uniquement)
+                    </label>
+                    <select
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                      value={labTemplateOverride || activePhotoSelection?.templateId || ""}
+                      onChange={(e) =>
+                        setLabTemplateOverride(
+                          (e.target.value as PhotoTemplateId) || "",
+                        )
+                      }
+                    >
+                      {compatibleLabTemplates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.id} — {t.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      N&apos;affecte pas le Blueprint / cahier automatique.
+                    </p>
+                  </div>
+                ) : null}
+
+                {activePhotoSelection ? (
+                  <div className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+                    Debug · {activePhotoSelection.templateId}
+                    <br />
+                    {activePhotoSelection.assignments.map((a) => {
+                      const ph = activePhotoSelection.orderedPhotos.find(
+                        (x) => x.sourcePhotoId === a.sourcePhotoId,
+                      )
+                      return (
+                        <span key={a.slotId} className="mt-1 block">
+                          {a.role}/{a.slotId} → {a.sourcePhotoId.slice(0, 10)}… ·{" "}
+                          {ph?.orientation}
+                          <br />
+                          caption : {ph?.kicker ? `${ph.kicker} — ` : ""}
+                          {ph?.caption || "—"}
+                        </span>
+                      )
+                    })}
+                  </div>
+                ) : null}
+
                 {photoPagesLab.pageCount === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Aucune page planifiée (ex. une seule photo sans contenu assez fort).
@@ -976,7 +1025,7 @@ export function BookLabClient({
                 ) : null}
               </div>
               <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-6">
-                {photoPagesLab.pages[photoPageIndex] ? (
+                {photoPagesLab.pages[photoPageIndex] && activePhotoSelection ? (
                   <PagePreview>
                     <BookPage
                       palette={memoryPalette}
@@ -988,6 +1037,11 @@ export function BookLabClient({
                           photos={photoPagesLab.pages[photoPageIndex]!.page.photos}
                           style={memoryStyle}
                           palette={memoryPalette}
+                          seed={`${seed.trim() || "lab-seed-1"}:photo-pages:${photoPagesLab.pages[photoPageIndex]!.pageKey}`}
+                          pageKey={photoPagesLab.pages[photoPageIndex]!.pageKey}
+                          templateId={photoPagesLab.pages[photoPageIndex]!.page.templateId}
+                          forceTemplateId={labTemplateOverride || null}
+                          selection={activePhotoSelection}
                         />
                       ) : (
                         <PhotoCollageTemplate
@@ -1000,7 +1054,14 @@ export function BookLabClient({
                           style={memoryStyle}
                           palette={memoryPalette}
                           seed={`${seed.trim() || "lab-seed-1"}:photo-pages:${photoPagesLab.pages[photoPageIndex]!.pageKey}`}
-                          composition={activePhotoComposition ?? undefined}
+                          pageKey={photoPagesLab.pages[photoPageIndex]!.pageKey}
+                          templateId={
+                            photoPagesLab.pages[photoPageIndex]!.page.kind === "COLLAGE"
+                              ? photoPagesLab.pages[photoPageIndex]!.page.templateId
+                              : undefined
+                          }
+                          forceTemplateId={labTemplateOverride || null}
+                          selection={activePhotoSelection}
                         />
                       )}
                     </BookPage>

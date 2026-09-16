@@ -19,6 +19,7 @@ export type ScoredIntent = {
   implementationStatusOverride?: ImplementationStatus
   personalLayoutId?: string
   photoLayoutId?: string
+  photoTemplateId?: string
   sourceMemoryIds?: string[]
   sourcePhotoIds?: string[]
 }

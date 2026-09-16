@@ -6,6 +6,8 @@ import type {
   PlanPhotoPagesResult,
 } from "./types"
 import { editorializePhotoCopy } from "./copy"
+import { selectPhotoTemplate } from "./templates/select"
+import type { PhotoTemplateId } from "./templates/types"
 
 function hash(s: string): number {
   let h = 2166136261
@@ -210,22 +212,28 @@ export function planPhotoPages(input: {
         return sa - sb || a.sourcePhotoId.localeCompare(b.sourcePhotoId)
       })
       if (timed.every((p) => p.sortKey != null)) {
-        pages.push({
-          pageKey: `photo:${seed}:${pageIndex}`,
-          kind: "TIMELINE",
-          photos: timed,
-        })
+        pages.push(
+          bindTemplateToPage({
+            pageKey: `photo:${seed}:${pageIndex}`,
+            kind: "TIMELINE",
+            photos: timed,
+            seed: `${seed}:page:${pageIndex}`,
+          }),
+        )
         pageIndex++
         continue
       }
     }
 
-    pages.push({
-      pageKey: `photo:${seed}:${pageIndex}`,
-      kind: "COLLAGE",
-      layoutId: collageLayoutForCount(slice.length),
-      photos: slice,
-    })
+    pages.push(
+      bindTemplateToPage({
+        pageKey: `photo:${seed}:${pageIndex}`,
+        kind: "COLLAGE",
+        layoutId: collageLayoutForCount(slice.length),
+        photos: slice,
+        seed: `${seed}:page:${pageIndex}`,
+      }),
+    )
     pageIndex++
   }
 
@@ -237,6 +245,50 @@ export function planPhotoPages(input: {
     unusedPhotoIds: items
       .map((i) => i.sourcePhotoId)
       .filter((id) => !used.has(id)),
+  }
+}
+
+/**
+ * Bind a structural template to a planned photo page (no free geometry).
+ */
+export function bindTemplateToPage(input: {
+  pageKey: string
+  kind: "COLLAGE" | "TIMELINE"
+  layoutId?: PhotoCollageLayoutId
+  photos: PhotoPageItem[]
+  seed: string
+  aspectRatios?: Record<string, number>
+  forceTemplateId?: PhotoTemplateId | null
+}): PhotoPageV1 {
+  const selection = selectPhotoTemplate({
+    photos: input.photos,
+    pageType: input.kind,
+    seed: input.seed,
+    aspectRatios: input.aspectRatios,
+    forceTemplateId: input.forceTemplateId,
+  })
+  if (input.kind === "TIMELINE") {
+    return {
+      pageKey: input.pageKey,
+      kind: "TIMELINE",
+      templateId: selection.templateId,
+      photos: selection.orderedPhotos,
+      slotAssignments: selection.assignments,
+    }
+  }
+  return {
+    pageKey: input.pageKey,
+    kind: "COLLAGE",
+    layoutId:
+      input.layoutId ??
+      (selection.template.photoCount <= 2
+        ? "COLLAGE_2"
+        : selection.template.photoCount === 3
+          ? "COLLAGE_3"
+          : "COLLAGE_4"),
+    templateId: selection.templateId,
+    photos: selection.orderedPhotos,
+    slotAssignments: selection.assignments,
   }
 }
 

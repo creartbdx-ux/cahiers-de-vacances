@@ -82,8 +82,10 @@ export interface BlueprintPageSlot {
   reason: string
   /** PERSONAL_EDITORIAL_PAGE layout when composed (lab / experimental). */
   personalLayoutId?: string
-  /** PHOTO_COLLAGE_PAGE layout. */
+  /** PHOTO_COLLAGE_PAGE layout family (COLLAGE_2/3/4). */
   photoLayoutId?: string
+  /** Structural photo template id (PHOTO_3_B, …). */
+  photoTemplateId?: string
   sourceMemoryIds?: string[]
   sourcePhotoIds?: string[]
 }

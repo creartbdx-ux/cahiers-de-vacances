@@ -13,7 +13,8 @@ import {
   splitPhotoCounts,
   buildPhotoCaption,
   classifyPhotoOrientation,
-  resolveCollageComposition,
+  selectPhotoTemplate,
+  listCompatiblePhotoTemplates,
   type PhotoPageItem,
   type PhotoPageV1,
 } from "@/lib/photo-pages"
@@ -247,6 +248,7 @@ test("templates Polaroid / timeline rendent sourcePhotoId", () => {
     pageKey: "p1",
     kind: "COLLAGE",
     layoutId: "COLLAGE_2",
+    templateId: "PHOTO_2_A",
     photos: [
       {
         sourcePhotoId: "ph1",
@@ -279,11 +281,13 @@ test("templates Polaroid / timeline rendent sourcePhotoId", () => {
       style: getStyleTokens("RETRO"),
       palette: PALETTE,
       seed: "tpl",
+      templateId: "PHOTO_2_A",
+      pageKey: "p1",
     }),
   )
   assert.ok(html.includes('data-source-photo-id="ph1"'))
-  assert.ok(html.includes('data-layout="photo-collage"'))
-  assert.ok(html.includes("data-variant="))
+  assert.ok(html.includes('data-template-id="PHOTO_2_A"'))
+  assert.ok(html.includes('data-layout="photo-page-template"'))
 
   const tl = renderToStaticMarkup(
     createElement(PhotoTimelineTemplate, {
@@ -298,13 +302,26 @@ test("templates Polaroid / timeline rendent sourcePhotoId", () => {
           dateLabel: "2024",
           sortKey: 2024,
         },
+        {
+          sourcePhotoId: "ph3",
+          imageUrl: "https://example.com/3.jpg",
+          kicker: "AUS",
+          caption: "Voyage.",
+          anecdote: null,
+          place: null,
+          dateLabel: "2025",
+          sortKey: 2025,
+          participantIds: [],
+        },
       ],
       style: getStyleTokens("RETRO"),
       palette: PALETTE,
+      templateId: "PHOTO_TIMELINE_3_A",
+      pageKey: "tl1",
     }),
   )
   assert.ok(tl.includes("2019"))
-  assert.ok(tl.includes('data-layout="photo-timeline"'))
+  assert.ok(tl.includes('data-template-id="PHOTO_TIMELINE_3_A"'))
 })
 
 // --- Design / composition (planner unchanged) ---
@@ -324,73 +341,92 @@ function item(id: string, over: Partial<PhotoPageItem> = {}): PhotoPageItem {
   }
 }
 
-test("landscape favorisée en zone large (HERO_TOP)", () => {
+test("3 landscape => PHOTO_3_B", () => {
   const photos = [
-    item("land", { kicker: "A", caption: "Vue large." }),
-    item("l2", { kicker: "B", caption: "Autre large." }),
-    item("sq", { kicker: "C", caption: "Carré." }),
+    item("a", { caption: "A" }),
+    item("b", { caption: "B" }),
+    item("c", { caption: "C" }),
   ]
-  const comp = resolveCollageComposition({
-    layoutId: "COLLAGE_3",
+  const sel = selectPhotoTemplate({
     photos,
-    seed: "orient-land-majority",
-    aspectRatios: { land: 1.7, l2: 1.5, sq: 1.0 },
+    pageType: "COLLAGE",
+    seed: "3land",
+    aspectRatios: { a: 1.6, b: 1.5, c: 1.4 },
   })
-  assert.ok(comp.variant === "HERO_TOP" || comp.variant === "HERO_LEFT")
-  if (comp.variant === "HERO_TOP") {
-    assert.ok(
-      comp.heroPhotoId === "land" || comp.heroPhotoId === "l2",
-      "wide hero should be landscape",
-    )
-  }
-  assert.equal(classifyPhotoOrientation(1.6), "LANDSCAPE")
-  assert.equal(classifyPhotoOrientation(0.7), "PORTRAIT")
+  assert.equal(sel.templateId, "PHOTO_3_B")
 })
 
-test("portrait favorisée en zone verticale (HERO_LEFT/RIGHT)", () => {
-  const photos = [
-    item("port", { kicker: "P", caption: "Debout." }),
-    item("port2", { kicker: "Q", caption: "Debout deux." }),
-    item("l1", { kicker: "L", caption: "Large." }),
-  ]
-  const comp = resolveCollageComposition({
-    layoutId: "COLLAGE_3",
-    photos,
-    seed: "orient-port-majority",
-    aspectRatios: { port: 0.68, port2: 0.72, l1: 1.5 },
+test("1 landscape + 2 portrait => PHOTO_3_A ou PHOTO_3_C", () => {
+  const sel = selectPhotoTemplate({
+    photos: [item("a"), item("b"), item("c")],
+    pageType: "COLLAGE",
+    seed: "mix-lp",
+    aspectRatios: { a: 1.6, b: 0.7, c: 0.75 },
   })
-  assert.ok(comp.variant === "HERO_LEFT" || comp.variant === "HERO_RIGHT")
-  assert.ok(
-    comp.heroPhotoId === "port" || comp.heroPhotoId === "port2",
-    `expected portrait hero, got ${comp.heroPhotoId}`,
-  )
+  assert.ok(["PHOTO_3_A", "PHOTO_3_C"].includes(sel.templateId))
 })
 
-test("même seed => même variante collage", () => {
-  const photos = [
-    item("a", { caption: "Un." }),
-    item("b", { caption: "Deux." }),
-    item("c", { caption: "Trois." }),
-  ]
+test("2 portrait => PHOTO_2_A", () => {
+  const sel = selectPhotoTemplate({
+    photos: [item("a"), item("b")],
+    pageType: "COLLAGE",
+    seed: "2port",
+    aspectRatios: { a: 0.7, b: 0.72 },
+  })
+  assert.equal(sel.templateId, "PHOTO_2_A")
+})
+
+test("2 landscape => PHOTO_2_B", () => {
+  const sel = selectPhotoTemplate({
+    photos: [item("a"), item("b")],
+    pageType: "COLLAGE",
+    seed: "2land",
+    aspectRatios: { a: 1.5, b: 1.6 },
+  })
+  assert.equal(sel.templateId, "PHOTO_2_B")
+})
+
+test("4 photos => template 4 slots", () => {
+  const sel = selectPhotoTemplate({
+    photos: [item("a"), item("b"), item("c"), item("d")],
+    pageType: "COLLAGE",
+    seed: "4p",
+    aspectRatios: { a: 1.5, b: 1, c: 0.8, d: 1.2 },
+  })
+  assert.ok(["PHOTO_4_A", "PHOTO_4_B"].includes(sel.templateId))
+  assert.equal(sel.assignments.length, 4)
+})
+
+test("même seed => même template", () => {
+  const photos = [item("a"), item("b"), item("c")]
   const ratios = { a: 1.5, b: 0.8, c: 1.1 }
-  const x = resolveCollageComposition({
-    layoutId: "COLLAGE_3",
+  const x = selectPhotoTemplate({
     photos,
-    seed: "stable-var",
+    pageType: "COLLAGE",
+    seed: "stable-tpl",
     aspectRatios: ratios,
   })
-  const y = resolveCollageComposition({
-    layoutId: "COLLAGE_3",
+  const y = selectPhotoTemplate({
     photos,
-    seed: "stable-var",
+    pageType: "COLLAGE",
+    seed: "stable-tpl",
     aspectRatios: ratios,
   })
-  assert.equal(x.variant, y.variant)
-  assert.equal(x.heroPhotoId, y.heroPhotoId)
-  assert.deepEqual(
-    x.photos.map((p) => p.sourcePhotoId),
-    y.photos.map((p) => p.sourcePhotoId),
-  )
+  assert.equal(x.templateId, y.templateId)
+  assert.deepEqual(x.assignments, y.assignments)
+})
+
+test("toutes les photos affectées exactement une fois", () => {
+  const photos = [item("a"), item("b"), item("c")]
+  const sel = selectPhotoTemplate({
+    photos,
+    pageType: "COLLAGE",
+    seed: "once",
+    aspectRatios: { a: 1.6, b: 0.7, c: 0.8 },
+  })
+  const ids = sel.assignments.map((a) => a.sourcePhotoId).sort()
+  assert.deepEqual(ids, ["a", "b", "c"])
+  assert.equal(new Set(ids).size, 3)
 })
 
 test("captions non répétitives et courtes", () => {
@@ -431,38 +467,24 @@ test("caption d'une photo jamais croisée", () => {
   assert.ok(!/porto/i.test(`${sydney.kicker} ${sydney.caption}`))
 })
 
-test("COLLAGE_2 / 3 / 4 compositions valides", () => {
-  const c2 = resolveCollageComposition({
-    layoutId: "COLLAGE_2",
-    photos: [item("a"), item("b")],
-    seed: "v2",
-    aspectRatios: { a: 0.7, b: 0.7 },
-  })
-  assert.equal(c2.variant, "STACKED")
+test("template incompatible jamais sélectionné", () => {
+  const compat = listCompatiblePhotoTemplates("COLLAGE", 2).map((t) => t.id)
+  assert.ok(compat.includes("PHOTO_2_A"))
+  assert.ok(!compat.includes("PHOTO_3_A"))
+  assert.ok(!compat.includes("PHOTO_TIMELINE_3_A"))
+})
 
-  const c2b = resolveCollageComposition({
-    layoutId: "COLLAGE_2",
-    photos: [item("a"), item("b")],
-    seed: "v2b",
-    aspectRatios: { a: 1.5, b: 1.4 },
+test("timeline utilise uniquement template timeline", () => {
+  const { pages } = planPhotoPages({
+    photos: [
+      photo("a", { caption: "Eysines 2019", takenAt: "2019-03-30" }),
+      photo("b", { caption: "Porto 2024", takenAt: "2024-06-01" }),
+      photo("c", { caption: "Australie 2025", takenAt: "2025-01-10" }),
+    ],
+    seed: "tl-tpl",
   })
-  assert.equal(c2b.variant, "SIDE_BY_SIDE")
-
-  const c3 = resolveCollageComposition({
-    layoutId: "COLLAGE_3",
-    photos: [item("a"), item("b"), item("c")],
-    seed: "v3",
-  })
-  assert.ok(["HERO_LEFT", "HERO_TOP", "HERO_RIGHT"].includes(c3.variant))
-  assert.ok(c3.heroPhotoId)
-
-  const c4 = resolveCollageComposition({
-    layoutId: "COLLAGE_4",
-    photos: [item("a"), item("b"), item("c"), item("d")],
-    seed: "v4",
-    aspectRatios: { a: 1.6, b: 1, c: 1, d: 1 },
-  })
-  assert.ok(["GRID_2X2", "HERO_PLUS_THREE"].includes(c4.variant))
+  assert.equal(pages[0]!.kind, "TIMELINE")
+  assert.equal(pages[0]!.templateId, "PHOTO_TIMELINE_3_A")
 })
 
 test("pas de timeline sans dates fiables (planner)", () => {
@@ -475,4 +497,19 @@ test("pas de timeline sans dates fiables (planner)", () => {
     seed: "no-tl",
   })
   assert.equal(pages[0]!.kind, "COLLAGE")
+  assert.ok(pages[0]!.templateId?.startsWith("PHOTO_3_"))
+})
+
+test("planPhotoPages attache templateId", () => {
+  const { pages } = planPhotoPages({
+    photos: [photo("a"), photo("b"), photo("c")],
+    seed: "bind",
+  })
+  assert.ok(pages[0]!.templateId)
+  assert.ok(pages[0]!.slotAssignments?.length === 3)
+})
+
+test("orientation helpers inchangés", () => {
+  assert.equal(classifyPhotoOrientation(1.6), "LANDSCAPE")
+  assert.equal(classifyPhotoOrientation(0.7), "PORTRAIT")
 })

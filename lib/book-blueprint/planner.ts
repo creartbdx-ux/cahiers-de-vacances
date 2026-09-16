@@ -194,7 +194,8 @@ function intentFromPhotoPage(
       sourceNeeds: ["photo"],
       participantIds,
       sourcePhotoIds,
-      reason: `Timeline photo (${page.photos.length} photo(s), dates fiables)`,
+      photoTemplateId: page.templateId,
+      reason: `Timeline photo (${page.photos.length} photo(s)${page.templateId ? `, ${page.templateId}` : ""})`,
     }
   }
   return {
@@ -203,8 +204,9 @@ function intentFromPhotoPage(
     sourceNeeds: ["photo"],
     participantIds,
     photoLayoutId: page.layoutId,
+    photoTemplateId: page.templateId,
     sourcePhotoIds,
-    reason: `Album photo ${page.layoutId} (${page.photos.length} photo(s))`,
+    reason: `Album photo ${page.templateId ?? page.layoutId} (${page.photos.length} photo(s))`,
   }
 }
 
@@ -614,6 +616,7 @@ function toBlueprintPages(
       reason: item.reason,
       ...(item.personalLayoutId ? { personalLayoutId: item.personalLayoutId } : {}),
       ...(item.photoLayoutId ? { photoLayoutId: item.photoLayoutId } : {}),
+      ...(item.photoTemplateId ? { photoTemplateId: item.photoTemplateId } : {}),
       ...(item.sourceMemoryIds?.length ? { sourceMemoryIds: item.sourceMemoryIds } : {}),
       ...(item.sourcePhotoIds?.length ? { sourcePhotoIds: item.sourcePhotoIds } : {}),
     }

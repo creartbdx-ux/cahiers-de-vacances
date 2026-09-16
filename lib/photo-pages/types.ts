@@ -32,14 +32,20 @@ export interface PhotoPageItem {
 export interface PhotoCollagePageV1 {
   pageKey: string
   kind: "COLLAGE"
+  /** @deprecated Prefer templateId — kept for Blueprint layout family. */
   layoutId: PhotoCollageLayoutId
+  /** Structural template from the photo template registry. */
+  templateId?: import("./templates/types").PhotoTemplateId
   photos: PhotoPageItem[]
+  slotAssignments?: import("./templates/select").PhotoSlotAssignment[]
 }
 
 export interface PhotoTimelinePageV1 {
   pageKey: string
   kind: "TIMELINE"
+  templateId?: import("./templates/types").PhotoTemplateId
   photos: PhotoPageItem[]
+  slotAssignments?: import("./templates/select").PhotoSlotAssignment[]
 }
 
 export type PhotoPageV1 = PhotoCollagePageV1 | PhotoTimelinePageV1
