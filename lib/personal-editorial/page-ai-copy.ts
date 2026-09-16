@@ -5,6 +5,10 @@ import type { PersonalBlockV1, PersonalEditorialPageV1 } from "./types"
 import { validatePageLevelCopy } from "./validate-editorial"
 import { buildEditorialCopyFromFacts } from "./editorial-copy"
 import { assertPagePhotoProvenance } from "./provenance"
+import {
+  groupEditorialCompatibility,
+  localBlockKicker,
+} from "./relations"
 
 export type PersonalEditorialMode = "AI" | "FALLBACK"
 
@@ -12,6 +16,7 @@ export interface PersonalEditorialPageCopyV1 {
   pageTitle: string
   pageKicker: string | null
   pageIntro: string | null
+  pageRelationType: "STRONG" | "NEUTRAL"
   blocks: Array<{
     sourceId: string
     kicker: string | null
@@ -32,11 +37,12 @@ export interface PageEditorialResult {
 const PAGE_COPY_SCHEMA: JsonSchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["pageTitle", "pageKicker", "pageIntro", "blocks"],
+  required: ["pageTitle", "pageKicker", "pageIntro", "pageRelationType", "blocks"],
   properties: {
     pageTitle: { type: "string", minLength: 1 },
     pageKicker: { type: ["string", "null"] },
     pageIntro: { type: ["string", "null"] },
+    pageRelationType: { type: "string", enum: ["STRONG", "NEUTRAL"] },
     blocks: {
       type: "array",
       items: {
@@ -62,6 +68,7 @@ function buildPageAiPayload(
   page: PersonalEditorialPageV1,
   ctx: PersonalEditorialAudienceContext,
 ) {
+  const group = groupEditorialCompatibility(page.blocks)
   return {
     audience: ctx.audience,
     creator: { name: ctx.creatorName },
@@ -71,17 +78,28 @@ function buildPageAiPayload(
       layout: page.layoutId,
       semanticTheme: page.theme.title,
       groupingReason: page.theme.groupingReason,
+      pageRelationType: page.pageRelationType ?? group.level,
+      pageRelationReason: page.pageRelationReason ?? group.reason,
+      relations: group.relations.map((r) => ({
+        type: r.type,
+        subjectSourceId: r.subjectSourceId,
+        objectSourceId: r.objectSourceId,
+        evidence: r.evidence,
+      })),
       sources: page.blocks.map((b) => ({
         sourceId: blockSourceId(b),
         sourceType: b.type,
         originalText: b.originalText,
+        localKickerHint: localBlockKicker(b.facts),
         facts: {
           sharedFacts: b.facts.sharedFacts,
           creatorOpinions: b.facts.creatorOpinions,
           recipientFacts: b.facts.recipientFacts,
+          recipientOpinions: b.facts.recipientOpinions,
           locations: b.facts.locations,
           tripContext: b.facts.tripContext,
           events: b.facts.events,
+          dates: b.facts.dates,
           category: b.facts.category,
         },
       })),
@@ -151,8 +169,17 @@ function systemPrompt(ctx: PersonalEditorialAudienceContext): string {
     "Interdit : concaténer des tags avec « & », titres génériques",
     "(« Un moment à garder », « Souvenir partagé »).",
     "",
+    "RELATIONS : respectez pageRelationType fourni (STRONG ou NEUTRAL).",
+    "NEUTRAL : ne créez aucun récit liant les sources ; titres de page neutres.",
+    "Ne transformez jamais NEUTRAL en histoire commune.",
+    "Ne déplacez aucune source entre pages.",
+    "Kicker de chaque block : UNIQUEMENT depuis les facts locaux du block",
+    "(localKickerHint). Ex. Tokyo/onsen → JAPON/TOKYO/ESCALE AU JAPON,",
+    "jamais AUSTRALIE par héritage du thème de page.",
+    "",
     "Retournez EXACTEMENT un block par sourceId fourni — ni plus, ni moins.",
     "sourceId de chaque block DOIT matcher exactement un sourceId d'entrée.",
+    "pageRelationType doit reprendre celui fourni dans pageContext.",
   ]
     .filter(Boolean)
     .join("\n")
@@ -197,6 +224,43 @@ function validatePageCopy(
     unsupportedClaims.push("sourceIds mismatch (ajout ou suppression)")
   }
 
+  const expectedRel = page.pageRelationType ?? groupEditorialCompatibility(page.blocks).level
+  const expectedLevel = expectedRel === "CONFLICT" ? "NEUTRAL" : expectedRel
+  if (copy.pageRelationType !== expectedLevel) {
+    // Soft: allow AI to keep NEUTRAL when page is STRONG, but never invent STRONG
+    if (copy.pageRelationType === "STRONG" && expectedLevel === "NEUTRAL") {
+      reasons.push("relation-inventee-strong")
+      unsupportedClaims.push("pageRelationType STRONG alors que le packing est NEUTRAL")
+    }
+  }
+
+  if (
+    expectedLevel === "NEUTRAL" &&
+    /\bet\b|·/.test(copy.pageTitle) &&
+    /eysines|porto|tokyo|sydney|australie|japon/i.test(copy.pageTitle)
+  ) {
+    reasons.push("titre-lieux-concatenes")
+    unsupportedClaims.push(`titre NEUTRAL interdit: « ${copy.pageTitle} »`)
+  }
+
+  for (const blockCopy of copy.blocks) {
+    const block = page.blocks.find((b) => blockSourceId(b) === blockCopy.sourceId)
+    if (!block || !blockCopy.kicker) continue
+    const local = localBlockKicker(block.facts)
+    // Japan/Tokyo block must not inherit AUSTRALIE kicker from page theme
+    if (
+      /japon|tokyo|onsen|escale/i.test(
+        `${block.facts.locations.join(" ")} ${block.facts.rawText}`,
+      ) &&
+      /^australie$/i.test(blockCopy.kicker.trim())
+    ) {
+      reasons.push(`${blockCopy.sourceId}:kicker-heritage-page`)
+      unsupportedClaims.push(
+        `${blockCopy.sourceId}: kicker AUSTRALIE hérité — attendu local (${local ?? "JAPON/TOKYO"})`,
+      )
+    }
+  }
+
   const factsBySourceId = new Map(
     page.blocks.map((b) => [blockSourceId(b), b.facts] as const),
   )
@@ -225,12 +289,22 @@ function mergeAiCopyOntoPage(
   const blocks = page.blocks.map((b) => {
     const c = byId.get(blockSourceId(b))
     if (!c) return b
+    const localKicker = localBlockKicker(b.facts)
+    let kicker = c.kicker?.trim() || localKicker
+    // Never keep AUSTRALIE-only kicker on Japan/Tokyo local blocks
+    if (
+      kicker &&
+      /^australie$/i.test(kicker) &&
+      /japon|tokyo|onsen/i.test(`${b.facts.locations.join(" ")} ${b.facts.rawText}`)
+    ) {
+      kicker = localKicker
+    }
     return {
       ...b,
       title: c.title?.trim() || b.shortTitle || b.title,
       shortTitle: c.title?.trim() || b.shortTitle,
-      kicker: c.kicker,
-      eyebrow: c.kicker || b.eyebrow,
+      kicker,
+      eyebrow: kicker || b.eyebrow,
       body: c.text,
       displayText: c.text,
       usedAi: true,
@@ -250,6 +324,7 @@ function mergeAiCopyOntoPage(
     },
     pageKicker: copy.pageKicker,
     pageIntro: copy.pageIntro,
+    pageRelationType: copy.pageRelationType,
     editorialMode: "AI",
   }
 }
@@ -360,6 +435,8 @@ export async function editorializePersonalEditorialPage(input: {
         raw.data.pageIntro === null || raw.data.pageIntro === undefined
           ? null
           : String(raw.data.pageIntro).trim() || null,
+      pageRelationType:
+        raw.data.pageRelationType === "STRONG" ? "STRONG" : "NEUTRAL",
       blocks: (raw.data.blocks ?? []).map((b) => ({
         sourceId: String(b.sourceId ?? "").trim(),
         kicker:

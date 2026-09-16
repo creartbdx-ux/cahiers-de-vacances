@@ -109,6 +109,7 @@ function editorialDefaults(text: string, sourceId = "x") {
       locations: [],
       tripContext: [],
       events: [],
+      dates: [],
       creatorOpinions: [],
       recipientOpinions: [],
       quotes: text ? [text] : [],

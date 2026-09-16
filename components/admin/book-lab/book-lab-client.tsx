@@ -916,11 +916,17 @@ export function BookLabClient({
                           Page theme : {p.page.theme?.title ?? "—"}
                           {p.page.pageKicker ? ` · kicker ${p.page.pageKicker}` : ""}
                           <br />
-                          Compatibility :{" "}
+                          Compatibility : {p.page.pageRelationType ?? "—"}
+                          {p.page.pageRelationReason
+                            ? ` — Reason: ${p.page.pageRelationReason}`
+                            : p.page.theme?.groupingReason
+                              ? ` — Reason: ${p.page.theme.groupingReason}`
+                              : ""}
+                          <br />
+                          RELATION TYPE : {p.page.pageRelationType ?? "—"}
+                          <br />
+                          Compat score :{" "}
                           {Math.round((p.page.compatibilityScore ?? 0) * 100)} %
-                          {p.page.theme?.groupingReason
-                            ? ` — ${p.page.theme.groupingReason}`
-                            : ""}
                           <br />
                           Poids : {p.weight} / 4 · Remplissage logique :{" "}
                           {Math.round((p.page.packingFillScore ?? p.page.pageFillScore) * 100)} %
@@ -964,14 +970,26 @@ export function BookLabClient({
                                 SOURCE : {(b.originalText || "").slice(0, 120)}
                                 {(b.originalText || "").length > 120 ? "…" : ""}
                                 <br />
-                                FACT MODEL :{" "}
+                                FACTS :{" "}
                                 {[
-                                  ...(b.facts?.creatorOpinions ?? []),
-                                  ...(b.facts?.sharedFacts ?? []),
-                                  ...(b.facts?.locations ?? []),
+                                  ...(b.facts?.locations ?? []).map((x) => `loc:${x}`),
+                                  ...(b.facts?.tripContext ?? []).map((x) => `trip:${x}`),
+                                  ...(b.facts?.events ?? []).map((x) => `evt:${x}`),
+                                  ...(b.facts?.dates ?? []).map((x) => `date:${x}`),
+                                  ...(b.facts?.creatorOpinions ?? []).slice(0, 2),
+                                  ...(b.facts?.sharedFacts ?? []).slice(0, 2),
                                 ]
-                                  .slice(0, 4)
+                                  .slice(0, 8)
                                   .join(" · ") || "—"}
+                                <br />
+                                RELATIONS :{" "}
+                                {p.page.pageRelationType === "STRONG"
+                                  ? p.page.pageRelationReason || "STRONG"
+                                  : p.page.pageRelationType === "NEUTRAL"
+                                    ? p.page.pageRelationReason || "NEUTRAL"
+                                    : "—"}
+                                <br />
+                                KICKER SOURCE : {b.kicker || "—"}
                                 <br />
                                 AI COPY : {(b.displayText || b.body || "").slice(0, 140)}
                                 {(b.displayText || b.body || "").length > 140 ? "…" : ""}

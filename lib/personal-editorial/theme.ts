@@ -1,11 +1,15 @@
 import type { PersonalBlockV1, PersonalEditorialPageTheme } from "./types"
-import { groupCompatibilityScore, isNeutralGrouping } from "./compatibility"
+import { groupRelationMeta, isNeutralGrouping } from "./compatibility"
 import { validatePageTitle } from "./validate-editorial"
 import {
   factsSupportAustraliaJapanLink,
-  factsShareTrip,
   type PersonalSourceFacts,
 } from "./facts"
+import {
+  hasAustraliaTrip,
+  hasExplicitAustraliaJapanEscale,
+  hasJapanLocal,
+} from "./relations"
 
 function uniq(xs: string[]): string[] {
   return [...new Set(xs.filter(Boolean))]
@@ -17,6 +21,7 @@ function blockFacts(b: PersonalBlockV1): PersonalSourceFacts | null {
 
 /**
  * Natural page title from blocks — NEVER concatenates tags with "&".
+ * NEUTRAL pages never invent a common story between unrelated places.
  */
 export function buildNaturalPageCopy(blocks: PersonalBlockV1[]): PersonalEditorialPageTheme {
   const sourceIds = blocks.map((b) =>
@@ -25,9 +30,8 @@ export function buildNaturalPageCopy(blocks: PersonalBlockV1[]): PersonalEditori
   const tags = uniq(blocks.flatMap((b) => b.semanticTags))
   const locations = uniq(blocks.flatMap((b) => b.locations))
   const trips = uniq(blocks.flatMap((b) => b.trips))
-  const categories = uniq(blocks.map((b) => b.semanticCategory))
-  const compat = groupCompatibilityScore(blocks)
   const allFacts = blocks.map(blockFacts).filter(Boolean) as PersonalSourceFacts[]
+  const meta = groupRelationMeta(blocks)
 
   if (blocks.length === 1) {
     const lead = blocks[0]!
@@ -41,95 +45,94 @@ export function buildNaturalPageCopy(blocks: PersonalBlockV1[]): PersonalEditori
     }
   }
 
-  if (isNeutralGrouping(blocks) || compat < 0.55) {
-    const title = pickNeutralTitle(sourceIds.join(":"))
+  if (meta.level === "NEUTRAL" || isNeutralGrouping(blocks)) {
     return {
       themeType: "NEUTRAL_MOMENTS",
-      title,
+      title: pickNeutralTitle(sourceIds.join(":")),
       subtitle: null,
       semanticTags: tags,
       sourceIds,
-      groupingReason: "Regroupement neutre — aucune thématique forcée",
+      groupingReason: meta.reason || "Regroupement neutre — aucune thématique forcée",
     }
   }
 
-  // Strong Australia trip shared by all
-  const ausBlocks = blocks.filter(
-    (b) =>
-      b.trips.some((t) => /australie/i.test(t)) ||
-      b.locations.some((l) => /australie|whitehaven|sydney/i.test(l)),
-  )
-  const japanBlocks = blocks.filter(
-    (b) =>
-      b.locations.some((l) => /japon|tokyo|onsen/i.test(l)) ||
-      b.trips.some((t) => /japon/i.test(t)),
-  )
+  // STRONG: Australia + Japan escale
+  const hasAusJapan =
+    allFacts.some((f) => hasExplicitAustraliaJapanEscale(f)) &&
+    allFacts.some((f) => hasAustraliaTrip(f)) &&
+    (allFacts.some((f) => hasJapanLocal(f)) ||
+      allFacts.some((a, i) =>
+        allFacts.some((b, j) => i < j && factsSupportAustraliaJapanLink(a, b)),
+      ))
 
-  if (ausBlocks.length === blocks.length) {
-    return finishTitle(
-      {
-        themeType: "THEMED",
-        title: "En Australie",
-        subtitle: null,
-        semanticTags: tags,
-        sourceIds,
-        groupingReason: "Voyage Australie explicite sur tous les blocs",
-      },
-    )
-  }
-
-  if (
-    ausBlocks.length > 0 &&
-    japanBlocks.length > 0 &&
-    allFacts.length >= 2 &&
-    allFacts.some((a, i) =>
-      allFacts.some((b, j) => i < j && factsSupportAustraliaJapanLink(a, b)),
-    )
-  ) {
+  if (hasAusJapan) {
     return finishTitle({
       themeType: "THEMED",
-      title: "D’Australie au Japon",
+      title: "Australie, avec une escale au Japon",
       subtitle: null,
       semanticTags: tags,
       sourceIds,
-      groupingReason: "Escale Japon explicitement liée au voyage Australie",
+      groupingReason: meta.reason,
+    })
+  }
+
+  const allAustralia = blocks.every(
+    (b) =>
+      hasAustraliaTrip(b.facts) ||
+      b.trips.some((t) => /australie/i.test(t)) ||
+      b.locations.some((l) => /australie|whitehaven|sydney/i.test(l)),
+  )
+  if (allAustralia) {
+    return finishTitle({
+      themeType: "THEMED",
+      title: "En Australie",
+      subtitle: null,
+      semanticTags: tags,
+      sourceIds,
+      groupingReason: meta.reason || "Voyage Australie explicite",
     })
   }
 
   if (
-    categories.every((c) => c === "RELATIONSHIP" || c === "MILESTONE" || c === "WORK") &&
-    (tags.some((t) => t.includes("premier") || t === "premier-bisou") ||
-      blocks.some(
-        (b) =>
-          b.semanticTags.includes("professionnel") || /début/i.test(b.kicker || ""),
-      ))
-  ) {
-    const hasDebutSignal = blocks.some(
+    blocks.every(
+      (b) =>
+        b.semanticCategory === "RELATIONSHIP" ||
+        b.semanticCategory === "MILESTONE" ||
+        b.semanticCategory === "WORK",
+    ) &&
+    blocks.some(
       (b) =>
         /premier/i.test(b.originalText) ||
-        /premier/i.test(b.displayText) ||
-        b.semanticTags.some((t) => t.includes("premier")),
+        b.semanticTags.some((t) => t.includes("premier")) ||
+        b.facts.events.includes("rendez-vous-pro") ||
+        b.facts.events.includes("premier-bisou"),
     )
-    if (hasDebutSignal) {
-      return finishTitle({
-        themeType: "THEMED",
-        title: "Les débuts",
-        subtitle: null,
-        semanticTags: tags,
-        sourceIds,
-        groupingReason: "Repères de début explicitement présents",
-      })
-    }
+  ) {
+    return finishTitle({
+      themeType: "THEMED",
+      title: "Les débuts",
+      subtitle: null,
+      semanticTags: tags,
+      sourceIds,
+      groupingReason: meta.reason || "Repères de début explicitement présents",
+    })
   }
 
-  if (trips.length === 1 && blocks.every((b) => b.trips.includes(trips[0]!) || b.locations.some((l) => l.toLowerCase().includes(trips[0]!.toLowerCase())))) {
+  if (
+    trips.length === 1 &&
+    blocks.every(
+      (b) =>
+        b.trips.includes(trips[0]!) ||
+        b.locations.some((l) => l.toLowerCase().includes(trips[0]!.toLowerCase())),
+    )
+  ) {
     return finishTitle({
       themeType: "THEMED",
       title: `En ${trips[0]}`,
       subtitle: null,
       semanticTags: tags,
       sourceIds,
-      groupingReason: "Même voyage explicite",
+      groupingReason: meta.reason || "Même voyage explicite",
     })
   }
 
@@ -140,29 +143,18 @@ export function buildNaturalPageCopy(blocks: PersonalBlockV1[]): PersonalEditori
       subtitle: null,
       semanticTags: tags,
       sourceIds,
-      groupingReason: "Lieu explicite commun",
+      groupingReason: meta.reason || "Lieu explicite commun",
     })
   }
 
-  if (locations.length === 2 && compat >= 0.7) {
-    // Natural pairing without &
-    return finishTitle({
-      themeType: "THEMED",
-      title: `${locations[0]} · ${locations[1]}`,
-      subtitle: null,
-      semanticTags: tags,
-      sourceIds,
-      groupingReason: "Deux lieux explicites",
-    })
-  }
-
+  // Never "Eysines · Porto" / location concat without SAME_LOCATION STRONG
   return {
     themeType: "NEUTRAL_MOMENTS",
     title: pickNeutralTitle(sourceIds.join(":")),
     subtitle: null,
     semanticTags: tags,
     sourceIds,
-    groupingReason: "Pas de dénominateur commun assez fort",
+    groupingReason: meta.reason || "Pas de dénominateur commun assez fort",
   }
 }
 
@@ -176,6 +168,15 @@ function finishTitle(theme: PersonalEditorialPageTheme): PersonalEditorialPageTh
       groupingReason: `${theme.groupingReason} — titre corrigé (anti-concat)`,
     }
   }
+  // Ban "X et Y" / "X · Y" style place mashups in themed titles when places differ
+  if (/\bet\b|·/.test(theme.title) && /eysines|porto|tokyo|sydney/i.test(theme.title)) {
+    return {
+      ...theme,
+      themeType: "NEUTRAL_MOMENTS",
+      title: pickNeutralTitle(theme.sourceIds.join(":")),
+      groupingReason: `${theme.groupingReason} — concaténation de lieux refusée`,
+    }
+  }
   return theme
 }
 
@@ -183,7 +184,6 @@ const NEUTRAL_TITLES = [
   "Quelques moments",
   "Petits fragments",
   "Instants choisis",
-  "Souvenirs en suspens",
   "Pages personnelles",
 ]
 
@@ -216,5 +216,3 @@ export function buildPageTheme(
   }
   return buildNaturalPageCopy(blocks)
 }
-
-void factsShareTrip

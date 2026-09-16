@@ -10,7 +10,8 @@ export interface PersonalSourceActor {
 
 /**
  * Structured facts extracted ONLY from one source text.
- * Never invents; lists may be empty.
+ * Never invents; listes may be empty.
+ * Cross-source relations are computed separately in relations.ts.
  */
 export interface PersonalSourceFacts {
   sourceId: string
@@ -23,6 +24,7 @@ export interface PersonalSourceFacts {
   locations: string[]
   tripContext: string[]
   events: string[]
+  dates: string[]
   creatorOpinions: string[]
   recipientOpinions: string[]
   quotes: string[]
@@ -65,15 +67,22 @@ export function extractPersonalSourceFacts(input: {
   const sharedFacts: string[] = []
   const creatorFacts: string[] = []
   const events: string[] = []
+  const dates: string[] = []
   const quotes: string[] = []
 
   const creator = input.ctx.creatorName
+
+  // Dates (explicit only)
+  const dateMatch = raw.match(
+    /\b(\d{1,2}\s+(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)\s+\d{4})\b/i,
+  )
+  if (dateMatch?.[1]) dates.push(dateMatch[1])
 
   // Creator opinions — keep attribution to creator
   // Apostrophe: ASCII or typographic; avoid \b after accents (JS \w is ASCII-only).
   if (/j['\u2019]ai\s+ador[ée]/i.test(raw) || /j['\u2019]adore\b/i.test(raw)) {
     const place =
-      semantics.locations.find((l) => /whitehaven|plage/i.test(l)) ||
+      semantics.locations.find((l) => /whitehaven|plage|porto/i.test(l)) ||
       semantics.locations[0] ||
       "ce lieu"
     creatorOpinions.push(
@@ -83,8 +92,8 @@ export function extractPersonalSourceFacts(input: {
     )
   }
   if (
-    /moment\s+pr[eé]f[eé]r[eé]/i.test(raw) &&
-    /(mon\s+moment|j['\u2019]ai|c['\u2019]est\s+mon)/i.test(raw)
+    /moment\s+pr[eé]f[eé]r[eé]|souvenir\s+pr[eé]f[eé]r[eé]/i.test(raw) &&
+    /(mon\s+moment|mon\s+souvenir|j['\u2019]ai|c['\u2019]est\s+mon)/i.test(raw)
   ) {
     const place =
       semantics.locations.find((l) => /whitehaven|plage/i.test(l)) ||
@@ -103,6 +112,13 @@ export function extractPersonalSourceFacts(input: {
           : `Moment préféré ${tripLabel}`,
     )
   }
+  if (/insist[ée]/i.test(raw) && /whitehaven|excursion/i.test(raw)) {
+    creatorFacts.push(
+      creator
+        ? `${creator} avait insisté pour l'excursion`
+        : "Insistance pour l'excursion",
+    )
+  }
 
   // Shared trip / last day
   if (/\bdernier\s+jour\b/i.test(raw)) {
@@ -117,10 +133,52 @@ export function extractPersonalSourceFacts(input: {
       sharedFacts.push(`Voyage lié à ${t}`)
     }
   }
+  if (/\broad\s*trip|c[oô]te\s+est/i.test(raw)) {
+    events.push("road-trip")
+    sharedFacts.push("Road trip")
+    if (/australie|c[oô]te\s+est/i.test(raw) && !semantics.trips.includes("Australie")) {
+      semantics.trips.push("Australie")
+      sharedFacts.push("Voyage lié à Australie")
+    }
+  }
   if (/\bescale\b/i.test(raw)) {
     events.push("escale")
     const loc = semantics.locations.find((l) => /tokyo|japon/i.test(l))
     sharedFacts.push(loc ? `Escale à ${loc}` : "Escale")
+    // Explicit: escale during Australia trip → also anchor Australia trip context
+    if (
+      /australie/i.test(raw) &&
+      (/pendant\s+(notre|votre|le)\s+voyage/i.test(raw) ||
+        /voyage\s+en\s+australie/i.test(raw))
+    ) {
+      if (!semantics.trips.some((t) => /australie/i.test(t))) {
+        semantics.trips.push("Australie")
+      }
+      sharedFacts.push("Escale pendant le voyage en Australie")
+    }
+  }
+
+  // Porto / reconciliation
+  if (/dispute/i.test(raw)) {
+    events.push("dispute")
+    sharedFacts.push("Dispute")
+  }
+  if (/r[eé]concili/i.test(raw)) {
+    events.push("reconciliation")
+    sharedFacts.push("Réconciliation")
+  }
+  if (/n['\u2019]aime\s+pas.*t[eê]te|sa\s+t[eê]te/i.test(raw)) {
+    recipientOpinions.push(
+      input.ctx.recipientNames[0]
+        ? `${input.ctx.recipientNames[0]} n'aime pas particulièrement sa tête sur la photo`
+        : "Le destinataire n'aime pas particulièrement sa tête sur la photo",
+    )
+  }
+
+  // Coca anecdote
+  if (/coca/i.test(raw) && /bulle/i.test(raw)) {
+    sharedFacts.push("Anecdote du Coca sans bulles")
+    events.push("coca-sans-bulles")
   }
 
   // "{Recipient} et moi" → shared presence, not creator-only opinion
@@ -136,11 +194,11 @@ export function extractPersonalSourceFacts(input: {
   }
 
   // Firsts / milestones
-  if (/\bpremier\s+bisou\b/i.test(raw)) {
+  if (/\bpremier\s+bisou\b|\bpremier\s+baiser\b/i.test(raw)) {
     events.push("premier-bisou")
-    sharedFacts.push("Premier bisou")
+    sharedFacts.push("Premier baiser")
   }
-  if (/\bpremiers?\s+rendez[- ]?vous\s+professionnels?\b/i.test(raw)) {
+  if (/\bpremiers?\s+rendez[- ]?vous\s+professionnels?\b|\bd[eé]marchage\b/i.test(raw)) {
     events.push("rendez-vous-pro")
     sharedFacts.push("Premiers rendez-vous professionnels")
   }
@@ -150,6 +208,10 @@ export function extractPersonalSourceFacts(input: {
         ? "Première entreprise"
         : "Entreprise",
     )
+  }
+  if (/\bcogn[ée]|choc\s+de\s+t[eê]te|se\s+sont\s+rentr[eé]/i.test(raw)) {
+    events.push("choc-tete")
+    sharedFacts.push("Choc de tête")
   }
   if (/\bfou\s+rire\b/i.test(raw) || /\brire\b/i.test(raw)) {
     events.push("rire")
@@ -173,10 +235,11 @@ export function extractPersonalSourceFacts(input: {
     actors,
     sharedFacts: uniq(sharedFacts),
     creatorFacts: uniq(creatorFacts),
-    recipientFacts: [],
+    recipientFacts: uniq([]),
     locations: semantics.locations,
     tripContext: semantics.trips,
     events: uniq(events),
+    dates: uniq(dates),
     creatorOpinions: uniq(creatorOpinions),
     recipientOpinions: uniq(recipientOpinions),
     quotes,

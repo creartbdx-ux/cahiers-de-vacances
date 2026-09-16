@@ -1,5 +1,6 @@
 import type { PersonalEditorialAudienceContext } from "./audience-context"
 import type { PersonalSourceFacts } from "./facts"
+import { localBlockKicker } from "./relations"
 
 export type EditorialPerspectiveV2 =
   | "CREATOR_ATTRIBUTED"
@@ -34,12 +35,13 @@ export function buildEditorialCopyFromFacts(input: {
   const claimsUsed: string[] = []
   const leadPlace =
     facts.locations.find((l) =>
-      /whitehaven|sydney\s+tower|tokyo|onsen|portugal/i.test(l),
+      /whitehaven|sydney\s+tower|tokyo|onsen|portugal|porto|eysines/i.test(l),
     ) ||
     facts.locations[0] ||
     null
   const trip = facts.tripContext[0] || null
-  const kicker = trip || null
+  // Kicker is ALWAYS local to this source — never inherit a page-level trip alone
+  const kicker = localBlockKicker(facts)
 
   // Creator opinions → always attributed (OTHER_PERSON)
   if (facts.creatorOpinions.length && ctx.audience === "OTHER_PERSON") {
@@ -80,7 +82,7 @@ export function buildEditorialCopyFromFacts(input: {
       facts.sharedFacts.find((f) => /dernier/i.test(f)) || "Dernier jour"
     claimsUsed.push(claim)
     return {
-      kicker: trip,
+      kicker,
       shortTitle: leadPlace || "Dernier jour",
       displayText: trip
         ? `Votre dernier jour en ${trip}${leadPlace ? ` — ${leadPlace}` : ""}.`
@@ -94,7 +96,7 @@ export function buildEditorialCopyFromFacts(input: {
   if (facts.events.includes("escale")) {
     claimsUsed.push(...facts.sharedFacts.filter((s) => /escale/i.test(s)))
     return {
-      kicker: trip,
+      kicker,
       shortTitle: leadPlace || "Escale",
       displayText:
         facts.sharedFacts.find((s) => /escale/i.test(s)) ||
@@ -156,7 +158,7 @@ export function buildEditorialCopyFromFacts(input: {
   ) {
     claimsUsed.push(...facts.sharedFacts.slice(0, 2))
     return {
-      kicker: trip,
+      kicker,
       shortTitle: leadPlace,
       displayText: `Un repère de votre voyage en ${trip}.`,
       perspective: "NEUTRAL_EDITORIAL",

@@ -21,11 +21,13 @@ import {
 } from "./weights"
 import {
   groupCompatibilityScore,
+  groupHasConflict,
+  groupRelationMeta,
   isNeutralGrouping,
   semanticCompatibilityScore,
+  pairRelationLevel,
 } from "./compatibility"
 import { buildPageTheme } from "./theme"
-import { categoriesClash } from "./semantic"
 import { assertPagePhotoProvenance } from "./provenance"
 
 const VISUAL_ROLES: VisualRole[] = ["LIGHT", "SECONDARY", "ACCENT", "NEUTRAL"]
@@ -61,13 +63,38 @@ export function canAddBlock(
   if (current.some((b) => isTrueHeroCandidate(b) && b.type === "MEMORY")) {
     return blockWeight(candidate) <= 1 && current.length < 2
   }
+  // Never pack CONFLICT pairs
+  if (current.some((b) => pairWouldConflict(b, candidate))) return false
+  // Never dilute a STRONG cluster with a NEUTRAL-only attachment
+  if (wouldDiluteStrongCluster([...current, candidate])) return false
   return true
+}
+
+function pairWouldConflict(a: PersonalBlockV1, b: PersonalBlockV1): boolean {
+  return pairRelationLevel(a, b) === "CONFLICT"
+}
+
+/** True when some pairs are STRONG and others only NEUTRAL (false thematic cohesion). */
+function wouldDiluteStrongCluster(blocks: PersonalBlockV1[]): boolean {
+  if (blocks.length <= 1) return false
+  let hasStrong = false
+  let hasNeutral = false
+  for (let i = 0; i < blocks.length; i++) {
+    for (let j = i + 1; j < blocks.length; j++) {
+      const level = pairRelationLevel(blocks[i]!, blocks[j]!)
+      if (level === "CONFLICT") return true
+      if (level === "STRONG") hasStrong = true
+      else hasNeutral = true
+    }
+  }
+  return hasStrong && hasNeutral
 }
 
 function groupIsValid(blocks: PersonalBlockV1[]): boolean {
   if (!blocks.length || blocks.length > PERSONAL_PAGE_MAX_BLOCKS) return false
   if (photoCount(blocks) > PERSONAL_PAGE_MAX_PHOTOS) return false
   if (totalWeight(blocks) > PERSONAL_PAGE_CAPACITY) return false
+  if (groupHasConflict(blocks)) return false
   const acc: PersonalBlockV1[] = []
   for (const b of blocks) {
     if (!canAddBlock(acc, b)) return false
@@ -115,6 +142,9 @@ function makePage(
         ? "STACK"
         : "ASYMMETRIC"
       : null
+  const relationMeta = groupRelationMeta(ordered)
+  const pageRelationType =
+    relationMeta.level === "CONFLICT" ? "NEUTRAL" : relationMeta.level
   return {
     pageKey: `pep:${seed}:${index}`,
     layoutId,
@@ -129,6 +159,8 @@ function makePage(
     heroReason,
     layoutVariant,
     compatibilityScore: groupCompatibilityScore(ordered),
+    pageRelationType,
+    pageRelationReason: relationMeta.reason,
     editorialMode: "FALLBACK",
     pageKicker: null,
     pageIntro: null,
@@ -136,7 +168,8 @@ function makePage(
 }
 
 /**
- * Priorities: provenance → editorial coherence → readability → visual fill → page economy.
+ * Priorities: truth → explicit relations → semantic compat → perspective →
+ * readability → fill → page count.
  */
 function scoreComposition(groups: PersonalBlockV1[][], seed: string): number {
   let score = 0
@@ -147,57 +180,66 @@ function scoreComposition(groups: PersonalBlockV1[][], seed: string): number {
     const fill = pageFillScore(g)
     const fillPct = fill * 100
     const layout = layouts[i]!
+    const meta = groupRelationMeta(g)
     const compat = groupCompatibilityScore(g)
 
-    score += compat * 80
-    if (compat >= 0.7) score += 25
-    else if (compat < 0.45 && g.length > 1) score -= 45
+    // Hard preference for coherent pages
+    if (meta.level === "CONFLICT") score -= 200
+    if (meta.level === "STRONG" && g.length > 1) score += 55
+    if (meta.level === "NEUTRAL" && g.length > 1) score += 18
+
+    // Compat bonus only for multi-block pages (mono gets fake 1.0)
+    if (g.length > 1) {
+      score += compat * 90
+      if (compat >= 0.8) score += 30
+      else if (compat < 0.3) score -= 60
+    } else {
+      score += 12
+    }
 
     for (let a = 0; a < g.length; a++) {
       for (let b = a + 1; b < g.length; b++) {
-        if (categoriesClash(g[a]!.semanticCategory, g[b]!.semanticCategory)) {
-          score -= 40
-        }
-        score += (semanticCompatibilityScore(g[a]!, g[b]!) - 0.45) * 20
+        score += (semanticCompatibilityScore(g[a]!, g[b]!) - 0.5) * 35
       }
     }
 
     if (fillPct >= 60) score += 12
-    else if (fillPct < 40 && !isHeroLayout(layout)) score -= 20
+    else if (fillPct < 40 && !isHeroLayout(layout)) score -= 12
 
     const hasPhoto = g.some((b) => b.type === "PHOTO_MEMORY")
     const hasMemory = g.some((b) => b.type === "MEMORY")
-    if (hasPhoto && hasMemory && compat >= 0.5) score += 16
+    if (hasPhoto && hasMemory && meta.level === "STRONG") score += 18
+    if (hasPhoto && hasMemory && meta.level === "NEUTRAL") score += 14
 
-    score += (4 - layoutPreferenceRank(layout)) * 2
+    score += (4 - layoutPreferenceRank(layout)) * 1.5
 
-    if (layout === "PHOTO_PLUS_TWO_SNIPPETS" && compat >= 0.55) score += 30
-    if (layout === "PHOTO_PLUS_MEMORY" && compat >= 0.5) score += 12
-    if (g.length > 1 && isNeutralGrouping(g)) score += 4
+    if (layout === "PHOTO_PLUS_TWO_SNIPPETS" && meta.level === "STRONG") score += 22
+    if (layout === "PHOTO_PLUS_TWO_SNIPPETS" && meta.level === "NEUTRAL") score += 16
+    if (layout === "PHOTO_PLUS_MEMORY" && meta.level === "STRONG") score += 10
+    if (layout === "PHOTO_PLUS_MEMORY" && meta.level === "NEUTRAL") score += 8
+    if (g.length > 1 && isNeutralGrouping(g)) score += 6
 
     if (g.length === 1) {
       const alone = g[0]!
       if (isTrueHeroCandidate(alone)) score += 10
       else if (alone.density === "SHORT") score -= 55
-      else if (alone.density === "MEDIUM") score -= 30
-      else score -= 15
+      else if (alone.density === "MEDIUM") score -= 28
+      else score -= 12
     } else {
-      score += g.length * 4
+      score += g.length * 6
     }
   }
 
   score -= layouts.filter((l) => isHeroLayout(l)).length * 20
-  score -=
-    layouts.filter((l) => l === "SINGLE_MEMORY" || l === "SINGLE_PHOTO_MEMORY")
-      .length * 20
+  // Prefer fewer pages, but less than coherence
+  score -= groups.length * 14
 
-  for (let i = 1; i < layouts.length; i++) {
-    if (isHeroLayout(layouts[i - 1]!) && isHeroLayout(layouts[i]!)) score -= 30
+  // Anti consecutive heroes
+  for (let i = 0; i < layouts.length - 1; i++) {
+    if (isHeroLayout(layouts[i]!) && isHeroLayout(layouts[i + 1]!)) score -= 35
   }
 
-  // Page economy last and lighter — coherence > compression
-  score -= groups.length * 12
-  score += (hash(`${seed}:${groups.length}:${layouts.join(",")}`) % 7) * 0.01
+  void seed
   return score
 }
 
@@ -340,11 +382,15 @@ function absorbNonHeroOrphans(groups: PersonalBlockV1[][]): PersonalBlockV1[][] 
         if (i === j) continue
         if (!canAddBlock(out[j]!, alone)) continue
         const trial = [...out[j]!, alone]
+        if (groupHasConflict(trial)) continue
+        if (wouldDiluteStrongCluster(trial)) continue
         let s = groupCompatibilityScore(trial) + pageFillScore(trial) * 0.4
         const layout = pickPersonalEditorialLayout(stableSortIds(trial))
         if (layout === "PHOTO_PLUS_TWO_SNIPPETS") s += 0.3
-        // Don't absorb into a strongly clashing page
-        if (groupCompatibilityScore(trial) < 0.35) continue
+        // Allow NEUTRAL packing for fill (compat ~0.5)
+        if (groupCompatibilityScore(trial) < 0.45) continue
+        const meta = groupRelationMeta(trial)
+        if (meta.level === "NEUTRAL") s += 0.15
         if (s > bestScore) {
           bestScore = s
           bestJ = j

@@ -116,6 +116,7 @@ test("provider configuré => mode AI used ; 1 appel par page max sans repair", a
         pageTitle: "En Australie",
         pageKicker: null,
         pageIntro: null,
+        pageRelationType: "NEUTRAL",
         blocks: ids.map((sourceId) => {
           const isWh = /wh/i.test(sourceId)
           return {
@@ -189,6 +190,7 @@ test("réponse IA ne peut pas ajouter de source", async () => {
       pageTitle: "Test",
       pageKicker: null,
       pageIntro: null,
+        pageRelationType: "NEUTRAL",
       blocks: [
         ...expected.map((sourceId) => ({
           sourceId,
@@ -236,6 +238,7 @@ test("invention lieu rejetée puis fallback", async () => {
       pageTitle: "À Tokyo",
       pageKicker: null,
       pageIntro: null,
+        pageRelationType: "NEUTRAL",
       blocks: [
         {
           sourceId: "m1",
@@ -269,6 +272,7 @@ test("Régénérer rédaction ne change pas packing", async () => {
         pageTitle: `Titre ${calls}`,
         pageKicker: null,
         pageIntro: null,
+        pageRelationType: "NEUTRAL",
         blocks: ids.map((sourceId) => ({
           sourceId,
           kicker: null,
@@ -312,6 +316,7 @@ test("sourceIds imposés préservés après AI", async () => {
         pageTitle: "Quelques moments",
         pageKicker: null,
         pageIntro: null,
+        pageRelationType: "NEUTRAL",
         blocks: payload.requiredSourceIds.map((sourceId) => ({
           sourceId,
           kicker: null,
@@ -502,6 +507,7 @@ test("accepte copy Emma→Sami courte et attribuée", async () => {
       pageTitle: "Whitehaven Beach",
       pageKicker: null,
       pageIntro: null,
+        pageRelationType: "NEUTRAL",
       blocks: [
         {
           sourceId: "wh",

@@ -79,6 +79,7 @@ const CATEGORY_RULES: Array<{
     category: "WORK",
     patterns: [
       /\bentreprise\b/i,
+      /\bd[eé]marchage\b/i,
       /\btravail\b/i,
       /\bprofessionnel\b/i,
       /\bbureau\b/i,
@@ -156,6 +157,13 @@ export function classifyPersonalSemantics(input: {
       bestHits = hits
       category = rule.category
     }
+  }
+
+  // Pro / démarchage wins over "rendez-vous" RELATIONSHIP false positive
+  if (
+    /\b(entreprise|d[eé]marchage|professionnel|bureau|coll[eè]gue)\b/i.test(blob)
+  ) {
+    category = "WORK"
   }
 
   // Explicit place field is a location if not already captured

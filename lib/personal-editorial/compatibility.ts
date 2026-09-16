@@ -1,57 +1,36 @@
 import type { PersonalBlockV1 } from "./types"
-import { categoriesClash } from "./semantic"
+import {
+  blockPairCompatibility,
+  groupEditorialCompatibility,
+  type EditorialRelationLevel,
+  type SourceRelation,
+} from "./relations"
+
+export type { EditorialRelationLevel, SourceRelation }
 
 function blockId(b: PersonalBlockV1): string {
   return b.type === "MEMORY" ? b.sourceMemoryId : b.sourcePhotoId
 }
 
 /**
- * Pairwise semantic compatibility in [0, 1].
- * Bonus: shared trip/location/category/tags.
- * Penalty: clear category clash that a themed page would falsely link.
+ * Pairwise semantic compatibility in [0, 1], derived from editorial relations.
+ * STRONG ≫ NEUTRAL ≫ CONFLICT. Same participants alone stay NEUTRAL (~0.5).
  */
 export function semanticCompatibilityScore(
   a: PersonalBlockV1,
   b: PersonalBlockV1,
 ): number {
-  let score = 0.45 // neutral baseline
+  const { level } = blockPairCompatibility(a, b)
+  if (level === "STRONG") return 0.88
+  if (level === "CONFLICT") return 0.08
+  return 0.5
+}
 
-  if (a.semanticCategory === b.semanticCategory && a.semanticCategory !== "OTHER") {
-    score += 0.18
-  }
-
-  const locOverlap = a.locations.filter((l) =>
-    b.locations.some((x) => x.toLowerCase() === l.toLowerCase()),
-  )
-  if (locOverlap.length) score += 0.2
-
-  const tripOverlap = a.trips.filter((t) =>
-    b.trips.some((x) => x.toLowerCase() === t.toLowerCase()),
-  )
-  if (tripOverlap.length) score += 0.22
-
-  const tagOverlap = a.semanticTags.filter((t) => b.semanticTags.includes(t))
-  if (tagOverlap.length) score += 0.08 * Math.min(2, tagOverlap.length)
-
-  // Explicit Australia trip + Tokyo escale: both travel + voyage/escale tags
-  const travelBridge =
-    a.semanticCategory === "TRAVEL" &&
-    b.semanticCategory === "TRAVEL" &&
-    (a.semanticTags.includes("voyage") || a.trips.length > 0) &&
-    (b.semanticTags.includes("escale") ||
-      b.locations.some((l) => /tokyo|japon/i.test(l)) ||
-      a.locations.some((l) => /tokyo|japon/i.test(l)))
-  if (travelBridge) score += 0.12
-
-  if (categoriesClash(a.semanticCategory, b.semanticCategory)) {
-    score -= 0.35
-  }
-
-  // Participant overlap slight bonus
-  const partOverlap = a.participantIds.filter((id) => b.participantIds.includes(id))
-  if (partOverlap.length) score += 0.05
-
-  return Math.max(0, Math.min(1, score))
+export function pairRelationLevel(
+  a: PersonalBlockV1,
+  b: PersonalBlockV1,
+): EditorialRelationLevel {
+  return blockPairCompatibility(a, b).level
 }
 
 export function groupCompatibilityScore(blocks: PersonalBlockV1[]): number {
@@ -67,10 +46,24 @@ export function groupCompatibilityScore(blocks: PersonalBlockV1[]): number {
   return n ? sum / n : 1
 }
 
+export function groupRelationMeta(blocks: PersonalBlockV1[]): {
+  level: EditorialRelationLevel
+  reason: string
+  relations: SourceRelation[]
+} {
+  return groupEditorialCompatibility(blocks)
+}
+
 /** True when the group should NOT claim a thematic title. */
 export function isNeutralGrouping(blocks: PersonalBlockV1[]): boolean {
   if (blocks.length <= 1) return false
-  return groupCompatibilityScore(blocks) < 0.55
+  return groupRelationMeta(blocks).level === "NEUTRAL"
+}
+
+/** Groups containing a CONFLICT pair must never be packed. */
+export function groupHasConflict(blocks: PersonalBlockV1[]): boolean {
+  if (blocks.length <= 1) return false
+  return groupRelationMeta(blocks).level === "CONFLICT"
 }
 
 export function groupSourceIds(blocks: PersonalBlockV1[]): string[] {

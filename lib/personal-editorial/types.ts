@@ -110,6 +110,9 @@ export interface PersonalEditorialPageV1 {
   heroReason: string | null
   layoutVariant?: PhotoPlusMemoryVariant | null
   compatibilityScore: number
+  /** Editorial relation strength for the packed page. */
+  pageRelationType?: "STRONG" | "NEUTRAL"
+  pageRelationReason?: string
   /** AI page copy vs deterministic fallback. */
   editorialMode?: "AI" | "FALLBACK"
   pageKicker?: string | null
