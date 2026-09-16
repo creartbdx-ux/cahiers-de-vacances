@@ -80,8 +80,10 @@ export interface BlueprintPageSlot {
   density: PageDensity
   section: BlueprintSectionKind
   reason: string
-  /** PERSONAL_EDITORIAL_PAGE layout when composed. */
+  /** PERSONAL_EDITORIAL_PAGE layout when composed (lab / experimental). */
   personalLayoutId?: string
+  /** PHOTO_COLLAGE_PAGE layout. */
+  photoLayoutId?: string
   sourceMemoryIds?: string[]
   sourcePhotoIds?: string[]
 }
@@ -155,7 +157,7 @@ export interface BookBlueprintV1 {
   stats: BlueprintStats
   capabilityGaps: CapabilityGap[]
   /**
-   * Per-memory full-page fitness (blocks may still be grouped on PERSONAL_EDITORIAL pages).
+   * Per-memory hints (sources for PERSONAL games — not dedicated V1 pages).
    */
   memoryContentHints: MemoryContentHint[]
 }
@@ -170,11 +172,16 @@ export interface CompositionTargets {
   /** Soft estimate before packing. */
   estimatedCorrectionPages: number
   maxReadyThemeGames: number
-  /** Max memory blocks to collect (not pages). */
+  /** Max photos considered for album pages. */
   photoSlots: number
-  /** Max photo blocks to collect (not pages). */
+  /**
+   * Memory count kept for personal-game budgeting / hints.
+   * Memories do not create dedicated Blueprint V1 pages.
+   */
   memorySlots: number
-  /** Composed PERSONAL_EDITORIAL pages (real page count). */
+  /** @deprecated V1 no longer plans PERSONAL_EDITORIAL pages — always 0. */
   personalEditorialSlots: number
+  /** Planned PHOTO_COLLAGE / PHOTO_TIMELINE pages. */
+  photoPageSlots: number
   personalGameSlots: number
 }

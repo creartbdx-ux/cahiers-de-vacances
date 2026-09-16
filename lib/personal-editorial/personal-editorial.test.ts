@@ -477,8 +477,9 @@ test("max 3 blocks / max 2 photos", () => {
   }
 })
 
-test("Blueprint utilise pages composées (pas 1:1)", () => {
-  assert.equal(getArchetype("PERSONAL_EDITORIAL_PAGE").implementationStatus, "READY")
+test("Blueprint V1 : photos → collage ; memories → game sources (pas PERSONAL_EDITORIAL)", () => {
+  assert.equal(getArchetype("PERSONAL_EDITORIAL_PAGE").implementationStatus, "PARTIAL")
+  assert.equal(getArchetype("PHOTO_COLLAGE_PAGE").implementationStatus, "READY")
   const p = profile({
     memories: [
       { id: "m1", text: "Petite anecdote A." },
@@ -489,11 +490,10 @@ test("Blueprint utilise pages composées (pas 1:1)", () => {
     photos: [
       { id: "ph1", useAuthorized: true, storagePath: "books/x/1.jpg", caption: "Légende A" },
       { id: "ph2", useAuthorized: true, storagePath: "books/x/2.jpg", caption: "Légende B" },
+      { id: "ph3", useAuthorized: true, storagePath: "books/x/3.jpg", caption: "Légende C" },
     ],
     sharedProfile: { interestUniverseIds: ["BEAUTY", "TRAVEL", "FASHION", "NATURE"] },
   })
-  const blocks = collectPersonalBlocks({ profile: p })
-  const composed = composePersonalEditorialPages(blocks, "pep-bp:personal-editorial")
   const bp = buildBookBlueprint({
     bookProjectId: "proj",
     seed: "pep-bp",
@@ -502,11 +502,17 @@ test("Blueprint utilise pages composées (pas 1:1)", () => {
     styles: STYLES,
     palettes: [PALETTE],
   })
-  const editorial = bp.pages.filter((x) => x.archetypeId === "PERSONAL_EDITORIAL_PAGE")
-  assert.equal(editorial.length, composed.length)
-  assert.ok(editorial.length < blocks.length)
+  assert.equal(bp.pages.filter((x) => x.archetypeId === "PERSONAL_EDITORIAL_PAGE").length, 0)
   assert.equal(bp.pages.filter((x) => x.archetypeId === "MEMORY_TEXT_PAGE").length, 0)
   assert.equal(bp.pages.filter((x) => x.archetypeId === "PHOTO_MEMORY_PAGE").length, 0)
+  assert.ok(bp.stats.photoPages >= 1)
+  assert.ok(
+    bp.pages.some(
+      (x) =>
+        x.archetypeId === "PHOTO_COLLAGE_PAGE" ||
+        x.archetypeId === "PHOTO_TIMELINE_PAGE",
+    ),
+  )
 })
 
 test("template PHOTO_PLUS_MEMORY sépare les sources", () => {

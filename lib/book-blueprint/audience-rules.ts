@@ -1,8 +1,5 @@
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
-import {
-  collectPersonalBlocks,
-  composePersonalEditorialPages,
-} from "@/lib/personal-editorial"
+import { planPhotoPagesFromProfile } from "@/lib/photo-pages"
 import type { CompositionTargets } from "./types"
 
 function clamp(n: number, min: number, max: number): number {
@@ -10,7 +7,9 @@ function clamp(n: number, min: number, max: number): number {
 }
 
 function countUsablePhotos(profile: BookProfileV1): number {
-  return (profile.photos ?? []).filter((p) => p.useAuthorized).length
+  return (profile.photos ?? []).filter(
+    (p) => p.useAuthorized && Boolean(p.storagePath?.trim()),
+  ).length
 }
 
 function countMemories(profile: BookProfileV1): number {
@@ -19,13 +18,13 @@ function countMemories(profile: BookProfileV1): number {
 
 /**
  * Soft composition targets for ~50 interior pages.
- * Photo/memory slots = block budgets; personalEditorialSlots = real pages after packing.
+ * Photos → album pages. Memories → personal game sources (not pages).
  */
 export function resolveCompositionTargets(input: {
   profile: BookProfileV1
   richnessLevel: RichnessLevel
   targetInteriorPages: number
-  /** Seed used to estimate packed personal pages deterministically. */
+  /** Seed used to estimate photo pages deterministically. */
   seed?: string
 }): CompositionTargets {
   const { profile, richnessLevel, targetInteriorPages: N } = input
@@ -65,12 +64,13 @@ export function resolveCompositionTargets(input: {
     mainGames += Math.round(2 * scale)
   }
 
-  // Block budgets (not pages)
+  // Photo budget = usable album photos (planner packs into pages)
   let photoSlots = 0
   if (photos === 0) photoSlots = 0
-  else if (photos <= 3) photoSlots = clamp(photos, 1, Math.round(3 * scale))
-  else photoSlots = clamp(Math.min(photos, Math.round(6 * scale)), 2, Math.round(7 * scale))
+  else if (photos <= 3) photoSlots = clamp(photos, 1, Math.round(4 * scale))
+  else photoSlots = clamp(Math.min(photos, Math.round(8 * scale)), 2, Math.round(10 * scale))
 
+  // Memories remain available for games — slot count for budgeting / hints only
   let memorySlots = 0
   if (memories === 0) memorySlots = 0
   else if (memories <= 2) memorySlots = memories
@@ -82,7 +82,10 @@ export function resolveCompositionTargets(input: {
 
   let personalGameSlots = 0
   if (audience === "ME" || audience === "OTHER_PERSON") {
-    personalGameSlots = richnessLevel === "RICH" ? Math.round(2 * scale) : Math.round(1 * scale)
+    // Memories enrich personal games when available
+    const base =
+      richnessLevel === "RICH" ? Math.round(2 * scale) : Math.round(1 * scale)
+    personalGameSlots = memories >= 2 ? Math.max(base, Math.round(2 * scale)) : base
   } else if (audience === "DUO") {
     personalGameSlots = Math.round(4 * scale)
   } else {
@@ -91,19 +94,20 @@ export function resolveCompositionTargets(input: {
 
   const maxReadyThemeGames = clamp(Math.round(12 * scale), 8, 15)
 
-  // Compose blocks → real personal editorial page count
-  const blocks = collectPersonalBlocks({
-    profile,
-    maxMemories: memorySlots || memories,
-    maxPhotos: photoSlots || photos,
-  })
-  const composed = composePersonalEditorialPages(
-    blocks,
+  // Photo pages only (no PERSONAL_EDITORIAL in V1)
+  const planned = planPhotoPagesFromProfile(
+    {
+      ...profile,
+      photos: (profile.photos ?? [])
+        .filter((p) => p.useAuthorized && Boolean(p.storagePath?.trim()))
+        .slice(0, photoSlots || photos),
+    },
     input.seed ?? "composition-targets",
   )
-  const personalEditorialSlots = composed.length
+  const photoPageSlots = planned.pages.length
+  const personalEditorialSlots = 0
 
-  const personalCore = personalEditorialSlots + personalGameSlots
+  const personalCore = photoPageSlots + personalGameSlots
   if (personalCore > personalBlock) {
     personalBlock = personalCore
   }
@@ -151,6 +155,7 @@ export function resolveCompositionTargets(input: {
     photoSlots,
     memorySlots,
     personalEditorialSlots,
+    photoPageSlots,
     personalGameSlots,
   }
 }

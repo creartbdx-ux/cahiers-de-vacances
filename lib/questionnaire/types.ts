@@ -92,6 +92,10 @@ export interface QuestionnairePhoto {
   anecdote?: string
   participantIds?: string[]
   useAuthorized: boolean
+  /** Optional place when known (album / timeline) — never invented. */
+  place?: string
+  /** Optional taken-at date/year when known — never invented. */
+  takenAt?: string
   /** Client upload lifecycle; omit or "local" until Storage + book_photos succeed. */
   uploadStatus?: PhotoUploadStatus
   /** User-facing upload error only (never raw gateway/Supabase messages). */

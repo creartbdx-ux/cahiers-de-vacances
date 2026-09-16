@@ -7,3 +7,8 @@ export * from "./scoring"
 export * from "./gaps"
 export * from "./memory-hints"
 export { buildBookBlueprint, type BuildBookBlueprintInput } from "./planner"
+export { getPersonalGameSources } from "@/lib/personal-game-sources"
+export {
+  planPhotoPages,
+  planPhotoPagesFromProfile,
+} from "@/lib/photo-pages"

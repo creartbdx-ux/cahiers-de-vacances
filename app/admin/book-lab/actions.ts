@@ -815,3 +815,53 @@ function hashSeed(s: string): number {
   }
   return h >>> 0
 }
+
+export type BookLabPhotoPagesResult =
+  | {
+      ok: true
+      pageCount: number
+      usablePhotoCount: number
+      pages: Array<{
+        pageKey: string
+        kind: "COLLAGE" | "TIMELINE"
+        layoutId?: string
+        sourcePhotoIds: string[]
+        page: import("@/lib/photo-pages").PhotoPageV1
+      }>
+      visualIdentity: MiniBookVisualIdentity
+    }
+  | { ok: false; message: string }
+
+/**
+ * Plan PHOTO_COLLAGE / PHOTO_TIMELINE pages for Book Lab.
+ * Memories are never injected on these pages.
+ */
+export async function prepareBookLabPhotoPagesAction(input: {
+  bookProjectId: string
+  seed: string
+}): Promise<BookLabPhotoPagesResult> {
+  const ctx = await loadBookLabPersonalContext(input)
+  if (!ctx.ok) return ctx
+
+  const { planPhotoPagesFromProfile } = await import("@/lib/photo-pages")
+  const planned = planPhotoPagesFromProfile(
+    ctx.profile,
+    `${input.seed.trim() || "lab-seed-1"}:photo-pages`,
+    ctx.photoSignedUrls,
+  )
+
+  return {
+    ok: true,
+    pageCount: planned.pages.length,
+    usablePhotoCount: planned.usedPhotoIds.length + planned.unusedPhotoIds.length,
+    pages: planned.pages.map((page) => ({
+      pageKey: page.pageKey,
+      kind: page.kind,
+      layoutId: page.kind === "COLLAGE" ? page.layoutId : undefined,
+      sourcePhotoIds: page.photos.map((p) => p.sourcePhotoId),
+      page,
+    })),
+    visualIdentity: ctx.visualIdentity,
+  }
+}
+

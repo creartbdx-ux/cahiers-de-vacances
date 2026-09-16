@@ -157,12 +157,11 @@ test("ME composition adaptée — peu/pas de QUIZ_PERSONAL", () => {
   assert.ok(bp.stats.mainGamePages >= 18)
 })
 
-test("OTHER_PERSON composition adaptée — thème + souvenirs + photos", () => {
+test("OTHER_PERSON composition adaptée — thème + photos album", () => {
   const bp = build(richOtherEmma(), "seed-other", "RICH")
   assert.equal(bp.audience, "OTHER_PERSON")
   assert.ok(!bp.pages.some((p) => p.gameId === "QUIZ_PERSONAL"))
-  assert.ok(bp.stats.personalEditorialPages >= 1)
-  assert.ok(bp.stats.memoryPages >= 1)
+  assert.equal(bp.stats.personalEditorialPages, 0)
   assert.ok(bp.stats.photoPages >= 1)
   // RICH OTHER: thème reste majoritaire côté jeux, sans monopoliser le cahier
   assert.ok(bp.stats.mainGamePages >= 14)
@@ -191,9 +190,7 @@ test("DUO composition — plus de personnel ludique", () => {
     "seed-duo",
     "RICH",
   )
-  assert.ok(
-    bp.stats.byFamily.PERSONAL_GAME + bp.stats.personalEditorialPages >= 4,
-  )
+  assert.ok(bp.stats.byFamily.PERSONAL_GAME + bp.stats.photoPages >= 4)
   assert.ok(bp.pages.some((p) => p.archetypeId === "DUO_INTERACTION" || p.gameId === "QUIZ_PERSONAL"))
 })
 
@@ -249,9 +246,9 @@ test("profil riche augmente intelligemment le personnel", () => {
   const poor = build(baseProfile({ memories: [], photos: [] }), "seed-rich-cmp", "INSUFFICIENT")
   const rich = build(richOtherEmma(), "seed-rich-cmp", "RICH")
   const poorPersonal =
-    poor.stats.personalEditorialPages + poor.stats.byFamily.PERSONAL_GAME
+    poor.stats.photoPages + poor.stats.byFamily.PERSONAL_GAME
   const richPersonal =
-    rich.stats.personalEditorialPages + rich.stats.byFamily.PERSONAL_GAME
+    rich.stats.photoPages + rich.stats.byFamily.PERSONAL_GAME
   assert.ok(richPersonal > poorPersonal)
 })
 

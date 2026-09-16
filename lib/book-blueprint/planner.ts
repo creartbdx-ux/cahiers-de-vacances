@@ -4,11 +4,10 @@ import { hashSeed, resolveBookVisualIdentity } from "@/lib/mini-book/visual-iden
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
 import type { Palette, Style } from "@/lib/supabase/types"
 import {
-  collectPersonalBlocks,
-  composePersonalEditorialPages,
-  pageProvenance,
-  type PersonalEditorialPageV1,
-} from "@/lib/personal-editorial"
+  planPhotoPagesFromProfile,
+  type PhotoPageV1,
+} from "@/lib/photo-pages"
+import { getPersonalGameSources } from "@/lib/personal-game-sources"
 import {
   getArchetype,
   READY_THEME_ARCHETYPE_IDS,
@@ -180,31 +179,32 @@ export function buildBookBlueprint(input: BuildBookBlueprintInput): BookBlueprin
   }
 }
 
-function intentFromPersonalPage(
-  page: PersonalEditorialPageV1,
+function intentFromPhotoPage(
+  page: PhotoPageV1,
   nextId: () => string,
 ): ScoredIntent {
-  const { sourceMemoryIds, sourcePhotoIds } = pageProvenance(page)
-  const sourceNeeds: string[] = []
-  if (sourceMemoryIds.length) sourceNeeds.push("memory")
-  if (sourcePhotoIds.length) sourceNeeds.push("photo")
+  const sourcePhotoIds = page.photos.map((p) => p.sourcePhotoId)
   const participantIds = [
-    ...new Set(page.blocks.flatMap((b) => b.participantIds)),
+    ...new Set(page.photos.flatMap((p) => p.participantIds)),
   ]
-  const onlyWeakPhotos =
-    page.blocks.length > 0 &&
-    page.blocks.every((b) => b.type === "PHOTO_MEMORY" && b.weakSource)
-
+  if (page.kind === "TIMELINE") {
+    return {
+      archetype: getArchetype("PHOTO_TIMELINE_PAGE"),
+      tempId: nextId(),
+      sourceNeeds: ["photo"],
+      participantIds,
+      sourcePhotoIds,
+      reason: `Timeline photo (${page.photos.length} photo(s), dates fiables)`,
+    }
+  }
   return {
-    archetype: getArchetype("PERSONAL_EDITORIAL_PAGE"),
+    archetype: getArchetype("PHOTO_COLLAGE_PAGE"),
     tempId: nextId(),
-    sourceNeeds,
+    sourceNeeds: ["photo"],
     participantIds,
-    personalLayoutId: page.layoutId,
-    sourceMemoryIds,
+    photoLayoutId: page.layoutId,
     sourcePhotoIds,
-    reason: `Page personnelle composite (${page.layoutId}, ${page.blocks.length} bloc(s))`,
-    implementationStatusOverride: onlyWeakPhotos ? "PARTIAL" : "READY",
+    reason: `Album photo ${page.layoutId} (${page.photos.length} photo(s))`,
   }
 }
 
@@ -274,16 +274,22 @@ function buildIntentBag(input: {
     })
   }
 
-  // --- Personal editorial pages (composed blocks, not 1 block = 1 page) ---
-  const blocks = collectPersonalBlocks({
-    profile,
-    maxMemories: targets.memorySlots || (profile.memories?.length ?? 0),
-    maxPhotos: targets.photoSlots || (profile.photos?.length ?? 0),
-  })
-  const composed = composePersonalEditorialPages(blocks, `${seed}:personal-editorial`)
-  for (const page of composed) {
-    bag.push(intentFromPersonalPage(page, nextId))
+  // --- Photo album pages (collage / timeline) — no independent memories ---
+  const photoPlan = planPhotoPagesFromProfile(
+    {
+      ...profile,
+      photos: (profile.photos ?? [])
+        .filter((p) => p.useAuthorized && Boolean(p.storagePath?.trim()))
+        .slice(0, targets.photoSlots || (profile.photos?.length ?? 0)),
+    },
+    `${seed}:photo-pages`,
+  )
+  for (const page of photoPlan.pages) {
+    bag.push(intentFromPhotoPage(page, nextId))
   }
+
+  // Memories feed personal games (sources), not dedicated pages
+  void getPersonalGameSources(profile)
 
   // --- Personal games ---
   let personalLeft = targets.personalGameSlots
@@ -295,7 +301,7 @@ function buildIntentBag(input: {
     bag.push({
       archetype: getArchetype("PERSONAL_QUIZ"),
       tempId: nextId(),
-      sourceNeeds: ["personalFacts"],
+      sourceNeeds: ["personalFacts", "memories"],
       reason: "Quiz personnel éligible (Editorial Engine)",
     })
     personalLeft--
@@ -322,13 +328,14 @@ function buildIntentBag(input: {
     bag.push({
       archetype: getArchetype("PERSONAL_REFLECTION"),
       tempId: nextId(),
+      sourceNeeds: ["memories"],
       reason: "Page personnelle ludique / contemplative (non interrogatoire)",
     })
     personalLeft--
   }
 
-  // Fill remaining personal block with reflection if editorial+games < block
-  const personalUsed = composed.length + targets.personalGameSlots
+  // Fill remaining personal block with reflection if photo+games < block
+  const personalUsed = photoPlan.pages.length + targets.personalGameSlots
   let personalPad = Math.max(0, targets.personalBlock - personalUsed)
   while (personalPad > 0) {
     bag.push({
@@ -606,6 +613,7 @@ function toBlueprintPages(
       section,
       reason: item.reason,
       ...(item.personalLayoutId ? { personalLayoutId: item.personalLayoutId } : {}),
+      ...(item.photoLayoutId ? { photoLayoutId: item.photoLayoutId } : {}),
       ...(item.sourceMemoryIds?.length ? { sourceMemoryIds: item.sourceMemoryIds } : {}),
       ...(item.sourcePhotoIds?.length ? { sourcePhotoIds: item.sourcePhotoIds } : {}),
     }
@@ -701,9 +709,18 @@ function computeStats(pages: BlueprintPageSlot[]): BlueprintStats {
     (p) => p.archetypeId === "THEME_VARIETY_GAME" || p.family === "QUICK_GAME",
   ).length
 
+  const photoAlbum = pages.filter(
+    (p) =>
+      p.archetypeId === "PHOTO_COLLAGE_PAGE" ||
+      p.archetypeId === "PHOTO_TIMELINE_PAGE",
+  )
   const personalEditorial = pages.filter((p) => p.archetypeId === "PERSONAL_EDITORIAL_PAGE")
-  const photoPages = personalEditorial.filter((p) => (p.sourcePhotoIds?.length ?? 0) > 0).length
-  const memoryPages = personalEditorial.filter((p) => (p.sourceMemoryIds?.length ?? 0) > 0).length
+  const photoPages = photoAlbum.length
+  const memoryPages = pages.filter(
+    (p) =>
+      p.archetypeId === "MEMORY_TEXT_PAGE" ||
+      (p.sourceMemoryIds?.length ?? 0) > 0,
+  ).length
 
   return {
     interiorPageCount: pages.length,

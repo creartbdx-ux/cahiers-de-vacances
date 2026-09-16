@@ -18,6 +18,7 @@ export type ScoredIntent = {
   /** Optional override (e.g. weak photo chain => PARTIAL). */
   implementationStatusOverride?: ImplementationStatus
   personalLayoutId?: string
+  photoLayoutId?: string
   sourceMemoryIds?: string[]
   sourcePhotoIds?: string[]
 }

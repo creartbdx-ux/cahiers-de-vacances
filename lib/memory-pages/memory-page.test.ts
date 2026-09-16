@@ -416,13 +416,14 @@ test("aucune correction générée — correctionRequired false", () => {
   const arch = getArchetype("MEMORY_TEXT_PAGE")
   assert.equal(arch.correctionRequired, false)
   assert.equal(arch.correctionWeight, 0)
-  assert.equal(arch.implementationStatus, "READY")
+  assert.equal(arch.implementationStatus, "PARTIAL")
 })
 
-test("Blueprint MEMORY_TEXT_PAGE READY ; PERSONAL_EDITORIAL_PAGE READY", () => {
-  assert.equal(getArchetype("MEMORY_TEXT_PAGE").implementationStatus, "READY")
-  assert.equal(getArchetype("PHOTO_MEMORY_PAGE").implementationStatus, "READY")
-  assert.equal(getArchetype("PERSONAL_EDITORIAL_PAGE").implementationStatus, "READY")
+test("Blueprint V1 photo collage READY ; PERSONAL_EDITORIAL expérimental", () => {
+  assert.equal(getArchetype("MEMORY_TEXT_PAGE").implementationStatus, "PARTIAL")
+  assert.equal(getArchetype("PHOTO_MEMORY_PAGE").implementationStatus, "PARTIAL")
+  assert.equal(getArchetype("PERSONAL_EDITORIAL_PAGE").implementationStatus, "PARTIAL")
+  assert.equal(getArchetype("PHOTO_COLLAGE_PAGE").implementationStatus, "READY")
 
   const bp = buildBookBlueprint({
     bookProjectId: "proj",
@@ -467,21 +468,20 @@ test("Blueprint MEMORY_TEXT_PAGE READY ; PERSONAL_EDITORIAL_PAGE READY", () => {
     palettes: [PALETTE],
   })
 
-  const editorial = bp.pages.filter((p) => p.archetypeId === "PERSONAL_EDITORIAL_PAGE")
-  assert.ok(editorial.length >= 1)
-  assert.ok(editorial.every((p) => p.implementationStatus === "READY"))
+  assert.equal(bp.pages.filter((p) => p.archetypeId === "PERSONAL_EDITORIAL_PAGE").length, 0)
+  assert.ok(bp.stats.photoPages >= 1)
+  assert.ok(
+    bp.pages.some((p) => p.archetypeId === "PHOTO_COLLAGE_PAGE"),
+  )
 
   const memoryGap = bp.capabilityGaps.find((g) => g.family === "MEMORY")
   assert.equal(memoryGap, undefined)
 
   const photoGap = bp.capabilityGaps.find((g) => g.family === "PHOTO")
   assert.equal(photoGap, undefined)
-
-  const editorialGap = bp.capabilityGaps.find((g) => g.family === "PERSONAL_EDITORIAL")
-  assert.equal(editorialGap, undefined)
 })
 
-test("Blueprint PHOTO weak-only pages restent PARTIAL", () => {
+test("Blueprint : 1 photo faible ne crée pas de page album obligatoire", () => {
   const bp = buildBookBlueprint({
     bookProjectId: "proj-weak",
     seed: "bp-weak",
@@ -505,8 +505,8 @@ test("Blueprint PHOTO weak-only pages restent PARTIAL", () => {
     styles: STYLES,
     palettes: [PALETTE],
   })
-  const editorial = bp.pages.filter((p) => p.archetypeId === "PERSONAL_EDITORIAL_PAGE")
-  assert.ok(editorial.every((p) => p.implementationStatus === "PARTIAL"))
+  assert.equal(bp.stats.photoPages, 0)
+  assert.equal(bp.pages.filter((p) => p.archetypeId === "PERSONAL_EDITORIAL_PAGE").length, 0)
 })
 
 test("memory inexistant => échec sans invention", async () => {
@@ -725,7 +725,7 @@ test("Blueprint expose memoryContentHints WEAK pour SHORT", () => {
     styles: STYLES,
     palettes: [PALETTE],
   })
-  assert.equal(getArchetype("MEMORY_TEXT_PAGE").implementationStatus, "READY")
+  assert.equal(getArchetype("MEMORY_TEXT_PAGE").implementationStatus, "PARTIAL")
   const weak = bp.memoryContentHints.find((h) => h.memoryId === "onsen")
   assert.ok(weak)
   assert.equal(weak!.fullPageRecommended, false)

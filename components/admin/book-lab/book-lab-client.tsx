@@ -32,11 +32,13 @@ import {
   prepareBookLabMemoryPageAction,
   prepareBookLabPersonalEditorialAction,
   prepareBookLabPhotoMemoryPageAction,
+  prepareBookLabPhotoPagesAction,
   regenerateBookLabPersonalEditorialCopyAction,
   type BookLabCrosswordContent,
   type BookLabMemoryPageResult,
   type BookLabPersonalEditorialResult,
   type BookLabPhotoMemoryPageResult,
+  type BookLabPhotoPagesResult,
   type BookLabQuizContent,
   type BookLabWordsearchContent,
 } from "@/app/admin/book-lab/actions"
@@ -45,6 +47,8 @@ import type { Palette, Style } from "@/lib/supabase/types"
 import { MemoryTemplate } from "@/components/book-renderer/templates/memory-template"
 import { PhotoMemoryTemplate } from "@/components/book-renderer/templates/photo-memory-template"
 import { PersonalEditorialTemplate } from "@/components/book-renderer/templates/personal-editorial-template"
+import { PhotoCollageTemplate } from "@/components/book-renderer/templates/photo-collage-template"
+import { PhotoTimelineTemplate } from "@/components/book-renderer/templates/photo-timeline-template"
 import { blockTextWordCount, blockWeight } from "@/lib/personal-editorial"
 import { resolveMemoryPageSurface } from "@/lib/memory-pages"
 
@@ -114,6 +118,13 @@ export function BookLabClient({
   const [personalEditorialPending, startPersonalEditorialTransition] = useTransition()
   const [personalPageIndex, setPersonalPageIndex] = useState(0)
 
+  const [photoPagesLab, setPhotoPagesLab] = useState<
+    Extract<BookLabPhotoPagesResult, { ok: true }> | null
+  >(null)
+  const [photoPagesError, setPhotoPagesError] = useState<string | null>(null)
+  const [photoPagesPending, startPhotoPagesTransition] = useTransition()
+  const [photoPageIndex, setPhotoPageIndex] = useState(0)
+
   const selected = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
@@ -161,22 +172,24 @@ export function BookLabClient({
     const id =
       memoryPage?.visualIdentity.paletteId ??
       photoMemoryPage?.visualIdentity.paletteId ??
+      photoPagesLab?.visualIdentity.paletteId ??
       personalEditorial?.visualIdentity.paletteId ??
       visualIdentity?.paletteId
     return palettes.find((p) => p.id === id) ?? palettes[0] ?? FALLBACK_PALETTE
-  }, [palettes, memoryPage, photoMemoryPage, personalEditorial, visualIdentity])
+  }, [palettes, memoryPage, photoMemoryPage, photoPagesLab, personalEditorial, visualIdentity])
 
   const memoryStyle = useMemo(
     () =>
       getStyleTokens(
         memoryPage?.visualIdentity.styleId ??
           photoMemoryPage?.visualIdentity.styleId ??
+          photoPagesLab?.visualIdentity.styleId ??
           personalEditorial?.visualIdentity.styleId ??
           visualIdentity?.styleId ??
           styles[0]?.id ??
           "RETRO",
       ),
-    [memoryPage, photoMemoryPage, personalEditorial, visualIdentity, styles],
+    [memoryPage, photoMemoryPage, photoPagesLab, personalEditorial, visualIdentity, styles],
   )
 
   const memorySurface = memoryPage
@@ -373,6 +386,24 @@ export function BookLabClient({
       }
       setPersonalEditorial(result)
       setPersonalPageIndex(0)
+    })
+  }
+
+  function preparePhotoPages() {
+    if (!selected) return
+    setPhotoPagesError(null)
+    startPhotoPagesTransition(async () => {
+      const result = await prepareBookLabPhotoPagesAction({
+        bookProjectId: selected.id,
+        seed: seed.trim() || "lab-seed-1",
+      })
+      if (!result.ok) {
+        setPhotoPagesLab(null)
+        setPhotoPagesError(result.message)
+        return
+      }
+      setPhotoPagesLab(result)
+      setPhotoPageIndex(0)
     })
   }
 
@@ -832,10 +863,122 @@ export function BookLabClient({
 
       {selected && (
         <section className="rounded-2xl border border-border bg-card p-5">
-          <h2 className="mb-1 text-base font-semibold">PERSONAL EDITORIAL PAGE LAB</h2>
+          <h2 className="mb-1 text-base font-semibold">PHOTO PAGES LAB</h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            Packing déterministe + éditorialisation IA de page (voie principale si API key).
-            Le fallback fact-model n&apos;est utilisé qu&apos;en secours technique.
+            Album Polaroid / timeline à partir des photos SAVED + autorisées uniquement.
+            Aucun souvenir texte indépendant n&apos;est injecté.
+          </p>
+
+          <div className="mb-4 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => preparePhotoPages()}
+              disabled={photoPagesPending || availablePhotos.length === 0}
+            >
+              {photoPagesPending ? "Planification…" : "Planifier les pages photo"}
+            </Button>
+            <span className="self-center text-xs text-muted-foreground">
+              {availablePhotos.length} photo(s) utilisable(s)
+            </span>
+          </div>
+
+          {photoPagesError && (
+            <p className="mb-3 text-sm text-destructive">{photoPagesError}</p>
+          )}
+
+          {photoPagesLab && (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+              <div className="space-y-3 text-sm">
+                <p className="text-muted-foreground">
+                  {photoPagesLab.usablePhotoCount} photo(s) → {photoPagesLab.pageCount}{" "}
+                  page(s) album
+                </p>
+                <ul className="space-y-2">
+                  {photoPagesLab.pages.map((p, i) => (
+                    <li key={p.pageKey}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-full rounded-lg border px-3 py-2 text-left",
+                          i === photoPageIndex
+                            ? "border-foreground bg-muted/50"
+                            : "border-border bg-background",
+                        )}
+                        onClick={() => setPhotoPageIndex(i)}
+                      >
+                        <span className="font-medium">
+                          Page photo {i + 1} · {p.kind}
+                          {p.layoutId ? ` · ${p.layoutId}` : ""}
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Photos :{" "}
+                          {p.page.photos
+                            .map(
+                              (ph) =>
+                                ph.kicker ||
+                                ph.caption?.slice(0, 24) ||
+                                ph.sourcePhotoId.slice(0, 8),
+                            )
+                            .join(" · ") || "—"}
+                          <br />
+                          sourcePhotoIds : {p.sourcePhotoIds.join(", ")}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {photoPagesLab.pageCount === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Aucune page planifiée (ex. une seule photo sans contenu assez fort).
+                  </p>
+                ) : null}
+              </div>
+              <div className="rounded-2xl border border-border bg-muted/40 p-4 sm:p-6">
+                {photoPagesLab.pages[photoPageIndex] ? (
+                  <PagePreview>
+                    <BookPage
+                      palette={memoryPalette}
+                      showSafeArea={false}
+                      surface={resolveMemoryPageSurface(memoryPalette, "LIGHT")}
+                    >
+                      {photoPagesLab.pages[photoPageIndex]!.page.kind === "TIMELINE" ? (
+                        <PhotoTimelineTemplate
+                          photos={photoPagesLab.pages[photoPageIndex]!.page.photos}
+                          style={memoryStyle}
+                          palette={memoryPalette}
+                        />
+                      ) : (
+                        <PhotoCollageTemplate
+                          layoutId={
+                            photoPagesLab.pages[photoPageIndex]!.page.kind === "COLLAGE"
+                              ? photoPagesLab.pages[photoPageIndex]!.page.layoutId
+                              : "COLLAGE_2"
+                          }
+                          photos={photoPagesLab.pages[photoPageIndex]!.page.photos}
+                          style={memoryStyle}
+                          palette={memoryPalette}
+                        />
+                      )}
+                    </BookPage>
+                  </PagePreview>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Aucune page à afficher.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {selected && (
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <h2 className="mb-1 text-base font-semibold">
+            PERSONAL EDITORIAL PAGE LAB{" "}
+            <span className="text-xs font-normal text-muted-foreground">(expérimental)</span>
+          </h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Hors Blueprint V1 — réservé à l&apos;expérimentation. Les souvenirs texte
+            alimentent les jeux PERSONAL ; les photos passent par PHOTO PAGES LAB.
           </p>
 
           <div className="mb-4 flex flex-wrap gap-2">
