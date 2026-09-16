@@ -51,6 +51,7 @@ import { PhotoCollageTemplate } from "@/components/book-renderer/templates/photo
 import { PhotoTimelineTemplate } from "@/components/book-renderer/templates/photo-timeline-template"
 import { blockTextWordCount, blockWeight } from "@/lib/personal-editorial"
 import { resolveMemoryPageSurface } from "@/lib/memory-pages"
+import { resolveCollageComposition } from "@/lib/photo-pages"
 
 export type BookLabProject = {
   id: string
@@ -191,6 +192,16 @@ export function BookLabClient({
       ),
     [memoryPage, photoMemoryPage, photoPagesLab, personalEditorial, visualIdentity, styles],
   )
+
+  const activePhotoComposition = useMemo(() => {
+    const entry = photoPagesLab?.pages[photoPageIndex]
+    if (!entry || entry.page.kind !== "COLLAGE") return null
+    return resolveCollageComposition({
+      layoutId: entry.page.layoutId,
+      photos: entry.page.photos,
+      seed: `${seed.trim() || "lab-seed-1"}:photo-pages:${entry.pageKey}`,
+    })
+  }, [photoPagesLab, photoPageIndex, seed])
 
   const memorySurface = memoryPage
     ? resolveMemoryPageSurface(memoryPalette, memoryPage.visualRole)
@@ -894,38 +905,69 @@ export function BookLabClient({
                   page(s) album
                 </p>
                 <ul className="space-y-2">
-                  {photoPagesLab.pages.map((p, i) => (
-                    <li key={p.pageKey}>
-                      <button
-                        type="button"
-                        className={cn(
-                          "w-full rounded-lg border px-3 py-2 text-left",
-                          i === photoPageIndex
-                            ? "border-foreground bg-muted/50"
-                            : "border-border bg-background",
-                        )}
-                        onClick={() => setPhotoPageIndex(i)}
-                      >
-                        <span className="font-medium">
-                          Page photo {i + 1} · {p.kind}
-                          {p.layoutId ? ` · ${p.layoutId}` : ""}
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          Photos :{" "}
-                          {p.page.photos
-                            .map(
-                              (ph) =>
-                                ph.kicker ||
-                                ph.caption?.slice(0, 24) ||
-                                ph.sourcePhotoId.slice(0, 8),
-                            )
-                            .join(" · ") || "—"}
-                          <br />
-                          sourcePhotoIds : {p.sourcePhotoIds.join(", ")}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
+                  {photoPagesLab.pages.map((p, i) => {
+                    const comp =
+                      p.page.kind === "COLLAGE"
+                        ? resolveCollageComposition({
+                            layoutId: p.page.layoutId,
+                            photos: p.page.photos,
+                            seed: `${seed.trim() || "lab-seed-1"}:photo-pages:${p.pageKey}`,
+                          })
+                        : null
+                    return (
+                      <li key={p.pageKey}>
+                        <button
+                          type="button"
+                          className={cn(
+                            "w-full rounded-lg border px-3 py-2 text-left",
+                            i === photoPageIndex
+                              ? "border-foreground bg-muted/50"
+                              : "border-border bg-background",
+                          )}
+                          onClick={() => setPhotoPageIndex(i)}
+                        >
+                          <span className="font-medium">
+                            Page photo {i + 1} · {p.kind}
+                            {p.layoutId ? ` · ${p.layoutId}` : ""}
+                            {comp ? ` · ${comp.variant}` : ""}
+                          </span>
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            layout : {p.layoutId ?? p.kind}
+                            {comp ? (
+                              <>
+                                <br />
+                                variant : {comp.variant}
+                                <br />
+                                heroPhotoId : {comp.heroPhotoId ?? "—"}
+                                <br />
+                                title :{" "}
+                                {comp.showPageTitle ? comp.pageTitle ?? "—" : "(hidden)"}
+                              </>
+                            ) : null}
+                            <br />
+                            sourcePhotoIds : {p.sourcePhotoIds.join(", ")}
+                            <br />
+                            {p.page.photos.map((ph) => {
+                              const orientation =
+                                comp?.photos.find((x) => x.sourcePhotoId === ph.sourcePhotoId)
+                                  ?.orientation ?? "—"
+                              return (
+                                <span
+                                  key={ph.sourcePhotoId}
+                                  className="mt-1 block pl-1"
+                                >
+                                  · {ph.sourcePhotoId.slice(0, 10)}… · {orientation}
+                                  <br />
+                                  caption : {ph.kicker ? `${ph.kicker} — ` : ""}
+                                  {ph.caption || "—"}
+                                </span>
+                              )
+                            })}
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
                 </ul>
                 {photoPagesLab.pageCount === 0 ? (
                   <p className="text-sm text-muted-foreground">
@@ -957,6 +999,8 @@ export function BookLabClient({
                           photos={photoPagesLab.pages[photoPageIndex]!.page.photos}
                           style={memoryStyle}
                           palette={memoryPalette}
+                          seed={`${seed.trim() || "lab-seed-1"}:photo-pages:${photoPagesLab.pages[photoPageIndex]!.pageKey}`}
+                          composition={activePhotoComposition ?? undefined}
                         />
                       )}
                     </BookPage>

@@ -1,3 +1,5 @@
 export * from "./types"
 export * from "./copy"
 export * from "./plan"
+export * from "./orientation"
+export * from "./collage-composition"

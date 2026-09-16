@@ -11,6 +11,10 @@ import { getPersonalGameSources } from "@/lib/personal-game-sources"
 import {
   planPhotoPages,
   splitPhotoCounts,
+  buildPhotoCaption,
+  classifyPhotoOrientation,
+  resolveCollageComposition,
+  type PhotoPageItem,
   type PhotoPageV1,
 } from "@/lib/photo-pages"
 import { PhotoCollageTemplate } from "@/components/book-renderer/templates/photo-collage-template"
@@ -274,10 +278,12 @@ test("templates Polaroid / timeline rendent sourcePhotoId", () => {
       photos: collagePage.photos,
       style: getStyleTokens("RETRO"),
       palette: PALETTE,
+      seed: "tpl",
     }),
   )
   assert.ok(html.includes('data-source-photo-id="ph1"'))
   assert.ok(html.includes('data-layout="photo-collage"'))
+  assert.ok(html.includes("data-variant="))
 
   const tl = renderToStaticMarkup(
     createElement(PhotoTimelineTemplate, {
@@ -299,4 +305,174 @@ test("templates Polaroid / timeline rendent sourcePhotoId", () => {
   )
   assert.ok(tl.includes("2019"))
   assert.ok(tl.includes('data-layout="photo-timeline"'))
+})
+
+// --- Design / composition (planner unchanged) ---
+
+function item(id: string, over: Partial<PhotoPageItem> = {}): PhotoPageItem {
+  return {
+    sourcePhotoId: id,
+    imageUrl: `https://example.com/${id}.jpg`,
+    kicker: null,
+    caption: null,
+    anecdote: null,
+    place: null,
+    dateLabel: null,
+    sortKey: null,
+    participantIds: [],
+    ...over,
+  }
+}
+
+test("landscape favorisée en zone large (HERO_TOP)", () => {
+  const photos = [
+    item("land", { kicker: "A", caption: "Vue large." }),
+    item("l2", { kicker: "B", caption: "Autre large." }),
+    item("sq", { kicker: "C", caption: "Carré." }),
+  ]
+  const comp = resolveCollageComposition({
+    layoutId: "COLLAGE_3",
+    photos,
+    seed: "orient-land-majority",
+    aspectRatios: { land: 1.7, l2: 1.5, sq: 1.0 },
+  })
+  assert.ok(comp.variant === "HERO_TOP" || comp.variant === "HERO_LEFT")
+  if (comp.variant === "HERO_TOP") {
+    assert.ok(
+      comp.heroPhotoId === "land" || comp.heroPhotoId === "l2",
+      "wide hero should be landscape",
+    )
+  }
+  assert.equal(classifyPhotoOrientation(1.6), "LANDSCAPE")
+  assert.equal(classifyPhotoOrientation(0.7), "PORTRAIT")
+})
+
+test("portrait favorisée en zone verticale (HERO_LEFT/RIGHT)", () => {
+  const photos = [
+    item("port", { kicker: "P", caption: "Debout." }),
+    item("port2", { kicker: "Q", caption: "Debout deux." }),
+    item("l1", { kicker: "L", caption: "Large." }),
+  ]
+  const comp = resolveCollageComposition({
+    layoutId: "COLLAGE_3",
+    photos,
+    seed: "orient-port-majority",
+    aspectRatios: { port: 0.68, port2: 0.72, l1: 1.5 },
+  })
+  assert.ok(comp.variant === "HERO_LEFT" || comp.variant === "HERO_RIGHT")
+  assert.ok(
+    comp.heroPhotoId === "port" || comp.heroPhotoId === "port2",
+    `expected portrait hero, got ${comp.heroPhotoId}`,
+  )
+})
+
+test("même seed => même variante collage", () => {
+  const photos = [
+    item("a", { caption: "Un." }),
+    item("b", { caption: "Deux." }),
+    item("c", { caption: "Trois." }),
+  ]
+  const ratios = { a: 1.5, b: 0.8, c: 1.1 }
+  const x = resolveCollageComposition({
+    layoutId: "COLLAGE_3",
+    photos,
+    seed: "stable-var",
+    aspectRatios: ratios,
+  })
+  const y = resolveCollageComposition({
+    layoutId: "COLLAGE_3",
+    photos,
+    seed: "stable-var",
+    aspectRatios: ratios,
+  })
+  assert.equal(x.variant, y.variant)
+  assert.equal(x.heroPhotoId, y.heroPhotoId)
+  assert.deepEqual(
+    x.photos.map((p) => p.sourcePhotoId),
+    y.photos.map((p) => p.sourcePhotoId),
+  )
+})
+
+test("captions non répétitives et courtes", () => {
+  const c = buildPhotoCaption({
+    caption: "Lui et moi à Porto.",
+    anecdote: "Photo prise après une dispute — début de réconciliation.",
+    place: "Porto",
+    creatorName: "Emma",
+  })
+  assert.equal(c.kicker, "PORTO")
+  assert.ok(c.caption)
+  assert.ok(!/lui et moi à porto/i.test(c.caption!))
+  assert.ok(c.caption!.split(/\s+/).length <= 18)
+})
+
+test("caption d'une photo jamais croisée", () => {
+  const { pages } = planPhotoPages({
+    photos: [
+      photo("porto", {
+        caption: "À Porto.",
+        anecdote: "Réconciliation.",
+        place: "Porto",
+      }),
+      photo("sydney", {
+        caption: "Sydney Tower.",
+        anecdote: "Coca sans bulles.",
+        place: "Sydney",
+      }),
+    ],
+    seed: "cross",
+  })
+  const porto = pages[0]!.photos.find((p) => p.sourcePhotoId === "porto")!
+  const sydney = pages[0]!.photos.find((p) => p.sourcePhotoId === "sydney")!
+  assert.ok(porto)
+  assert.ok(sydney)
+  assert.notEqual(porto.caption, sydney.caption)
+  assert.ok(!/sydney/i.test(`${porto.kicker} ${porto.caption}`))
+  assert.ok(!/porto/i.test(`${sydney.kicker} ${sydney.caption}`))
+})
+
+test("COLLAGE_2 / 3 / 4 compositions valides", () => {
+  const c2 = resolveCollageComposition({
+    layoutId: "COLLAGE_2",
+    photos: [item("a"), item("b")],
+    seed: "v2",
+    aspectRatios: { a: 0.7, b: 0.7 },
+  })
+  assert.equal(c2.variant, "STACKED")
+
+  const c2b = resolveCollageComposition({
+    layoutId: "COLLAGE_2",
+    photos: [item("a"), item("b")],
+    seed: "v2b",
+    aspectRatios: { a: 1.5, b: 1.4 },
+  })
+  assert.equal(c2b.variant, "SIDE_BY_SIDE")
+
+  const c3 = resolveCollageComposition({
+    layoutId: "COLLAGE_3",
+    photos: [item("a"), item("b"), item("c")],
+    seed: "v3",
+  })
+  assert.ok(["HERO_LEFT", "HERO_TOP", "HERO_RIGHT"].includes(c3.variant))
+  assert.ok(c3.heroPhotoId)
+
+  const c4 = resolveCollageComposition({
+    layoutId: "COLLAGE_4",
+    photos: [item("a"), item("b"), item("c"), item("d")],
+    seed: "v4",
+    aspectRatios: { a: 1.6, b: 1, c: 1, d: 1 },
+  })
+  assert.ok(["GRID_2X2", "HERO_PLUS_THREE"].includes(c4.variant))
+})
+
+test("pas de timeline sans dates fiables (planner)", () => {
+  const { pages } = planPhotoPages({
+    photos: [
+      photo("a", { caption: "Sans date A" }),
+      photo("b", { caption: "Sans date B" }),
+      photo("c", { caption: "Sans date C" }),
+    ],
+    seed: "no-tl",
+  })
+  assert.equal(pages[0]!.kind, "COLLAGE")
 })
