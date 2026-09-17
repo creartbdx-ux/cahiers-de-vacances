@@ -6,6 +6,7 @@ export * from "./corrections"
 export * from "./scoring"
 export * from "./gaps"
 export * from "./memory-hints"
+export * from "./personalization-touches"
 export { buildBookBlueprint, type BuildBookBlueprintInput } from "./planner"
 export { getPersonalGameSources } from "@/lib/personal-game-sources"
 export {

@@ -183,20 +183,12 @@ test("Blueprint LIGHT : cahier complet, 0 memories/photos OK", () => {
   assert.ok(bp.stats.byDataNeed.THEME > 0)
   assert.ok(bp.stats.byDataNeed.NEUTRAL + bp.stats.byDataNeed.THEME > 10)
   assert.equal(bp.stats.byDataNeed.PHOTO, 0)
-  assert.equal(bp.stats.byDataNeed.DEEP_PERSONAL, 0)
-  // No customer-facing rejection codes in reasons
+  assert.equal(bp.pages.filter((p) => p.archetypeId === "PERSONAL_REFLECTION").length, 0)
+  assert.ok(bp.stats.pagesWithTouches > 0)
   assert.ok(!bp.pages.some((p) => /rejected|insuffisant|INSUFFICIENT/i.test(p.reason)))
 })
 
-test("Blueprint PERSONALIZED : plus de LIGHT_PERSONAL", () => {
-  const light = buildBookBlueprint({
-    bookProjectId: "p",
-    seed: "seed-cmp",
-    profile: fixtureProfileLight(),
-    richnessLevel: "LIGHT",
-    styles: STYLES,
-    palettes: PALETTES,
-  })
+test("Blueprint PERSONALIZED : touches + proches, pas de reflection quota", () => {
   const personalized = buildBookBlueprint({
     bookProjectId: "p",
     seed: "seed-cmp",
@@ -205,10 +197,12 @@ test("Blueprint PERSONALIZED : plus de LIGHT_PERSONAL", () => {
     styles: STYLES,
     palettes: PALETTES,
   })
-  assert.ok(
-    personalized.stats.byDataNeed.LIGHT_PERSONAL >= light.stats.byDataNeed.LIGHT_PERSONAL,
-  )
   assert.equal(personalized.personalizationDepth, "PERSONALIZED")
+  assert.equal(
+    personalized.pages.filter((p) => p.archetypeId === "PERSONAL_REFLECTION").length,
+    0,
+  )
+  assert.ok(personalized.stats.pagesWithTouches >= 8)
 })
 
 test("Blueprint RICH : PHOTO disponible, diversité theme conservée", () => {

@@ -87,7 +87,14 @@ export function BlueprintLabClient({
       if (filter === "READY") return p.implementationStatus === "READY"
       if (filter === "MISSING")
         return p.implementationStatus === "MISSING" || p.implementationStatus === "PARTIAL"
-      if (filter === "PERSONAL") return p.personalizationType === "PERSONAL"
+      if (filter === "PERSONAL") {
+        return (
+          (p.personalizationTouches?.length ?? 0) > 0 ||
+          p.dataNeed === "DEEP_PERSONAL" ||
+          p.family === "PHOTO" ||
+          p.personalizationType === "PERSONAL"
+        )
+      }
       if (filter === "THEME") return p.personalizationType === "THEME"
       if (filter === "CORRECTIONS") return p.family === "CORRECTION"
       return true
@@ -215,12 +222,19 @@ export function BlueprintLabClient({
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {familyLabel(p.family)}
+                      {p.dataNeed ? ` · ${p.dataNeed}` : ""}
                       {p.universeId ? ` · ${p.universeId}` : ""}
                       {p.gameId ? ` · ${p.gameId}` : ""}
                       {p.correctionOf?.length
                         ? ` · corrige ${p.correctionOf.length} jeu(x)`
                         : ""}
                     </p>
+                    {(p.personalizationTouches?.length ?? 0) > 0 ? (
+                      <p className="mt-0.5 text-xs text-foreground/80">
+                        Touches :{" "}
+                        {p.personalizationTouches!.map((t) => `${t.type} (${t.usage})`).join(" · ")}
+                      </p>
+                    ) : null}
                     <p className="mt-0.5 text-xs text-muted-foreground/80">{p.reason}</p>
                   </div>
                 </li>
@@ -257,13 +271,13 @@ function StatsCard({ blueprint }: { blueprint: BookBlueprintV1 }) {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
         <Stat label="Pages" value={String(s.interiorPageCount)} />
         <Stat label="Jeux principaux" value={String(s.mainGamePages)} />
+        <Stat label="Pages avec touches" value={String(s.pagesWithTouches)} />
         <Stat
-          label="Pages personnelles"
+          label="Perso. (touches+deep+photo)"
           value={String(
-            s.byFamily.PERSONAL_GAME +
-              s.personalEditorialPages +
-              s.byFamily.MEMORY +
-              s.byFamily.PHOTO,
+            s.pagesWithTouches +
+              (s.byDataNeed?.DEEP_PERSONAL ?? 0) +
+              s.photoPages,
           )}
         />
         <Stat label="Photos" value={String(s.photoPages)} />
@@ -279,6 +293,20 @@ function StatsCard({ blueprint }: { blueprint: BookBlueprintV1 }) {
           value={`L${s.byDensity.LIGHT} · M${s.byDensity.MEDIUM} · H${s.byDensity.HEAVY}`}
         />
       </div>
+      {s.byDataNeed ? (
+        <div className="mt-4">
+          <h3 className="mb-2 text-sm font-medium">Data need</h3>
+          <ul className="flex flex-wrap gap-2 text-xs">
+            {Object.entries(s.byDataNeed).map(([id, n]) =>
+              n > 0 ? (
+                <li key={id} className="rounded-lg border border-border px-2 py-1">
+                  {id} · {n}
+                </li>
+              ) : null,
+            )}
+          </ul>
+        </div>
+      ) : null}
       <div className="mt-4">
         <h3 className="mb-2 text-sm font-medium">Univers</h3>
         <ul className="flex flex-wrap gap-2 text-xs">

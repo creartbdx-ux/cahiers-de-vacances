@@ -190,7 +190,7 @@ test("DUO composition — plus de personnel ludique", () => {
     "seed-duo",
     "RICH",
   )
-  assert.ok(bp.stats.byFamily.PERSONAL_GAME + bp.stats.photoPages >= 4)
+  assert.ok(bp.stats.pagesWithTouches + bp.stats.photoPages >= 4)
   assert.ok(bp.pages.some((p) => p.archetypeId === "DUO_INTERACTION" || p.gameId === "QUIZ_PERSONAL"))
 })
 

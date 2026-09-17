@@ -37,6 +37,12 @@ export type PageDataNeed =
   | "DEEP_PERSONAL"
   | "PHOTO"
 
+export type {
+  PersonalizationTouch,
+  PersonalizationTouchType,
+  PersonalizationTouchUsage,
+} from "./personalization-touches"
+
 export type VisualRole = "PRIMARY" | "SECONDARY" | "ACCENT" | "LIGHT" | "NEUTRAL"
 
 export type BlueprintSectionKind =
@@ -72,8 +78,13 @@ export interface PageArchetype {
   gameId?: string
   technicalEngine?: string
   personalizationType: PersonalizationType
-  /** Data need for capability-based selection (defaults inferred from family/type). */
+  /** Data need for capability-based selection (orthogonal to page family). */
   dataNeed?: PageDataNeed
+  /**
+   * Suggested default touches this archetype can accept when capabilities allow.
+   * Planner may assign a subset onto the page slot.
+   */
+  suggestedTouchTypes?: import("./personalization-touches").PersonalizationTouchType[]
 }
 
 export interface BlueprintPageSlot {
@@ -94,6 +105,10 @@ export interface BlueprintPageSlot {
   density: PageDensity
   section: BlueprintSectionKind
   reason: string
+  /** Effective data need (from archetype; orthogonal to family / personalizationType). */
+  dataNeed?: PageDataNeed
+  /** Diffuse personalization applied to this page — may decorate THEME/NEUTRAL games. */
+  personalizationTouches?: import("./personalization-touches").PersonalizationTouch[]
   /** PERSONAL_EDITORIAL_PAGE layout when composed (lab / experimental). */
   personalLayoutId?: string
   /** PHOTO_COLLAGE_PAGE layout family (COLLAGE_2/3/4). */
@@ -132,7 +147,14 @@ export interface BlueprintStats {
   byVisualRole: Record<VisualRole, number>
   universeCounts: Record<string, number>
   themePercent: number
+  /**
+   * Share of pages touched by personalization:
+   * pages with ≥1 PersonalizationTouch + DEEP_PERSONAL + PHOTO.
+   * Not limited to personalizationType === PERSONAL.
+   */
   personalPercent: number
+  /** Count of pages with at least one PersonalizationTouch. */
+  pagesWithTouches: number
   readyPercent: number
   missingPercent: number
   photoPages: number
@@ -185,6 +207,10 @@ export interface CompositionTargets {
   opening: number
   closing: number
   mainGames: number
+  /**
+   * Dedicated personal *content* budget: photos + optional deep/audience games.
+   * Does NOT include a quota of generic "Page personnelle ludique".
+   */
   personalBlock: number
   quickLight: number
   breathers: number
@@ -202,5 +228,17 @@ export interface CompositionTargets {
   personalEditorialSlots: number
   /** Planned PHOTO_COLLAGE / PHOTO_TIMELINE pages. */
   photoPageSlots: number
+  /**
+   * Max dedicated DEEP / audience-interaction personal games (not generic reflection).
+   * Usually 0–3 — never a large PERSONAL_REFLECTION fill.
+   */
   personalGameSlots: number
+  /**
+   * Target number of pages that should receive ≥1 PersonalizationTouch
+   * (theme/neutral games decorated + intentional light-touch mechanics).
+   * ~12–18 for a 50-page book.
+   */
+  touchBudget: number
+  /** Intentional light-touch mechanic slots (logic/age, secret word, …). */
+  touchMechanicSlots: number
 }

@@ -22,6 +22,8 @@ export type ScoredIntent = {
   photoTemplateId?: string
   sourceMemoryIds?: string[]
   sourcePhotoIds?: string[]
+  /** Diffuse personalization touches assigned by planner. */
+  personalizationTouches?: import("./personalization-touches").PersonalizationTouch[]
 }
 
 /**

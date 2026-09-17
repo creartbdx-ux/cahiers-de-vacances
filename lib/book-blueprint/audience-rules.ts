@@ -26,9 +26,7 @@ function resolveDepth(
   richnessLevel: RichnessLevel,
   caps: PersonalizationCapabilities,
 ): PersonalizationDepth {
-  // Prefer capability-derived depth; fall back to normalized stored level
   const fromLevel = normalizePersonalizationDepth(richnessLevel)
-  // If stored level is richer legacy ENOUGH but caps say LIGHT, trust caps when profile is present
   if (caps.depth === "RICH" || fromLevel === "RICH") {
     return caps.depth === "RICH" ? "RICH" : fromLevel === "RICH" ? "RICH" : caps.depth
   }
@@ -40,14 +38,14 @@ function resolveDepth(
 
 /**
  * Soft composition targets for ~50 interior pages.
- * LIGHT profiles still get a full book (NEUTRAL + THEME + LIGHT_PERSONAL).
- * Photos → album pages. Memories → personal game sources (not pages).
+ *
+ * Personalization is mostly DIFFUSE (touchBudget on ordinary games).
+ * personalBlock / personalGameSlots no longer fill with generic PERSONAL_REFLECTION.
  */
 export function resolveCompositionTargets(input: {
   profile: BookProfileV1
   richnessLevel: RichnessLevel
   targetInteriorPages: number
-  /** Seed used to estimate photo pages deterministically. */
   seed?: string
 }): CompositionTargets {
   const { profile, richnessLevel, targetInteriorPages: N } = input
@@ -57,77 +55,60 @@ export function resolveCompositionTargets(input: {
   const audience = profile.audience
   const photos = countUsablePhotos(profile)
   const memories = countMemories(profile)
-  const facts = profile.personalFacts?.length ?? 0
 
-  let mainGames = Math.round(25 * scale)
-  let personalBlock = Math.round(10 * scale)
-  let quickLight = Math.round(5 * scale)
+  // Main games dominate — personalization lives as touches on these pages
+  let mainGames = Math.round(28 * scale)
+  let quickLight = Math.round(6 * scale)
   let breathers = Math.round(2 * scale)
   const opening = 1
   const closing = 1
   let estimatedCorrectionPages = Math.round(5 * scale)
 
-  if (audience === "ME" || audience === "OTHER_PERSON") {
+  if (audience === "DUO") {
     mainGames = Math.round(26 * scale)
-    personalBlock = Math.round(9 * scale)
-    quickLight = Math.round(5 * scale)
-  } else if (audience === "DUO") {
-    mainGames = Math.round(22 * scale)
-    personalBlock = Math.round(12 * scale)
     quickLight = Math.round(6 * scale)
   } else if (audience === "GROUP") {
-    mainGames = Math.round(21 * scale)
-    personalBlock = Math.round(13 * scale)
-    quickLight = Math.round(6 * scale)
+    mainGames = Math.round(25 * scale)
+    quickLight = Math.round(7 * scale)
   }
 
-  if (depth === "RICH") {
-    personalBlock += Math.round(2 * scale)
-    mainGames -= Math.round(1 * scale)
-  } else if (depth === "LIGHT") {
-    // More theme/neutral, fewer deep-personal slots — still a full book
-    personalBlock = Math.max(Math.round(4 * scale), personalBlock - Math.round(3 * scale))
-    mainGames += Math.round(2 * scale)
-  } else {
-    // PERSONALIZED — modest boost for light-personal
-    personalBlock += Math.round(1 * scale)
-  }
+  // Diffuse touch target: ~12–18 pages for N=50
+  let touchBudget = clamp(Math.round(15 * scale), Math.round(10 * scale), Math.round(20 * scale))
+  if (depth === "RICH") touchBudget = clamp(touchBudget + Math.round(2 * scale), 10, Math.round(22 * scale))
+  if (depth === "LIGHT") touchBudget = clamp(touchBudget - Math.round(1 * scale), Math.round(10 * scale), Math.round(18 * scale))
 
-  // Photo budget = usable album photos (planner packs into pages)
+  // Intentional light-touch mechanics (logic/age, secret word, …) — not generic personal pages
+  let touchMechanicSlots = 0
+  if (caps.hasAge || caps.hasBirthDate) touchMechanicSlots++
+  if (caps.hasRecipientName) touchMechanicSlots++
+  if (caps.hasClosePeople || caps.hasFamilyContext) touchMechanicSlots++
+  if (caps.hasTraits) touchMechanicSlots++
+  touchMechanicSlots = clamp(touchMechanicSlots, 0, Math.round(4 * scale))
+
+  // Photo budget
   let photoSlots = 0
   if (photos === 0 || !caps.hasPhotos) photoSlots = 0
   else if (photos <= 3) photoSlots = clamp(photos, 1, Math.round(4 * scale))
   else photoSlots = clamp(Math.min(photos, Math.round(8 * scale)), 2, Math.round(10 * scale))
 
-  // Memories remain available for games — slot count for budgeting / hints only
   let memorySlots = 0
   if (memories === 0 || !caps.hasMemories) memorySlots = 0
   else if (memories <= 2) memorySlots = memories
   else memorySlots = clamp(Math.min(memories, Math.round(5 * scale)), 2, Math.round(6 * scale))
-
   if (depth === "RICH" && memories > 0) {
     memorySlots = clamp(memorySlots + 1, 0, Math.round(7 * scale))
   }
 
+  // Dedicated deep / audience games — small, never a reflection fill
   let personalGameSlots = 0
-  if (audience === "ME" || audience === "OTHER_PERSON") {
-    if (depth === "RICH" && memories >= 2) {
-      personalGameSlots = Math.round(2 * scale)
-    } else if (depth === "PERSONALIZED" || caps.hasClosePeople || caps.hasTraits) {
-      personalGameSlots = Math.round(2 * scale)
-    } else {
-      // LIGHT: still some light-personal pages (name/traits/age touches)
-      personalGameSlots = Math.round(2 * scale)
-    }
-  } else if (audience === "DUO") {
-    personalGameSlots = Math.round(4 * scale)
-  } else {
-    personalGameSlots = Math.round(5 * scale)
+  if (audience === "DUO") personalGameSlots = Math.round(2 * scale)
+  else if (audience === "GROUP") personalGameSlots = Math.round(2 * scale)
+  else if (depth === "RICH" && (caps.hasMemories || caps.hasPersonalFacts)) {
+    personalGameSlots = Math.round(1 * scale)
   }
 
-  const maxReadyThemeGames = clamp(Math.round(12 * scale), 8, 15)
+  const maxReadyThemeGames = clamp(Math.round(14 * scale), 8, 16)
 
-  // Photo pages only (no PERSONAL_EDITORIAL in V1)
   const planned = planPhotoPagesFromProfile(
     {
       ...profile,
@@ -140,14 +121,12 @@ export function resolveCompositionTargets(input: {
   const photoPageSlots = planned.pages.length
   const personalEditorialSlots = 0
 
-  const personalCore = photoPageSlots + personalGameSlots
-  if (personalCore > personalBlock) {
-    personalBlock = personalCore
-  }
+  // personalBlock = photos + deep/audience + touch mechanics (explicit intents only)
+  let personalBlock = photoPageSlots + personalGameSlots + touchMechanicSlots
+  personalBlock = clamp(personalBlock, 0, Math.round(12 * scale))
 
-  mainGames = clamp(mainGames, Math.round(20 * scale), Math.round(28 * scale))
-  personalBlock = clamp(personalBlock, Math.round(6 * scale), Math.round(14 * scale))
-  quickLight = clamp(quickLight, Math.round(4 * scale), Math.round(7 * scale))
+  mainGames = clamp(mainGames, Math.round(22 * scale), Math.round(32 * scale))
+  quickLight = clamp(quickLight, Math.round(4 * scale), Math.round(8 * scale))
   breathers = clamp(breathers, Math.round(1 * scale), Math.round(3 * scale))
   estimatedCorrectionPages = clamp(
     estimatedCorrectionPages,
@@ -164,7 +143,7 @@ export function resolveCompositionTargets(input: {
       mainGames += delta
     } else {
       let need = -delta
-      const trimMain = Math.min(need, Math.max(0, mainGames - Math.round(20 * scale)))
+      const trimMain = Math.min(need, Math.max(0, mainGames - Math.round(22 * scale)))
       mainGames -= trimMain
       need -= trimMain
       const trimQuick = Math.min(need, Math.max(0, quickLight - Math.round(4 * scale)))
@@ -173,8 +152,6 @@ export function resolveCompositionTargets(input: {
       if (need > 0) breathers = Math.max(1, breathers - need)
     }
   }
-
-  void facts
 
   return {
     opening,
@@ -190,13 +167,11 @@ export function resolveCompositionTargets(input: {
     personalEditorialSlots,
     photoPageSlots,
     personalGameSlots,
+    touchBudget,
+    touchMechanicSlots,
   }
 }
 
-/**
- * Deep personal quiz only when enough personal facts — soft skip otherwise.
- * Never surfaces as customer-facing rejection.
- */
 export function quizPersonalAllowed(
   audience: BookProfileV1["audience"],
   personalFactCount: number,

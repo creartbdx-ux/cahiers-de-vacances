@@ -39,9 +39,16 @@ import type {
   CompositionTargets,
   PageDataNeed,
   PageFamily,
+  PersonalizationTouch,
   VisualRole,
 } from "./types"
 import { BOOK_BLUEPRINT_VERSION, DEFAULT_TARGET_INTERIOR_PAGES } from "./types"
+import {
+  availableTouchTypes,
+  pageCountsAsPersonalized,
+  touch,
+  type PersonalizationTouchType,
+} from "./personalization-touches"
 
 export interface BuildBookBlueprintInput {
   bookProjectId: string
@@ -312,7 +319,7 @@ function buildIntentBag(input: {
   // Memories feed personal games (sources), not dedicated pages
   void getPersonalGameSources(profile)
 
-  // --- Personal games — soft skip DEEP when not eligible; never surface rejection ---
+  // --- Dedicated deep / audience games (small) — NEVER fill with PERSONAL_REFLECTION ---
   let personalLeft = targets.personalGameSlots
   const allowQuizPersonal =
     canSatisfyDataNeed("DEEP_PERSONAL", caps) &&
@@ -323,83 +330,62 @@ function buildIntentBag(input: {
       archetype: getArchetype("PERSONAL_QUIZ"),
       tempId: nextId(),
       sourceNeeds: ["personalFacts", "memories"],
-      reason: "Quiz personnel éligible (Editorial Engine)",
+      personalizationTouches: [
+        touch("PERSONAL_FACT", "question"),
+        ...(caps.hasMemories ? [touch("MEMORY", "question")] : []),
+      ],
+      reason: "Quiz personnel (DEEP) — facts / souvenirs",
     })
     personalLeft--
   }
 
-  while (personalLeft > 0) {
-    if (profile.audience === "DUO" && personalLeft > 0) {
-      bag.push({
-        archetype: getArchetype("DUO_INTERACTION"),
-        tempId: nextId(),
-        reason: "Interaction duo — mécanique à développer",
-      })
-      personalLeft--
-      if (personalLeft <= 0) break
-    }
-    if (profile.audience === "GROUP" && personalLeft > 0) {
-      bag.push({
-        archetype: getArchetype("GROUP_WHO_IN_THE_BAND"),
-        tempId: nextId(),
-        reason: "Contenu collectif — mécanique à développer",
-      })
-      personalLeft--
-      if (personalLeft <= 0) break
-    }
-    // LIGHT_PERSONAL reflection — works with name/traits alone
+  if (profile.audience === "DUO" && personalLeft > 0) {
     bag.push({
-      archetype: getArchetype("PERSONAL_REFLECTION"),
+      archetype: getArchetype("DUO_INTERACTION"),
       tempId: nextId(),
-      sourceNeeds: caps.hasMemories ? ["memories"] : ["identity"],
-      reason: caps.hasMemories
-        ? "Page personnelle ludique / contemplative (non interrogatoire)"
-        : "Page légère personnalisée (identité / traits)",
+      personalizationTouches: caps.hasRecipientName
+        ? [touch("RECIPIENT_NAME", "context")]
+        : undefined,
+      reason: "Interaction duo — mécanique à développer",
     })
     personalLeft--
   }
-
-  // Fill remaining personal block with reflection if photo+games < block
-  const photoUsed = bag.filter(
-    (b) =>
-      b.archetype.id === "PHOTO_COLLAGE_PAGE" || b.archetype.id === "PHOTO_TIMELINE_PAGE",
-  ).length
-  let personalPad = Math.max(0, targets.personalBlock - photoUsed - targets.personalGameSlots)
-  while (personalPad > 0) {
+  if (profile.audience === "GROUP" && personalLeft > 0) {
     bag.push({
-      archetype: getArchetype("PERSONAL_REFLECTION"),
+      archetype: getArchetype("GROUP_WHO_IN_THE_BAND"),
       tempId: nextId(),
-      reason: "Complément personnel non-jeu",
+      personalizationTouches: [touch("CLOSE_PEOPLE_NAMES", "label")],
+      reason: "Contenu collectif — mécanique à développer",
     })
-    personalPad--
+    personalLeft--
   }
+  // leftover personalLeft intentionally unused — do not pad with reflection
 
-  // --- Quick / light — prefer NEUTRAL when depth is LIGHT ---
+  // --- Intentional light-touch mechanics (explicit MISSING intents) ---
+  pushTouchMechanicIntents({
+    bag,
+    caps,
+    slots: targets.touchMechanicSlots,
+    nextId,
+  })
+
+  // --- Quick / light — neutral by default; optional light-touch enrich ---
   let quick = targets.quickLight
   while (quick > 0) {
-    if ((profile.audience === "GROUP" || profile.audience === "DUO") && quick > 0 && rng.next() > 0.4) {
+    if ((profile.audience === "GROUP" || profile.audience === "DUO") && quick > 0 && rng.next() > 0.55) {
       bag.push({
         archetype: getArchetype("GROUP_QUICK_GAME"),
         tempId: nextId(),
-        reason: "Jeu rapide collectif manquant",
+        reason: "Jeu rapide collectif — mécanique à venir",
       })
       quick--
       continue
     }
-    const preferNeutral = caps.depth === "LIGHT" || rng.next() > 0.55
-    if (!preferNeutral && canSatisfyDataNeed("LIGHT_PERSONAL", caps)) {
-      bag.push({
-        archetype: getArchetype("PERSONAL_QUICK_GAME"),
-        tempId: nextId(),
-        reason: "Jeu rapide personnalisé manquant",
-      })
-    } else {
-      bag.push({
-        archetype: getArchetype("LIGHT_ACTIVITY"),
-        tempId: nextId(),
-        reason: "Activité légère / neutre",
-      })
-    }
+    bag.push({
+      archetype: getArchetype("LIGHT_ACTIVITY"),
+      tempId: nextId(),
+      reason: "Activité légère / neutre",
+    })
     quick--
   }
 
@@ -412,7 +398,145 @@ function buildIntentBag(input: {
     })
   }
 
+  // Diffuse personalization touches across ordinary games (THEME / quick)
+  applyDiffuseTouches(bag, caps, targets.touchBudget, rng)
+
   return bag
+}
+
+function pushTouchMechanicIntents(input: {
+  bag: DraftIntent[]
+  caps: PersonalizationCapabilities
+  slots: number
+  nextId: () => string
+}) {
+  const { bag, caps, nextId } = input
+  let left = input.slots
+  const candidates: Array<{
+    id: string
+    ok: boolean
+    touches: PersonalizationTouch[]
+    reason: string
+  }> = [
+    {
+      id: "LOGIC_AGE_GAME",
+      ok: caps.hasAge || caps.hasBirthDate,
+      touches: [
+        ...(caps.hasAge ? [touch("RECIPIENT_AGE", "theme")] : []),
+        ...(caps.hasBirthDate ? [touch("BIRTH_DATE", "theme")] : []),
+      ],
+      reason: "Jeu logique personnalisé par l'âge",
+    },
+    {
+      id: "SECRET_WORD_NAME_GAME",
+      ok: caps.hasRecipientName,
+      touches: [touch("RECIPIENT_NAME", "solution")],
+      reason: "Mot secret personnalisé par le prénom",
+    },
+    {
+      id: "LOGIC_CLOSE_PEOPLE_GAME",
+      ok: caps.hasClosePeople || caps.hasFamilyContext,
+      touches: [
+        ...(caps.hasClosePeople ? [touch("CLOSE_PEOPLE_NAMES", "label")] : []),
+        ...(caps.hasFamilyContext ? [touch("FAMILY_CONTEXT", "context")] : []),
+      ],
+      reason: "Jeu de logique avec proches",
+    },
+    {
+      id: "PERSONALITY_TEST_TRAITS",
+      ok: caps.hasTraits,
+      touches: [
+        touch("TRAITS", "result_copy"),
+        ...(caps.hasFamilyContext ? [touch("FAMILY_CONTEXT", "context")] : []),
+      ],
+      reason: "Test contextualisé par traits",
+    },
+  ]
+
+  for (const c of candidates) {
+    if (left <= 0) break
+    if (!c.ok) continue
+    bag.push({
+      archetype: getArchetype(c.id),
+      tempId: nextId(),
+      personalizationTouches: c.touches,
+      reason: c.reason,
+    })
+    left--
+  }
+}
+
+/** Decorate theme/quick pages with PersonalizationTouches up to touchBudget. */
+function applyDiffuseTouches(
+  bag: DraftIntent[],
+  caps: PersonalizationCapabilities,
+  touchBudget: number,
+  rng: ReturnType<typeof createRng>,
+) {
+  const available = availableTouchTypes(caps)
+  if (!available.length || touchBudget <= 0) return
+
+  let touched = bag.filter((b) => (b.personalizationTouches?.length ?? 0) > 0).length
+  if (touched >= touchBudget) return
+
+  const decorateable = bag.filter((b) => {
+    if ((b.personalizationTouches?.length ?? 0) > 0) return false
+    const fam = b.archetype.family
+    return fam === "THEME_GAME" || fam === "QUICK_GAME"
+  })
+
+  // Prefer READY theme games (especially wordsearch when close people exist), then others
+  const ranked = decorateable.slice().sort((a, b) => {
+    const score = (x: DraftIntent) => {
+      let s = 0
+      if (x.archetype.implementationStatus === "READY") s += 10
+      if (x.archetype.id === "THEME_WORDSEARCH" && caps.hasClosePeople) s += 8
+      if (x.archetype.id === "THEME_QUIZ") s += 2
+      if (x.archetype.family === "THEME_GAME") s += 3
+      return s
+    }
+    return score(b) - score(a)
+  })
+  // Soft shuffle within score bands via rng for determinism with seed
+  void rng
+
+  for (const intent of ranked) {
+    if (touched >= touchBudget) break
+    const suggested = intent.archetype.suggestedTouchTypes ?? []
+    const picks = pickTouchesForArchetype(intent.archetype.id, suggested, available)
+    if (!picks.length) continue
+    intent.personalizationTouches = picks
+    intent.reason = `${intent.reason} · touches: ${picks.map((t) => t.type).join(", ")}`
+    touched++
+  }
+}
+
+function pickTouchesForArchetype(
+  archetypeId: string,
+  suggested: PersonalizationTouchType[],
+  available: PersonalizationTouchType[],
+): PersonalizationTouch[] {
+  const pool = (suggested.length ? suggested : available).filter((t) => available.includes(t))
+  if (!pool.length) return []
+
+  const usageFor = (type: PersonalizationTouchType): PersonalizationTouch["usage"] => {
+    if (archetypeId.includes("WORDSEARCH")) {
+      if (type === "CLOSE_PEOPLE_NAMES" || type === "TRAITS" || type === "RECIPIENT_NAME") {
+        return "word_list"
+      }
+    }
+    if (archetypeId.includes("SECRET")) return "solution"
+    if (archetypeId.includes("LOGIC") && type === "RECIPIENT_AGE") return "theme"
+    if (type === "TRAITS") return "result_copy"
+    if (type === "INTERESTS") return "theme"
+    if (type === "CLOSE_PEOPLE_NAMES") return "label"
+    if (type === "RECIPIENT_NAME") return "title"
+    return "context"
+  }
+
+  // Prefer 1–2 touches per page
+  const selected = pool.slice(0, Math.min(2, pool.length))
+  return selected.map((t) => touch(t, usageFor(t)))
 }
 
 function createUniversePicker(universes: string[], rng: ReturnType<typeof createRng>) {
@@ -641,6 +765,10 @@ function toBlueprintPages(
       density: item.archetype.estimatedDensity,
       section,
       reason: item.reason,
+      dataNeed: item.archetype.dataNeed,
+      ...(item.personalizationTouches?.length
+        ? { personalizationTouches: item.personalizationTouches }
+        : {}),
       ...(item.personalLayoutId ? { personalLayoutId: item.personalLayoutId } : {}),
       ...(item.photoLayoutId ? { photoLayoutId: item.photoLayoutId } : {}),
       ...(item.photoTemplateId ? { photoTemplateId: item.photoTemplateId } : {}),
@@ -728,7 +856,6 @@ function computeStats(pages: BlueprintPageSlot[]): BlueprintStats {
 
   const n = pages.length || 1
   const themePages = byPersonalization.THEME
-  const personalPages = byPersonalization.PERSONAL
   const readyThemeGamePages = pages.filter(
     (p) =>
       p.family === "THEME_GAME" &&
@@ -736,7 +863,13 @@ function computeStats(pages: BlueprintPageSlot[]): BlueprintStats {
       !!p.gameId,
   ).length
   const missingMechanicPages = pages.filter(
-    (p) => p.archetypeId === "THEME_VARIETY_GAME" || p.family === "QUICK_GAME",
+    (p) =>
+      p.archetypeId === "THEME_VARIETY_GAME" ||
+      p.archetypeId === "LOGIC_AGE_GAME" ||
+      p.archetypeId === "SECRET_WORD_NAME_GAME" ||
+      p.archetypeId === "LOGIC_CLOSE_PEOPLE_GAME" ||
+      p.archetypeId === "PERSONALITY_TEST_TRAITS" ||
+      p.archetypeId === "LIGHT_ACTIVITY",
   ).length
 
   const photoAlbum = pages.filter(
@@ -760,9 +893,18 @@ function computeStats(pages: BlueprintPageSlot[]): BlueprintStats {
     PHOTO: 0,
   }
   for (const p of pages) {
-    const need = getArchetype(p.archetypeId).dataNeed ?? inferDataNeed(p)
+    const need = p.dataNeed ?? getArchetype(p.archetypeId).dataNeed ?? inferDataNeed(p)
     byDataNeed[need]++
   }
+
+  const pagesWithTouches = pages.filter((p) => (p.personalizationTouches?.length ?? 0) > 0).length
+  const personalizedCount = pages.filter((p) =>
+    pageCountsAsPersonalized({
+      personalizationTouches: p.personalizationTouches,
+      dataNeed: p.dataNeed ?? getArchetype(p.archetypeId).dataNeed,
+      family: p.family,
+    }),
+  ).length
 
   return {
     interiorPageCount: pages.length,
@@ -773,7 +915,8 @@ function computeStats(pages: BlueprintPageSlot[]): BlueprintStats {
     byVisualRole,
     universeCounts,
     themePercent: Math.round((themePages / n) * 100),
-    personalPercent: Math.round((personalPages / n) * 100),
+    personalPercent: Math.round((personalizedCount / n) * 100),
+    pagesWithTouches,
     readyPercent: Math.round((byStatus.READY / n) * 100),
     missingPercent: Math.round((byStatus.MISSING / n) * 100),
     photoPages,

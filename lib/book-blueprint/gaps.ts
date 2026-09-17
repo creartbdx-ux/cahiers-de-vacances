@@ -1,8 +1,10 @@
-import type { CapabilityGap, PageFamily } from "./types"
+import type { CapabilityGap } from "./types"
 import type { BlueprintPageSlot } from "./types"
+import { getArchetype } from "./archetypes"
 
 /**
- * Derive capability gaps from planned pages — drives what to build next.
+ * Capability gaps by missing *mechanics*, not generic "personal pages".
+ * Personalization is transversal (touches) — gaps list engines to build.
  */
 export function computeCapabilityGaps(
   pages: BlueprintPageSlot[],
@@ -14,159 +16,168 @@ export function computeCapabilityGaps(
     interests: number
   },
 ): CapabilityGap[] {
-  const familiesOfInterest: PageFamily[] = [
-    "QUICK_GAME",
-    "PERSONAL_EDITORIAL",
-    "MEMORY",
-    "PHOTO",
-    "PERSONAL_GAME",
-    "BREATHER",
-    "THEME_GAME",
-    "OPENING",
-    "CLOSING",
-  ]
-
   const gaps: CapabilityGap[] = []
 
-  for (const family of familiesOfInterest) {
-    const familyPages = pages.filter((p) => p.family === family)
-    if (!familyPages.length) continue
+  // Group MISSING/PARTIAL by mechanic family (skip legacy reflection quota)
+  const byMechanic = new Map<
+    string,
+    { pages: BlueprintPageSlot[]; labels: Set<string>; archetypeIds: Set<string> }
+  >()
 
-    const pagesNeeded = familyPages.length
-    const ready = familyPages.filter((p) => p.implementationStatus === "READY").length
-    const missingOrPartial = familyPages.filter((p) => p.implementationStatus !== "READY").length
-    if (missingOrPartial === 0 && family !== "THEME_GAME") continue
-
-    // For THEME_GAME, only report gap on MISSING variety slots
-    if (family === "THEME_GAME") {
-      const variety = familyPages.filter((p) => p.archetypeId === "THEME_VARIETY_GAME")
-      if (!variety.length) continue
-      gaps.push({
-        family,
-        archetypeId: "THEME_VARIETY_GAME",
-        label: "Nouvelles mécaniques de jeux thématiques",
-        pagesNeeded: variety.length,
-        ready: 0,
-        gap: variety.length,
-        priority: variety.length >= 5 ? "HIGH" : "MEDIUM",
-        audiences: [audience],
-        availableData: dataHints(availableData),
-        mechanicTags: ["variety", "theme", "main"],
-        recommendation: `Besoin de ${variety.length} pages de jeux thématiques avec de nouvelles mécaniques (au-delà de quiz / mots mêlés / mots croisés).`,
-      })
+  for (const p of pages) {
+    if (p.implementationStatus === "READY") continue
+    if (p.archetypeId === "PERSONAL_REFLECTION") continue // deprecated quota — ignore
+    if (p.family === "OPENING" || p.family === "CLOSING" || p.family === "CORRECTION") {
+      // Still report opening/closing as soft gaps once
       continue
     }
 
-    if (missingOrPartial === 0) continue
+    const arch = safeArchetype(p.archetypeId)
+    const mechanic =
+      arch?.mechanicFamily ??
+      (p.family === "THEME_GAME" && p.archetypeId === "THEME_VARIETY_GAME"
+        ? "VARIETY"
+        : p.family === "PHOTO"
+          ? "PHOTO"
+          : p.family === "BREATHER"
+            ? "BREATHER"
+            : "OTHER")
 
-    const priority =
-      missingOrPartial >= 5 ? "HIGH" : missingOrPartial >= 3 ? "MEDIUM" : "LOW"
+    const bucket = byMechanic.get(mechanic) ?? {
+      pages: [],
+      labels: new Set<string>(),
+      archetypeIds: new Set<string>(),
+    }
+    bucket.pages.push(p)
+    bucket.labels.add(p.label)
+    bucket.archetypeIds.add(p.archetypeId)
+    byMechanic.set(mechanic, bucket)
+  }
 
-    const label = familyLabel(family)
+  for (const [mechanic, bucket] of byMechanic) {
+    const gap = bucket.pages.length
+    if (gap === 0) continue
+    const priority = gap >= 5 ? "HIGH" : gap >= 3 ? "MEDIUM" : "LOW"
     gaps.push({
-      family,
-      label,
-      pagesNeeded,
-      ready,
-      gap: missingOrPartial,
+      family: bucket.pages[0]!.family,
+      archetypeId: [...bucket.archetypeIds][0],
+      label: mechanicLabel(mechanic),
+      pagesNeeded: gap,
+      ready: 0,
+      gap,
       priority,
       audiences: [audience],
-      availableData: dataHints(availableData, family),
-      mechanicTags: tagsForFamily(family),
-      recommendation: recommendationFor(family, missingOrPartial, audience, availableData),
+      availableData: dataHints(availableData, mechanic),
+      mechanicTags: [mechanic.toLowerCase()],
+      recommendation: recommendationForMechanic(mechanic, gap, audience, availableData),
     })
   }
 
-  // Sort HIGH first
+  // Opening / closing once if partial
+  for (const family of ["OPENING", "CLOSING"] as const) {
+    const familyPages = pages.filter((p) => p.family === family)
+    const missing = familyPages.filter((p) => p.implementationStatus !== "READY")
+    if (!missing.length) continue
+    gaps.push({
+      family,
+      label: family === "OPENING" ? "Pages d'ouverture" : "Pages de clôture",
+      pagesNeeded: missing.length,
+      ready: familyPages.length - missing.length,
+      gap: missing.length,
+      priority: "LOW",
+      audiences: [audience],
+      availableData: [],
+      mechanicTags: [family.toLowerCase()],
+      recommendation:
+        family === "OPENING"
+          ? "Page d'ouverture intérieure encore partielle (hors couverture)."
+          : "Page de clôture encore partielle.",
+    })
+  }
+
   const order = { HIGH: 0, MEDIUM: 1, LOW: 2 }
   gaps.sort((a, b) => order[a.priority] - order[b.priority] || b.gap - a.gap)
   return gaps
 }
 
-function familyLabel(family: PageFamily): string {
-  switch (family) {
-    case "QUICK_GAME":
-      return "Jeux rapides / activités légères"
-    case "MEMORY":
-      return "Blocs souvenirs (HERO)"
-    case "PHOTO":
-      return "Blocs photo (HERO)"
-    case "PERSONAL_EDITORIAL":
-      return "Pages personnelles composites"
-    case "PERSONAL_GAME":
-      return "Pages personnelles ludiques"
-    case "BREATHER":
-      return "Respirations / transitions"
-    case "OPENING":
-      return "Pages d'ouverture"
-    case "CLOSING":
-      return "Pages de clôture"
-    default:
-      return family
+function safeArchetype(id: string) {
+  try {
+    return getArchetype(id)
+  } catch {
+    return null
   }
 }
 
-function tagsForFamily(family: PageFamily): string[] {
-  switch (family) {
-    case "QUICK_GAME":
-      return ["quick", "light", "activity"]
-    case "MEMORY":
-      return ["memory", "block"]
+function mechanicLabel(mechanic: string): string {
+  switch (mechanic) {
+    case "LOGIC":
+      return "Jeux de logique / codes"
+    case "SECRET_CODE":
+      return "Jeux mot secret / message caché"
+    case "PERSONALITY_TEST":
+      return "Tests de personnalité"
+    case "VARIETY":
+      return "Nouvelles mécaniques thématiques"
+    case "QUICK":
+      return "Jeux rapides / activités légères"
+    case "QUIZ":
+      return "Quiz"
+    case "WORDSEARCH":
+      return "Mots mêlés"
+    case "CROSSWORD":
+      return "Mots croisés"
+    case "TRUE_FALSE":
+      return "Vrai / faux"
     case "PHOTO":
-      return ["photo", "block"]
-    case "PERSONAL_EDITORIAL":
-      return ["personal", "editorial", "composite"]
-    case "PERSONAL_GAME":
-      return ["personal", "interaction"]
+      return "Pages album photo"
     case "BREATHER":
-      return ["breather", "transition"]
+      return "Respirations / transitions"
+    case "RANKING":
+      return "Jeux de classement / ordre"
+    case "VISUAL":
+      return "Jeux visuels / observation"
     default:
-      return []
+      return `Mécanique ${mechanic}`
   }
 }
 
 function dataHints(
   data: { photos: number; memories: number; personalFacts: number; interests: number },
-  family?: PageFamily,
+  mechanic: string,
 ): string[] {
   const hints: string[] = []
-  if (!family || family === "PHOTO" || family === "PERSONAL_EDITORIAL") {
-    hints.push(`${data.photos} photo(s)`)
+  if (mechanic === "PHOTO") hints.push(`${data.photos} photo(s)`)
+  if (mechanic === "QUIZ" || mechanic === "TRUE_FALSE") {
+    hints.push(`${data.personalFacts} fait(s)`, `${data.memories} souvenir(s)`)
   }
-  if (!family || family === "MEMORY" || family === "PERSONAL_EDITORIAL") {
-    hints.push(`${data.memories} souvenir(s)`)
+  if (mechanic === "VARIETY" || mechanic === "WORDSEARCH" || mechanic === "CROSSWORD") {
+    hints.push(`${data.interests} intérêt(s)`)
   }
-  if (!family || family === "PERSONAL_GAME" || family === "QUICK_GAME") {
-    hints.push(`${data.personalFacts} fait(s) personnel(s)`)
-  }
-  if (!family || family === "THEME_GAME") hints.push(`${data.interests} intérêt(s)`)
   return hints
 }
 
-function recommendationFor(
-  family: PageFamily,
+function recommendationForMechanic(
+  mechanic: string,
   gap: number,
   audience: string,
   data: { photos: number; memories: number; personalFacts: number; interests: number },
 ): string {
-  switch (family) {
-    case "QUICK_GAME":
-      return `Besoin de ${gap} pages de jeux rapides, particulièrement pour ${audience}.`
-    case "MEMORY":
-      return `Besoin de ${gap} pages HERO souvenir encore non READY${data.memories ? ` — ${data.memories} souvenir(s) disponibles` : ""}.`
+  switch (mechanic) {
+    case "LOGIC":
+      return `Besoin de ${gap} page(s) de jeux de logique / codes (âge, proches comme labels, etc.).`
+    case "SECRET_CODE":
+      return `Besoin de ${gap} page(s) mot secret / message caché (ex. prénom du destinataire).`
+    case "PERSONALITY_TEST":
+      return `Besoin de ${gap} page(s) de test de personnalité contextualisé par les traits.`
+    case "VARIETY":
+      return `Besoin de ${gap} pages de jeux thématiques avec de nouvelles mécaniques (au-delà de quiz / mots mêlés / mots croisés).`
+    case "QUICK":
+      return `Besoin de ${gap} pages de jeux rapides / activités légères pour ${audience}.`
     case "PHOTO":
-      return `Besoin de ${gap} pages HERO photo encore non READY${data.photos ? ` — ${data.photos} photo(s) disponibles` : ""}.`
-    case "PERSONAL_EDITORIAL":
-      return `Besoin de ${gap} pages personnelles composites encore non READY (${data.memories} souvenir(s), ${data.photos} photo(s)).`
-    case "PERSONAL_GAME":
-      return `Besoin de ${gap} pages personnelles ludiques adaptées à ${audience}.`
+      return `Besoin de ${gap} pages album photo encore non READY${data.photos ? ` — ${data.photos} photo(s)` : ""}.`
     case "BREATHER":
       return `Besoin de ${gap} pages de respiration / transition éditoriale.`
-    case "OPENING":
-      return `Page d'ouverture intérieure encore partielle (hors couverture).`
-    case "CLOSING":
-      return `Page de clôture encore partielle.`
     default:
-      return `Besoin de ${gap} pages ${family}.`
+      return `Besoin de ${gap} page(s) pour la mécanique ${mechanic}.`
   }
 }
