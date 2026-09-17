@@ -25,6 +25,18 @@ export type PageDensity = "LIGHT" | "MEDIUM" | "HEAVY"
 
 export type PersonalizationType = "THEME" | "PERSONAL" | "NONE"
 
+/**
+ * What profile matter a page needs.
+ * Blueprint mixes NEUTRAL/THEME/LIGHT_PERSONAL for LIGHT profiles;
+ * DEEP_PERSONAL/PHOTO only when capabilities allow.
+ */
+export type PageDataNeed =
+  | "NEUTRAL"
+  | "THEME"
+  | "LIGHT_PERSONAL"
+  | "DEEP_PERSONAL"
+  | "PHOTO"
+
 export type VisualRole = "PRIMARY" | "SECONDARY" | "ACCENT" | "LIGHT" | "NEUTRAL"
 
 export type BlueprintSectionKind =
@@ -60,6 +72,8 @@ export interface PageArchetype {
   gameId?: string
   technicalEngine?: string
   personalizationType: PersonalizationType
+  /** Data need for capability-based selection (defaults inferred from family/type). */
+  dataNeed?: PageDataNeed
 }
 
 export interface BlueprintPageSlot {
@@ -129,6 +143,7 @@ export interface BlueprintStats {
   correctionPages: number
   readyThemeGamePages: number
   missingMechanicPages: number
+  byDataNeed: Record<PageDataNeed, number>
 }
 
 export interface CapabilityGap {
@@ -150,8 +165,10 @@ export interface BookBlueprintV1 {
   bookProjectId: string
   seed: string
   audience: "ME" | "OTHER_PERSON" | "DUO" | "GROUP"
-  richnessLevel: "INSUFFICIENT" | "ENOUGH" | "RICH"
+  richnessLevel: "LIGHT" | "PERSONALIZED" | "RICH" | "INSUFFICIENT" | "ENOUGH"
   targetInteriorPages: number
+  /** Snapshot of capabilities depth used for selection. */
+  personalizationDepth?: "LIGHT" | "PERSONALIZED" | "RICH"
   cover: BlueprintCover
   visualIdentity: BlueprintVisualIdentity
   sections: BlueprintSection[]

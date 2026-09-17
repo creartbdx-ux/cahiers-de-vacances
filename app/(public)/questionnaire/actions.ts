@@ -237,11 +237,11 @@ export async function submitQuestionnaireAction(
   }
 
   const richness = calculateProfileRichness(q)
-  if (richness.level === "INSUFFICIENT") {
+  if (!richness.canCreate) {
     return {
       ok: false,
-      error: `Profil insuffisant: ${richness.missing.join(", ")}`,
-      code: "INSUFFICIENT",
+      error: `Informations de base manquantes: ${richness.missing.join(", ")}`,
+      code: "VALIDATION",
     }
   }
 

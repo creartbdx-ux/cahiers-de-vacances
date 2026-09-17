@@ -303,8 +303,11 @@ test("GROUP : répartition raisonnable entre participants", () => {
 })
 
 test("ratio PERSONAL/THEME cohérent avec richesse", () => {
-  assert.equal(targetPersonalRatio("ENOUGH"), 0.5)
-  assert.equal(targetPersonalRatio("RICH"), 0.6)
+  assert.equal(targetPersonalRatio("ENOUGH"), 0.4)
+  assert.equal(targetPersonalRatio("PERSONALIZED"), 0.4)
+  assert.equal(targetPersonalRatio("RICH"), 0.55)
+  assert.equal(targetPersonalRatio("LIGHT"), 0.28)
+  assert.equal(targetPersonalRatio("INSUFFICIENT"), 0.28)
   const profile = baseProfile({ personalFacts: richFacts("r", 10) })
   const enough = buildEditorialPlan({
     profile,

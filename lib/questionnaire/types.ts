@@ -51,11 +51,35 @@ export interface QuestionnaireParticipant {
   id: string
   firstName: string
   ageBracket?: AgeBracket
+  /** ISO date YYYY-MM-DD when known — strong editorial value, never required. */
+  birthDate?: string
+  /** Approximate current age when birth date unknown. */
+  approximateAge?: number
   nickname?: string
   /** OTHER_PERSON only — link to the creator. */
   relationship?: string
   /** GROUP optional short trait. */
   personalTrait?: string
+}
+
+/** Light personalization — first names that enrich games without deep anecdotes. */
+export interface ClosePerson {
+  id: string
+  firstName: string
+  relationship?: string
+}
+
+/** Optional life-context toggles — never an administrative form. */
+export interface LifeContext {
+  hasChildren?: boolean
+  childrenCount?: number
+  childrenNames?: string[]
+  inCouple?: boolean
+  hasFamilyNearby?: boolean
+  hasPet?: boolean
+  petNames?: string[]
+  livingSituation?: "ALONE" | "WITH_SOMEONE" | "OTHER" | "UNKNOWN"
+  notes?: string
 }
 
 export interface PersonalFact {
@@ -155,6 +179,10 @@ export interface QuestionnaireV1 {
   personalFacts: PersonalFact[]
   memories: MemoryEntry[]
   insideJokes: InsideJoke[]
+  /** Optional close people (LIGHT personalization). */
+  closePeople?: ClosePerson[]
+  /** Optional life context toggles (LIGHT personalization). */
+  lifeContext?: LifeContext
   gamePreferences: Partial<GamePreferences> & { likedTypes?: GameTypePreference[] }
   photos: QuestionnairePhoto[]
   forbiddenTopics: ForbiddenTopicsAnswer | null
@@ -169,6 +197,8 @@ export interface BookProfileParticipant {
   id: string
   firstName: string
   ageBracket?: AgeBracket
+  birthDate?: string
+  approximateAge?: number
   nickname?: string
   relationship?: string
   personalTrait?: string
@@ -209,6 +239,10 @@ export interface BookProfileV1 {
   personalFacts: PersonalFact[]
   memories: MemoryEntry[]
   insideJokes: InsideJoke[]
+  /** Optional close people (LIGHT personalization). */
+  closePeople?: ClosePerson[]
+  /** Optional life context (LIGHT personalization). */
+  lifeContext?: LifeContext
   gamePreferences: GamePreferences
   visualPreferences: VisualPreferences
   forbiddenTopics: ForbiddenTopicsAnswer
@@ -224,10 +258,25 @@ export interface BookProfileV1 {
   lastNote?: string
 }
 
-export type RichnessLevel = "INSUFFICIENT" | "ENOUGH" | "RICH"
+/**
+ * Personalization depth available from questionnaire matter.
+ * Describes possible personalization — never book quality.
+ */
+export type PersonalizationDepth = "LIGHT" | "PERSONALIZED" | "RICH"
+
+/**
+ * Stored / API richness level.
+ * Prefer PersonalizationDepth. Legacy INSUFFICIENT/ENOUGH accepted via normalize.
+ */
+export type RichnessLevel = PersonalizationDepth | "INSUFFICIENT" | "ENOUGH"
 
 export interface RichnessResult {
-  level: RichnessLevel
+  /** Canonical depth — never INSUFFICIENT/ENOUGH after calculateProfileRichness. */
+  level: PersonalizationDepth
+  /** Alias of level for callers migrating to depth wording. */
+  depth: PersonalizationDepth
+  /** True when CORE fields are present — book can be created. */
+  canCreate: boolean
   missing: string[]
   bonuses: string[]
   message: string
@@ -246,15 +295,18 @@ export const AGE_BRACKETS: { value: AgeBracket; label: string }[] = [
 export const PERSONALITY_TRAIT_OPTIONS = [
   "drôle",
   "calme",
-  "sociable",
-  "curieux",
-  "compétitif",
-  "gourmand",
+  "solaire",
   "créatif",
-  "sportif",
+  "compétitif",
   "aventurier",
-  "rêveur",
+  "gourmand",
   "organisé",
+  "bordélique",
+  "sociable",
+  "réservé",
+  "curieux",
+  "sportif",
+  "rêveur",
   "tête en l'air",
   "spontané",
   "sensible",
@@ -349,11 +401,16 @@ export const DUO_TYPE_OPTIONS: { value: DuoType; label: string }[] = [
 
 export const MAX_GROUP_SIZE = 10
 export const MIN_GROUP_SIZE = 3
-export const MIN_INTERESTS = 3
-export const MIN_PERSONAL_FACTS = 3
+/** CORE minimum — a few interests are enough; ideal is ~3. */
+export const MIN_INTERESTS = 1
+export const IDEAL_INTERESTS = 3
+/** Deep personalization — never required for book creation. */
+export const MIN_PERSONAL_FACTS = 0
 export const MAX_PERSONAL_FACTS = 15
 export const MAX_PHOTOS = 10
-export const MIN_TRAITS_SOLO = 3
+/** CORE minimum — 1–2 traits OK; ideal is 3–6. */
+export const MIN_TRAITS_SOLO = 1
+export const IDEAL_TRAITS_SOLO = 3
 export const MAX_TRAITS_SOLO = 6
 
 export function createEmptyQuestionnaire(): QuestionnaireV1 {
@@ -369,6 +426,8 @@ export function createEmptyQuestionnaire(): QuestionnaireV1 {
     personalFacts: [],
     memories: [],
     insideJokes: [],
+    closePeople: [],
+    lifeContext: undefined,
     gamePreferences: {},
     photos: [],
     forbiddenTopics: null,

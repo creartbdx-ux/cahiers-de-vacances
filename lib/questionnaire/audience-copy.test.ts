@@ -40,8 +40,8 @@ test("OTHER_PERSON Emma→Sami : détails sans « vous dites »", () => {
   assert.ok(options.some((o) => o.value === "HABIT" && /habitude de Sami/i.test(o.label)))
   assert.ok(options.some((o) => o.value === "OTHER" && /sur Sami/i.test(o.label)))
 
-  assert.match(getStepCopy("personalFacts", q).title, /détails sur Sami/i)
-  assert.match(getStepCopy("memories", q).title, /souvenirs avec Sami/i)
+  assert.match(getStepCopy("personalFacts", q).title, /détail sur Sami/i)
+  assert.match(getStepCopy("memories", q).title, /souvenir avec Sami/i)
   assert.ok(!/à son sujet/i.test(getStepCopy("memories", q).title))
 })
 
@@ -50,7 +50,7 @@ test("OTHER_PERSON recap Pour Sami / Créé par Emma", () => {
   const r = recapCopy(buildAudienceCopyContext(q))
   assert.equal(r.forTitle, "Pour Sami")
   assert.equal(r.createdBy, "Créé par Emma")
-  assert.match(r.title, /prêt à être créé/i)
+  assert.match(r.title, /tout ce qu'il faut pour créer le cahier de Sami/i)
   assert.ok(!/OTHER_PERSON|creatorFirstName/i.test(JSON.stringify(r)))
 })
 
@@ -62,7 +62,7 @@ test("ME : expression « vous dites souvent » reste valide", () => {
   const ctx = buildAudienceCopyContext(q)
   const label = personalFactCategoryLabel("EXPRESSION", ctx, { kind: "SELF" })
   assert.equal(label, "Une expression que vous dites souvent")
-  assert.match(getStepCopy("personalFacts", q).title, /détails sur vous/i)
+  assert.match(getStepCopy("personalFacts", q).title, /détail vous vient en tête/i)
 })
 
 test("DUO : cible participant nommée correctement", () => {
@@ -112,7 +112,7 @@ test("GROUP non participant : pas de « votre groupe » incorrect", () => {
   assert.ok(!/votre groupe/i.test(habit), habit)
   assert.match(habit, /habitude du groupe/i)
   assert.ok(!/entre vous/i.test(expr), expr)
-  assert.match(getStepCopy("memories", q).title, /souvenirs du groupe/i)
+  assert.match(getStepCopy("memories", q).title, /souvenir du groupe/i)
   assert.ok(!/votre bande/i.test(getStepCopy("memories", q).title))
 })
 

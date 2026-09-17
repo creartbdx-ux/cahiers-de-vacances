@@ -132,7 +132,9 @@ test("ME valide", () => {
   assert.equal(profile.creator?.firstName, "Alex")
   assert.equal(profile.creator?.isParticipant, true)
   assert.equal(profile.creator?.participantId, q.participants[0]!.id)
-  assert.equal(calculateProfileRichness(q, profile).level === "ENOUGH" || calculateProfileRichness(q, profile).level === "RICH", true)
+  const richness = calculateProfileRichness(q, profile)
+  assert.equal(richness.canCreate, true)
+  assert.ok(richness.level === "LIGHT" || richness.level === "PERSONALIZED" || richness.level === "RICH")
 })
 
 test("DUO valide", () => {
@@ -165,16 +167,19 @@ test("GROUP > 10 refusé", () => {
   assert.ok(errors.some((e) => /10|Maximum|GROUP/i.test(e)))
 })
 
-test("minimum 3 intérêts", () => {
+test("minimum 1 intérêt", () => {
   const q = baseSolo("ME")
-  q.interestUniverseIds = ["MOUNTAIN", "TRAVEL"]
+  q.interestUniverseIds = []
   assert.ok(validateStep("interests", q).length > 0)
+  q.interestUniverseIds = ["MOUNTAIN"]
+  assert.deepEqual(validateStep("interests", q), [])
 })
 
-test("minimum 3 personal facts", () => {
+test("personal facts facultatifs (0 OK)", () => {
   const q = baseSolo("ME")
-  q.personalFacts = q.personalFacts.slice(0, 2)
-  assert.ok(validateStep("personalFacts", q).length > 0)
+  q.personalFacts = []
+  assert.deepEqual(validateStep("personalFacts", q), [])
+  assert.deepEqual(validateQuestionnaireComplete(q), [])
 })
 
 test("difficulté hors 1–4 refusée", () => {
@@ -230,17 +235,24 @@ test("creatorIsParticipant correctement dérivé", () => {
 
 test("calculateProfileRichness", () => {
   const q = baseSolo("ME")
-  const enough = calculateProfileRichness(q)
-  assert.equal(enough.level, "ENOUGH")
+  const light = calculateProfileRichness(q)
+  assert.equal(light.level, "PERSONALIZED") // has personalFacts in baseSolo
+  assert.equal(light.canCreate, true)
+
+  q.personalFacts = []
+  const coreOnly = calculateProfileRichness(q)
+  assert.equal(coreOnly.level, "LIGHT")
+  assert.equal(coreOnly.canCreate, true)
 
   q.memories = [{ id: "m1", text: "Premier sommet ensemble" }]
   const rich = calculateProfileRichness(q)
   assert.equal(rich.level, "RICH")
 
   q.interestUniverseIds = []
-  const insuff = calculateProfileRichness(q)
-  assert.equal(insuff.level, "INSUFFICIENT")
-  assert.ok(insuff.missing.length > 0)
+  const incomplete = calculateProfileRichness(q)
+  assert.equal(incomplete.level, "LIGHT")
+  assert.equal(incomplete.canCreate, false)
+  assert.ok(incomplete.missing.length > 0)
 })
 
 test("OTHER_PERSON exige creatorFirstName", () => {

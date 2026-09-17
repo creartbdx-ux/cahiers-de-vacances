@@ -77,8 +77,12 @@ export const PERSONAL_THRESHOLDS = {
   TRUE_FALSE_PERSONAL: { min: 4, ideal: 8 },
 } as const
 
-export function targetPersonalRatio(richness: "INSUFFICIENT" | "ENOUGH" | "RICH"): number {
-  if (richness === "RICH") return 0.6
-  if (richness === "ENOUGH") return 0.5
-  return 0.25
+/** Target share of PERSONAL pages — by personalization depth (legacy levels accepted). */
+export function targetPersonalRatio(
+  richness: "INSUFFICIENT" | "ENOUGH" | "RICH" | "LIGHT" | "PERSONALIZED",
+): number {
+  if (richness === "RICH") return 0.55
+  if (richness === "PERSONALIZED" || richness === "ENOUGH") return 0.4
+  // LIGHT / legacy INSUFFICIENT: light personalization, not a bad book
+  return 0.28
 }

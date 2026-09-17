@@ -670,10 +670,16 @@ export function QuestionnaireWizard({
         {step === "interests" && (
           <InterestsStep q={q} copy={copy} update={update} universes={universes} />
         )}
+        {step === "game" && <GamesStep q={q} copy={copy} setQ={setQ} />}
+        {step === "forbidden" && <ForbiddenStep q={q} copy={copy} update={update} />}
+        {step === "color" && <ColorStep q={q} copy={copy} update={update} palettes={palettes} />}
+        {step === "style" && <StyleStep q={q} copy={copy} update={update} styles={styles} />}
+        {step === "deepIntro" && <DeepIntroStep copy={copy} />}
+        {step === "closePeople" && <ClosePeopleStep q={q} copy={copy} setQ={setQ} />}
+        {step === "lifeContext" && <LifeContextStep q={q} copy={copy} setQ={setQ} />}
         {step === "personalFacts" && <PersonalFactsStep q={q} copy={copy} setQ={setQ} />}
         {step === "memories" && <MemoriesStep q={q} copy={copy} setQ={setQ} />}
         {step === "insideJokes" && <InsideJokesStep q={q} copy={copy} setQ={setQ} />}
-        {step === "game" && <GamesStep q={q} copy={copy} setQ={setQ} />}
         {step === "photos" && (
           <PhotosStep
             q={q}
@@ -685,9 +691,6 @@ export function QuestionnaireWizard({
             resolveUserId={resolveUserId}
           />
         )}
-        {step === "forbidden" && <ForbiddenStep q={q} copy={copy} update={update} />}
-        {step === "color" && <ColorStep q={q} copy={copy} update={update} palettes={palettes} />}
-        {step === "style" && <StyleStep q={q} copy={copy} update={update} styles={styles} />}
         {step === "finale" && <FinaleStep q={q} copy={copy} update={update} />}
         {step === "recap" && (
           <RecapStep
@@ -966,24 +969,100 @@ function ParticipantsStep({
               onChange={(e) => patchParticipant(i, { firstName: e.target.value })}
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Âge / tranche {q.audience === "GROUP" ? "(facultatif)" : "*"}
-            <select
-              className="h-10 rounded-lg border border-input bg-background px-3"
-              value={p.ageBracket ?? ""}
-              onChange={(e) =>
-                patchParticipant(i, {
-                  ageBracket: (e.target.value || undefined) as QuestionnaireParticipant["ageBracket"],
-                })
-              }
-            >
-              <option value="">—</option>
-              {AGE_BRACKETS.map((a) => (
-                <option key={a.value} value={a.value}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            {q.audience === "GROUP" ? (
+              <>
+                Âge / tranche (facultatif)
+                <select
+                  className="h-10 rounded-lg border border-input bg-background px-3"
+                  value={p.ageBracket ?? ""}
+                  onChange={(e) =>
+                    patchParticipant(i, {
+                      ageBracket: (e.target.value || undefined) as QuestionnaireParticipant["ageBracket"],
+                    })
+                  }
+                >
+                  <option value="">—</option>
+                  {AGE_BRACKETS.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <>
+                Vous connaissez {q.audience === "ME" ? "votre" : "sa"} date de naissance ?
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Chip
+                    active={Boolean(p.birthDate)}
+                    onClick={() =>
+                      patchParticipant(i, {
+                        birthDate: p.birthDate || "2000-01-01",
+                        approximateAge: undefined,
+                      })
+                    }
+                  >
+                    Oui
+                  </Chip>
+                  <Chip
+                    active={!p.birthDate && (Boolean(p.ageBracket) || typeof p.approximateAge === "number")}
+                    onClick={() =>
+                      patchParticipant(i, {
+                        birthDate: undefined,
+                        ageBracket: p.ageBracket ?? "26-35",
+                      })
+                    }
+                  >
+                    Non — âge approximatif
+                  </Chip>
+                  <Chip
+                    active={!p.birthDate && !p.ageBracket && p.approximateAge == null}
+                    onClick={() =>
+                      patchParticipant(i, {
+                        birthDate: undefined,
+                        ageBracket: undefined,
+                        approximateAge: undefined,
+                      })
+                    }
+                  >
+                    Je ne sais pas
+                  </Chip>
+                </div>
+                {p.birthDate ? (
+                  <input
+                    type="date"
+                    className="mt-2 h-10 rounded-lg border border-input bg-background px-3"
+                    value={p.birthDate}
+                    onChange={(e) =>
+                      patchParticipant(i, {
+                        birthDate: e.target.value || undefined,
+                        ageBracket: undefined,
+                        approximateAge: undefined,
+                      })
+                    }
+                  />
+                ) : (
+                  <select
+                    className="mt-2 h-10 rounded-lg border border-input bg-background px-3"
+                    value={p.ageBracket ?? ""}
+                    onChange={(e) =>
+                      patchParticipant(i, {
+                        ageBracket: (e.target.value || undefined) as QuestionnaireParticipant["ageBracket"],
+                        birthDate: undefined,
+                      })
+                    }
+                  >
+                    <option value="">Âge / tranche (facultatif)</option>
+                    {AGE_BRACKETS.map((a) => (
+                      <option key={a.value} value={a.value}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
+            )}
           </label>
           {q.audience !== "GROUP" && (
             <label className="flex flex-col gap-1 text-sm">
@@ -1454,6 +1533,220 @@ function InterestsStep({
   )
 }
 
+function DeepIntroStep({ copy }: { copy: { title: string; subtitle?: string } }) {
+  return (
+    <div className="flex flex-col gap-5">
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      <p className="rounded-xl border border-border bg-muted/40 p-4 text-sm text-foreground">
+        Nous avons déjà assez d&apos;informations pour créer le cahier. Les étapes suivantes
+        ajoutent seulement des touches personnelles — vous pouvez toutes les passer.
+      </p>
+    </div>
+  )
+}
+
+function ClosePeopleStep({
+  q,
+  copy,
+  setQ,
+}: {
+  q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
+  setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
+}) {
+  const people = q.closePeople ?? []
+  return (
+    <div className="flex flex-col gap-5">
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      {people.map((c, i) => (
+        <div key={c.id} className="grid gap-3 rounded-xl border border-border p-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-sm">
+            Prénom
+            <input
+              className="h-10 rounded-lg border border-input bg-background px-3"
+              value={c.firstName}
+              onChange={(e) =>
+                setQ((prev) => ({
+                  ...prev,
+                  closePeople: (prev.closePeople ?? []).map((x, idx) =>
+                    idx === i ? { ...x, firstName: e.target.value } : x,
+                  ),
+                }))
+              }
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            Lien (facultatif)
+            <input
+              className="h-10 rounded-lg border border-input bg-background px-3"
+              placeholder="Ex. sœur, ami, collègue"
+              value={c.relationship ?? ""}
+              onChange={(e) =>
+                setQ((prev) => ({
+                  ...prev,
+                  closePeople: (prev.closePeople ?? []).map((x, idx) =>
+                    idx === i ? { ...x, relationship: e.target.value } : x,
+                  ),
+                }))
+              }
+            />
+          </label>
+          <button
+            type="button"
+            className="text-sm text-destructive sm:col-span-2"
+            onClick={() =>
+              setQ((prev) => ({
+                ...prev,
+                closePeople: (prev.closePeople ?? []).filter((_, idx) => idx !== i),
+              }))
+            }
+          >
+            Retirer
+          </button>
+        </div>
+      ))}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            setQ((prev) => ({
+              ...prev,
+              closePeople: [...(prev.closePeople ?? []), { id: newId("cp"), firstName: "" }],
+            }))
+          }
+        >
+          <Plus className="size-4" /> Ajouter un prénom
+        </Button>
+      </div>
+      <p className="text-sm text-muted-foreground">Vous pouvez passer cette étape sans rien ajouter.</p>
+    </div>
+  )
+}
+
+function LifeContextStep({
+  q,
+  copy,
+  setQ,
+}: {
+  q: QuestionnaireV1
+  copy: { title: string; subtitle?: string }
+  setQ: React.Dispatch<React.SetStateAction<QuestionnaireV1>>
+}) {
+  const lc = q.lifeContext ?? {}
+  function patch(partial: NonNullable<QuestionnaireV1["lifeContext"]>) {
+    setQ((prev) => ({
+      ...prev,
+      lifeContext: { ...(prev.lifeContext ?? {}), ...partial },
+    }))
+  }
+  return (
+    <div className="flex flex-col gap-5">
+      <StepHeader title={copy.title} subtitle={copy.subtitle} />
+      <ToggleRow
+        label="A des enfants ?"
+        value={lc.hasChildren}
+        onChange={(v) => patch({ hasChildren: v })}
+      />
+      {lc.hasChildren === true && (
+        <label className="flex flex-col gap-1 text-sm">
+          Combien / prénoms (facultatif)
+          <input
+            className="h-10 rounded-lg border border-input bg-background px-3"
+            placeholder="Ex. 2 — Léa, Tom"
+            value={(lc.childrenNames ?? []).join(", ")}
+            onChange={(e) =>
+              patch({
+                childrenNames: e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </label>
+      )}
+      <ToggleRow label="En couple ?" value={lc.inCouple} onChange={(v) => patch({ inCouple: v })} />
+      <ToggleRow
+        label="Famille proche ?"
+        value={lc.hasFamilyNearby}
+        onChange={(v) => patch({ hasFamilyNearby: v })}
+      />
+      <ToggleRow label="A un animal ?" value={lc.hasPet} onChange={(v) => patch({ hasPet: v })} />
+      {lc.hasPet === true && (
+        <label className="flex flex-col gap-1 text-sm">
+          Prénom(s) de l&apos;animal (facultatif)
+          <input
+            className="h-10 rounded-lg border border-input bg-background px-3"
+            value={(lc.petNames ?? []).join(", ")}
+            onChange={(e) =>
+              patch({
+                petNames: e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </label>
+      )}
+      <div>
+        <FieldLabel>Vit…</FieldLabel>
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ["ALONE", "Seul·e"],
+              ["WITH_SOMEONE", "Avec quelqu'un"],
+              ["OTHER", "Autre"],
+            ] as const
+          ).map(([value, label]) => (
+            <Chip
+              key={value}
+              active={lc.livingSituation === value}
+              onClick={() =>
+                patch({
+                  livingSituation: lc.livingSituation === value ? "UNKNOWN" : value,
+                })
+              }
+            >
+              {label}
+            </Chip>
+          ))}
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground">Tout est facultatif — passez si rien ne s&apos;applique.</p>
+    </div>
+  )
+}
+
+function ToggleRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: boolean | undefined
+  onChange: (v: boolean | undefined) => void
+}) {
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <div className="flex flex-wrap gap-2">
+        <Chip active={value === true} onClick={() => onChange(true)}>
+          Oui
+        </Chip>
+        <Chip active={value === false} onClick={() => onChange(false)}>
+          Non
+        </Chip>
+        <Chip active={value === undefined} onClick={() => onChange(undefined)}>
+          Je ne sais pas
+        </Chip>
+      </div>
+    </div>
+  )
+}
+
 function PersonalFactsStep({
   q,
   copy,
@@ -1611,10 +1904,22 @@ function MemoriesStep({
     }))
   }
 
+  const empty = q.memories.length === 0
+
   return (
     <div className="flex flex-col gap-5">
       <StepHeader title={copy.title} subtitle={copy.subtitle} />
-      {suggestions.length > 0 && (
+      {empty ? (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => addMemory()}>
+            <Plus className="size-4" /> Ajouter un souvenir
+          </Button>
+          <p className="w-full text-sm text-muted-foreground">
+            Pas maintenant — vous pourrez continuer sans souvenir.
+          </p>
+        </div>
+      ) : null}
+      {!empty && suggestions.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {suggestions.map((s) => (
             <button
@@ -1696,9 +2001,11 @@ function MemoriesStep({
           </button>
         </div>
       ))}
-      <Button type="button" variant="outline" size="sm" onClick={() => addMemory()}>
-        <Plus className="size-4" /> Ajouter un souvenir
-      </Button>
+      {!empty ? (
+        <Button type="button" variant="outline" size="sm" onClick={() => addMemory()}>
+          <Plus className="size-4" /> En ajouter un autre
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -2678,17 +2985,10 @@ function RecapStep({
         ) : null}
       </RecapBlock>
 
-      <div
-        className={cn(
-          "rounded-xl border p-4 text-sm",
-          richness.level === "INSUFFICIENT"
-            ? "border-destructive/40 bg-destructive/10 text-destructive"
-            : "border-border bg-muted/40 text-foreground",
-        )}
-      >
-        {richness.level === "INSUFFICIENT" ? (
+      <div className={cn("rounded-xl border p-4 text-sm", "border-border bg-muted/40 text-foreground")}>
+        {!richness.canCreate ? (
           <>
-            <p className="font-medium">Encore quelques infos manquent</p>
+            <p className="font-medium">Encore quelques infos de base</p>
             <p className="mt-1 opacity-90">{richness.message}</p>
           </>
         ) : (
@@ -2716,7 +3016,7 @@ function RecapStep({
         type="button"
         size="lg"
         onClick={onSubmit}
-        disabled={pending || richness.level === "INSUFFICIENT"}
+        disabled={pending || !richness.canCreate}
       >
         {pending ? "Enregistrement…" : "Créer mon cahier"}
       </Button>

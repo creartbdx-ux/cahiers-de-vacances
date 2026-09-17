@@ -17,6 +17,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: {},
     tags: ["opening", "welcome"],
     personalizationType: "NONE",
+    dataNeed: "NEUTRAL",
   },
   {
     id: "THEME_QUIZ",
@@ -33,6 +34,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     gameId: "QUIZ_THEME",
     technicalEngine: "QUIZ",
     personalizationType: "THEME",
+    dataNeed: "THEME",
   },
   {
     id: "THEME_WORDSEARCH",
@@ -49,6 +51,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     gameId: "WORDSEARCH_THEME",
     technicalEngine: "WORDSEARCH",
     personalizationType: "THEME",
+    dataNeed: "THEME",
   },
   {
     id: "THEME_CROSSWORD",
@@ -65,6 +68,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     gameId: "CROSSWORD_THEME",
     technicalEngine: "CROSSWORD",
     personalizationType: "THEME",
+    dataNeed: "THEME",
   },
   {
     id: "THEME_TRUE_FALSE",
@@ -81,6 +85,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     gameId: "TRUE_FALSE_THEME",
     technicalEngine: "TRUE_FALSE",
     personalizationType: "THEME",
+    dataNeed: "THEME",
   },
   {
     id: "THEME_VARIETY_GAME",
@@ -95,6 +100,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     tags: ["theme", "main", "variety", "gap"],
     mechanicFamily: "VARIETY",
     personalizationType: "THEME",
+    dataNeed: "THEME",
   },
   {
     id: "PERSONAL_QUIZ",
@@ -111,6 +117,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     gameId: "QUIZ_PERSONAL",
     technicalEngine: "QUIZ",
     personalizationType: "PERSONAL",
+    dataNeed: "DEEP_PERSONAL",
   },
   {
     id: "DUO_INTERACTION",
@@ -124,6 +131,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: { requiresDuo: true },
     tags: ["duo", "personal", "interaction"],
     personalizationType: "PERSONAL",
+    dataNeed: "LIGHT_PERSONAL",
   },
   {
     id: "PERSONAL_REFLECTION",
@@ -137,6 +145,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: {},
     tags: ["personal", "contemplative", "fun"],
     personalizationType: "PERSONAL",
+    dataNeed: "LIGHT_PERSONAL",
   },
   {
     id: "GROUP_WHO_IN_THE_BAND",
@@ -150,6 +159,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: { requiresGroup: true },
     tags: ["group", "personal", "participants"],
     personalizationType: "PERSONAL",
+    dataNeed: "LIGHT_PERSONAL",
   },
   {
     id: "MEMORY_TEXT_PAGE",
@@ -163,6 +173,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: { minMemories: 1 },
     tags: ["memory", "personal", "block", "game-source", "experimental"],
     personalizationType: "PERSONAL",
+    dataNeed: "DEEP_PERSONAL",
   },
   {
     id: "PHOTO_MEMORY_PAGE",
@@ -176,6 +187,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: { minPhotos: 1 },
     tags: ["photo", "memory", "personal", "block", "experimental"],
     personalizationType: "PERSONAL",
+    dataNeed: "PHOTO",
   },
   {
     id: "PHOTO_COLLAGE_PAGE",
@@ -189,6 +201,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: { minPhotos: 2 },
     tags: ["photo", "collage", "album", "polaroid"],
     personalizationType: "PERSONAL",
+    dataNeed: "PHOTO",
   },
   {
     id: "PHOTO_TIMELINE_PAGE",
@@ -202,6 +215,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: { minPhotos: 2 },
     tags: ["photo", "timeline", "album"],
     personalizationType: "PERSONAL",
+    dataNeed: "PHOTO",
   },
   {
     id: "PERSONAL_EDITORIAL_PAGE",
@@ -215,6 +229,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: {},
     tags: ["personal", "editorial", "composite", "experimental", "lab-only"],
     personalizationType: "PERSONAL",
+    dataNeed: "LIGHT_PERSONAL",
   },
   {
     id: "PERSONAL_QUICK_GAME",
@@ -228,6 +243,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: {},
     tags: ["quick", "personal"],
     personalizationType: "PERSONAL",
+    dataNeed: "LIGHT_PERSONAL",
   },
   {
     id: "GROUP_QUICK_GAME",
@@ -241,6 +257,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: {},
     tags: ["quick", "group"],
     personalizationType: "PERSONAL",
+    dataNeed: "LIGHT_PERSONAL",
   },
   {
     id: "LIGHT_ACTIVITY",
@@ -254,6 +271,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: {},
     tags: ["quick", "light", "activity"],
     personalizationType: "NONE",
+    dataNeed: "NEUTRAL",
   },
   {
     id: "BREATHER_PAGE",
@@ -267,6 +285,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: {},
     tags: ["breather", "transition"],
     personalizationType: "NONE",
+    dataNeed: "NEUTRAL",
   },
   {
     id: "COMPACT_CORRECTIONS",
@@ -280,6 +299,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: {},
     tags: ["correction", "compact"],
     personalizationType: "NONE",
+    dataNeed: "NEUTRAL",
   },
   {
     id: "CLOSING_PAGE",
@@ -293,6 +313,7 @@ export const PAGE_ARCHETYPES: PageArchetype[] = [
     minimumProfileRequirements: {},
     tags: ["closing"],
     personalizationType: "NONE",
+    dataNeed: "NEUTRAL",
   },
 ]
 

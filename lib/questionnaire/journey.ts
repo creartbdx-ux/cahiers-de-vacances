@@ -1,5 +1,5 @@
 /**
- * Adaptive questionnaire journey: step lists + audience-aware copy.
+ * Adaptive questionnaire journey: CORE first, then optional personalization.
  * Pure presentation helpers — does not invent profile data.
  */
 
@@ -10,7 +10,7 @@ import {
   type StepCopy,
   type StepId,
 } from "./audience-copy"
-import type { AudienceType, QuestionnaireV1 } from "./types"
+import type { AudienceType, PersonalizationDepth, QuestionnaireV1 } from "./types"
 
 export type { StepCopy, StepId }
 export {
@@ -24,11 +24,26 @@ export {
   deName,
 } from "./audience-copy"
 
+/** Core steps required before optional deep personalization. */
+export const CORE_JOURNEY_STEPS: StepId[] = [
+  "audience",
+  "participants",
+  "personality",
+  "interests",
+  "game",
+  "forbidden",
+  "color",
+  "style",
+]
+
 /** @deprecated use buildJourneySteps — kept for callers that only know audience. */
 export function stepsForAudience(audience: AudienceType | null): StepId[] {
   return buildJourneySteps(audience, null)
 }
 
+/**
+ * Journey: CORE → deepIntro gate → light optional → deep optional → finale → recap.
+ */
 export function buildJourneySteps(
   audience: AudienceType | null,
   creatorIsParticipant: boolean | null | undefined,
@@ -38,17 +53,19 @@ export function buildJourneySteps(
 
   const isParticipant = deriveCreatorIsParticipant(audience, creatorIsParticipant)
 
-  steps.push("participants", "personality", "interests", "personalFacts", "memories")
+  // PARTIE ESSENTIELLE
+  steps.push("participants", "personality", "interests", "game", "forbidden", "color", "style")
+
+  // Transition + optional personalization
+  steps.push("deepIntro", "closePeople", "lifeContext", "personalFacts", "memories")
 
   if (audience === "DUO" || audience === "GROUP") {
     steps.push("insideJokes")
   }
 
-  steps.push("game", "photos", "forbidden", "color", "style", "finale", "recap")
+  steps.push("photos", "finale", "recap")
 
-  // Journey shape is identical for participant vs not, but copy differs.
   void isParticipant
-
   return steps
 }
 
@@ -138,15 +155,19 @@ export function audienceHumanLabel(audience: AudienceType | null): string {
 }
 
 export function richnessClientMessage(
-  level: "INSUFFICIENT" | "ENOUGH" | "RICH",
+  level: PersonalizationDepth | "INSUFFICIENT" | "ENOUGH" | "RICH" | "LIGHT" | "PERSONALIZED",
 ): string {
   if (level === "INSUFFICIENT") {
-    return "Il manque encore quelques informations essentielles pour personnaliser le cahier."
+    return "Il manque encore quelques informations de base pour créer le cahier."
   }
   if (level === "RICH") {
-    return "Vous nous avez donné beaucoup de matière : votre cahier pourra être particulièrement personnalisé."
+    return "Nous avons tout ce qu'il faut pour créer le cahier — avec une personnalisation très riche."
   }
-  return "Nous avons déjà suffisamment d'informations pour créer un cahier vraiment personnel."
+  if (level === "PERSONALIZED" || level === "ENOUGH") {
+    return "Nous avons déjà assez d'informations pour créer le cahier. Les touches personnelles le rendront encore plus unique."
+  }
+  // LIGHT
+  return "Nous avons déjà assez d'informations pour créer le cahier."
 }
 
 /** Recap tags: show up to `max` items, then "+ X autres". */

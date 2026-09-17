@@ -16,14 +16,17 @@ export type StepId =
   | "participants"
   | "personality"
   | "interests"
-  | "personalFacts"
-  | "memories"
-  | "insideJokes"
   | "game"
-  | "photos"
   | "forbidden"
   | "color"
   | "style"
+  | "deepIntro"
+  | "closePeople"
+  | "lifeContext"
+  | "personalFacts"
+  | "memories"
+  | "insideJokes"
+  | "photos"
   | "finale"
   | "recap"
 
@@ -344,15 +347,15 @@ export function recapCopy(ctx: AudienceCopyContext): {
 
   if (ctx.audience === "ME") {
     return {
-      title: "Votre cahier est prêt à être créé",
-      subtitle: "Voici un aperçu de ce que nous avons retenu.",
+      title: "Nous avons tout ce qu'il faut pour créer votre cahier",
+      subtitle: "Voici un aperçu — les touches personnelles restent un bonus.",
       forTitle: recipient || creator ? `Pour vous${creator ? `, ${creator}` : ""}` : "Pour vous",
       forSubtitle: "Pour vous",
       createdBy: null,
-      universesTitle: "Vos univers",
-      gamesTitle: "Vos jeux",
-      visualTitle: "Votre univers graphique",
-      personalizationTitle: "Votre personnalisation",
+      universesTitle: "Les bases — univers",
+      gamesTitle: "Jeux",
+      visualTitle: "Univers graphique",
+      personalizationTitle: "Touches personnelles",
       personalizationHint: null,
     }
   }
@@ -360,36 +363,34 @@ export function recapCopy(ctx: AudienceCopyContext): {
   if (ctx.audience === "OTHER_PERSON") {
     const forTitle = recipient ? `Pour ${recipient}` : "Pour quelqu'un"
     return {
-      title: "Votre cahier est prêt à être créé",
-      subtitle: "Voici un aperçu de ce que nous avons retenu.",
+      title: recipient
+        ? `Nous avons tout ce qu'il faut pour créer le cahier de ${recipient}`
+        : "Nous avons tout ce qu'il faut pour créer le cahier",
+      subtitle: "Voici un aperçu — les touches personnelles restent un bonus.",
       forTitle,
       forSubtitle: "Pour quelqu'un",
       createdBy: creator ? `Créé par ${creator}` : null,
-      universesTitle: recipient ? `Les univers ${deName(recipient)}` : "Ses univers",
-      gamesTitle: recipient ? `Les jeux ${deName(recipient)}` : "Jeux choisis",
+      universesTitle: recipient ? `Les bases — univers ${deName(recipient)}` : "Les bases — univers",
+      gamesTitle: recipient ? `Jeux ${deName(recipient)}` : "Jeux choisis",
       visualTitle: "Univers graphique",
-      personalizationTitle: recipient
-        ? `Personnalisation pour ${recipient}`
-        : "Personnalisation",
-      personalizationHint: recipient
-        ? `Ces éléments enrichissent le cahier ${deName(recipient)}.`
-        : null,
+      personalizationTitle: "Touches personnelles",
+      personalizationHint: null,
     }
   }
 
   const names = ctx.participantNames
   const forTitle = names.length ? names.join(" · ") : ctx.audience === "DUO" ? "Pour deux personnes" : "Pour un groupe"
   return {
-    title: "Le cahier est prêt à être créé",
-    subtitle: "Voici un aperçu de ce que nous avons retenu.",
+    title: "Nous avons tout ce qu'il faut pour créer le cahier",
+    subtitle: "Voici un aperçu — les touches personnelles restent un bonus.",
     forTitle,
     forSubtitle:
       ctx.audience === "DUO" ? "Pour deux personnes" : "Pour un groupe",
     createdBy: creator ? `Créé par ${creator}` : null,
-    universesTitle: "Univers",
+    universesTitle: "Les bases — univers",
     gamesTitle: "Jeux",
     visualTitle: "Univers graphique",
-    personalizationTitle: "Personnalisation",
+    personalizationTitle: "Touches personnelles",
     personalizationHint: null,
   }
 }
@@ -439,12 +440,17 @@ export function buildStepCopy(step: StepId, ctx: AudienceCopyContext): StepCopy 
       }
     case "personality":
       if (audience === "ME") {
-        return { navLabel: "Personnalité", title: "Votre personnalité" }
+        return {
+          navLabel: "Personnalité",
+          title: "Comment vous décririez-vous ?",
+          subtitle: "Choisissez quelques traits — 3 à 6 idéalement, 1 ou 2 suffisent.",
+        }
       }
       if (audience === "OTHER_PERSON") {
         return {
           navLabel: "Personnalité",
-          title: r ? `La personnalité ${deName(r)}` : "Sa personnalité",
+          title: r ? `Comment décririez-vous ${r} ?` : "Comment le/la décririez-vous ?",
+          subtitle: "Choisissez quelques traits — 3 à 6 idéalement, 1 ou 2 suffisent.",
         }
       }
       if (audience === "DUO") {
@@ -467,7 +473,7 @@ export function buildStepCopy(step: StepId, ctx: AudienceCopyContext): StepCopy 
         return {
           navLabel: "Goûts",
           title: "Ce que vous aimez",
-          subtitle: "Sélectionnez au moins 3 choses qui vous correspondent.",
+          subtitle: "Sélectionnez ce qui vous correspond — un seul intérêt suffit déjà.",
         }
       }
       if (audience === "OTHER_PERSON") {
@@ -475,8 +481,8 @@ export function buildStepCopy(step: StepId, ctx: AudienceCopyContext): StepCopy 
           navLabel: "Goûts",
           title: r ? `Ce que ${r} aime` : "Ce qu'il/elle aime",
           subtitle: r
-            ? `Sélectionnez au moins 3 choses qui correspondent à ${r}.`
-            : "Sélectionnez au moins 3 choses qui lui correspondent.",
+            ? `Sélectionnez ce qui correspond à ${r} — quelques intérêts suffisent.`
+            : "Sélectionnez ce qui lui correspond — quelques intérêts suffisent.",
         }
       }
       if (audience === "DUO") {
@@ -484,8 +490,8 @@ export function buildStepCopy(step: StepId, ctx: AudienceCopyContext): StepCopy 
           navLabel: "Goûts",
           title: participant ? "Ce que vous aimez ensemble" : "Ce qu'elles aiment ensemble",
           subtitle: participant
-            ? "Sélectionnez au moins 3 choses qui vous ressemblent à deux."
-            : "Sélectionnez au moins 3 choses qui les rassemblent.",
+            ? "Sélectionnez ce qui vous ressemble à deux."
+            : "Sélectionnez ce qui les rassemble.",
         }
       }
       return {
@@ -493,74 +499,100 @@ export function buildStepCopy(step: StepId, ctx: AudienceCopyContext): StepCopy 
         title: participant
           ? "Ce que vous aimez faire ensemble"
           : "Ce qu'ils aiment faire ensemble",
-        subtitle: "Sélectionnez au moins 3 choses qui correspondent au groupe.",
+        subtitle: "Sélectionnez ce qui correspond au groupe.",
+      }
+    case "deepIntro":
+      return {
+        navLabel: "Plus loin",
+        title: "Vous voulez le rendre encore plus personnel ?",
+        subtitle:
+          "Tout ce qui suit est facultatif. Ajoutez seulement ce qui vous vient facilement — le cahier fonctionne déjà très bien avec les bases.",
+      }
+    case "closePeople":
+      if (audience === "OTHER_PERSON") {
+        return {
+          navLabel: "Proches",
+          title: r
+            ? `Quelques personnes importantes autour ${deName(r)}`
+            : "Quelques personnes importantes autour d'elle/lui",
+          subtitle: "Prénoms seulement — facultatif. Passez si rien ne vous vient.",
+        }
+      }
+      if (audience === "ME") {
+        return {
+          navLabel: "Proches",
+          title: "Quelques personnes importantes autour de vous",
+          subtitle: "Prénoms seulement — facultatif.",
+        }
+      }
+      return {
+        navLabel: "Proches",
+        title: "D'autres personnes importantes ?",
+        subtitle: "Prénoms seulement — facultatif. Passez si rien ne vous vient.",
+      }
+    case "lifeContext":
+      return {
+        navLabel: "Contexte",
+        title: "Un peu de contexte de vie ?",
+        subtitle: "Quelques bascules simples — tout est facultatif.",
       }
     case "personalFacts":
       if (audience === "ME") {
         return {
           navLabel: "Détails",
-          title: "Quelques petits détails sur vous",
+          title: "Un petit détail vous vient en tête ?",
           subtitle:
-            "Ce sont souvent ces petites choses qui rendent le cahier vraiment personnel. Ajoutez au moins 3 petits détails. 5 à 8 permettent d'aller encore plus loin.",
+            "Plat préféré, habitude, expression… 0 réponse est parfaitement valide. Passez si rien ne vient.",
         }
       }
       if (audience === "OTHER_PERSON") {
         return {
           navLabel: "Détails",
           title: r
-            ? `Quelques petits détails ${surName(r)}`
-            : "Quelques petits détails sur cette personne",
-          subtitle: r
-            ? `Ces petites choses nous aideront à rendre son cahier encore plus personnel.`
-            : "Ajoutez au moins 3 petits détails. 5 à 8 rendent le cahier encore plus personnel.",
+            ? `Un petit détail ${surName(r)} ?`
+            : "Un petit détail sur cette personne ?",
+          subtitle:
+            "Plat préféré, habitude, expression… 0 réponse est parfaitement valide.",
         }
       }
       if (audience === "DUO") {
         return {
           navLabel: "Détails",
-          title: participant
-            ? "Quelques petits détails sur vous"
-            : "Quelques petits détails sur elles",
-          subtitle:
-            "Ajoutez au moins 3 détails. Précisez qui cela concerne — le libellé s'adapte.",
+          title: "Un petit détail vous vient en tête ?",
+          subtitle: "Facultatif. Précisez qui cela concerne si besoin.",
         }
       }
       return {
         navLabel: "Détails",
-        title: participant
-          ? "Les petites choses qui caractérisent votre groupe"
-          : "Les petites choses qui caractérisent le groupe",
-        subtitle:
-          "Ajoutez au moins 3 détails. Précisez qui cela concerne — le libellé s'adapte.",
+        title: "Un petit détail sur le groupe ?",
+        subtitle: "Facultatif. Passez si rien ne vient.",
       }
     case "memories":
       if (audience === "ME") {
         return {
           navLabel: "Souvenirs",
-          title: "Quelques moments qui vous ressemblent",
-          subtitle:
-            "Vous pouvez nous raconter un voyage marquant, une anecdote drôle, une expérience mémorable ou simplement un moment que vous aimez raconter.",
+          title: "Un souvenir vous vient en tête ?",
+          subtitle: "Facultatif. Ajoutez seulement ce qui vient facilement — ou passez.",
         }
       }
       if (audience === "OTHER_PERSON") {
         return {
           navLabel: "Souvenirs",
-          title: r ? `Quelques souvenirs avec ${r}` : "Quelques souvenirs partagés",
-          subtitle:
-            "Un souvenir partagé, une anecdote, un voyage… tout est bienvenu.",
+          title: r ? `Un souvenir avec ${r} ?` : "Un souvenir vous vient en tête ?",
+          subtitle: "Facultatif. Ajoutez seulement ce qui vient facilement — ou passez.",
         }
       }
       if (audience === "DUO") {
         return {
           navLabel: "Souvenirs",
-          title: participant ? "Vos souvenirs à deux" : "Quelques souvenirs sur eux",
-          subtitle: "Rencontre, voyage, anecdote drôle, habitude commune…",
+          title: participant ? "Un souvenir à deux ?" : "Un souvenir sur eux ?",
+          subtitle: "Facultatif. Rencontre, voyage, anecdote… ou passez.",
         }
       }
       return {
         navLabel: "Souvenirs",
-        title: participant ? "Les souvenirs de votre bande" : "Les souvenirs du groupe",
-        subtitle: "Souvenir culte, soirée, voyage, tradition…",
+        title: participant ? "Un souvenir de votre bande ?" : "Un souvenir du groupe ?",
+        subtitle: "Facultatif. Souvenir culte, soirée, voyage… ou passez.",
       }
     case "insideJokes":
       if (audience === "GROUP") {
@@ -593,23 +625,24 @@ export function buildStepCopy(step: StepId, ctx: AudienceCopyContext): StepCopy 
       if (audience === "ME") {
         return {
           navLabel: "Photos",
-          title: "Vos photos",
+          title: "Quelques photos ?",
           subtitle:
-            "Elles sont totalement facultatives, mais peuvent être utilisées pour rendre certaines pages encore plus personnelles.",
+            "Quelques photos peuvent ajouter des pages album à votre cahier, mais il fonctionnera très bien sans.",
         }
       }
       if (audience === "OTHER_PERSON") {
         return {
           navLabel: "Photos",
-          title: r ? `Photos pour le cahier ${deName(r)}` : "Quelques photos",
+          title: r ? `Quelques photos pour le cahier ${deName(r)} ?` : "Quelques photos ?",
           subtitle:
-            "Totalement facultatives — une légende ou une anecdote aident à les situer.",
+            "Quelques photos peuvent ajouter des pages album, mais le cahier fonctionnera très bien sans.",
         }
       }
       return {
         navLabel: "Photos",
-        title: "Photos",
-        subtitle: "Totalement facultatives — max. 10.",
+        title: "Quelques photos ?",
+        subtitle:
+          "Quelques photos peuvent ajouter des pages album, mais le cahier fonctionnera très bien sans.",
       }
     case "forbidden":
       if (audience === "ME") {

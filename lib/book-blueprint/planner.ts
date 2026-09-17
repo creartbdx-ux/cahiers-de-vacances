@@ -2,6 +2,13 @@ import { createRng } from "@/lib/game-engines/random"
 import { resolveCoverDisplayName, resolveCoverSubtitle } from "@/lib/mini-book/cover-name"
 import { hashSeed, resolveBookVisualIdentity } from "@/lib/mini-book/visual-identity"
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
+import {
+  buildPersonalizationTouches,
+  canSatisfyDataNeed,
+  computePersonalizationCapabilities,
+  normalizePersonalizationDepth,
+  type PersonalizationCapabilities,
+} from "@/lib/questionnaire/capabilities"
 import type { Palette, Style } from "@/lib/supabase/types"
 import {
   planPhotoPagesFromProfile,
@@ -17,6 +24,7 @@ import {
   countUsablePhotosExport,
   quizPersonalAllowed,
   resolveCompositionTargets,
+  resolveDepth,
 } from "./audience-rules"
 import { packCorrections, type CorrectionNeed } from "./corrections"
 import { computeCapabilityGaps } from "./gaps"
@@ -29,6 +37,7 @@ import type {
   BlueprintSection,
   BlueprintStats,
   CompositionTargets,
+  PageDataNeed,
   PageFamily,
   VisualRole,
 } from "./types"
@@ -63,6 +72,11 @@ export function buildBookBlueprint(input: BuildBookBlueprintInput): BookBlueprin
     palettes: input.palettes,
   })
 
+  const caps = computePersonalizationCapabilities(input.profile)
+  const depth = resolveDepth(input.richnessLevel, caps)
+  const touches = buildPersonalizationTouches(input.profile)
+  void touches // available for future title/label personalization without changing engines
+
   const targets = resolveCompositionTargets({
     profile: input.profile,
     richnessLevel: input.richnessLevel,
@@ -79,6 +93,7 @@ export function buildBookBlueprint(input: BuildBookBlueprintInput): BookBlueprin
     targets,
     profile: input.profile,
     richnessLevel: input.richnessLevel,
+    caps,
     universes,
     rng,
     seed: input.seed,
@@ -163,7 +178,8 @@ export function buildBookBlueprint(input: BuildBookBlueprintInput): BookBlueprin
     bookProjectId: input.bookProjectId,
     seed: input.seed,
     audience: input.profile.audience,
-    richnessLevel: input.richnessLevel,
+    richnessLevel: normalizePersonalizationDepth(input.richnessLevel),
+    personalizationDepth: depth,
     targetInteriorPages,
     cover: {
       displayName: resolveCoverDisplayName(input.profile),
@@ -241,11 +257,12 @@ function buildIntentBag(input: {
   targets: CompositionTargets
   profile: BookProfileV1
   richnessLevel: RichnessLevel
+  caps: PersonalizationCapabilities
   universes: string[]
   rng: ReturnType<typeof createRng>
   seed: string
 }): DraftIntent[] {
-  const { targets, profile, universes, rng, seed } = input
+  const { targets, profile, caps, universes, rng, seed } = input
   const bag: DraftIntent[] = []
   let seq = 0
   const nextId = () => `${seed}:intent:${seq++}`
@@ -276,29 +293,31 @@ function buildIntentBag(input: {
     })
   }
 
-  // --- Photo album pages (collage / timeline) — no independent memories ---
-  const photoPlan = planPhotoPagesFromProfile(
-    {
-      ...profile,
-      photos: (profile.photos ?? [])
-        .filter((p) => p.useAuthorized && Boolean(p.storagePath?.trim()))
-        .slice(0, targets.photoSlots || (profile.photos?.length ?? 0)),
-    },
-    `${seed}:photo-pages`,
-  )
-  for (const page of photoPlan.pages) {
-    bag.push(intentFromPhotoPage(page, nextId))
+  // --- Photo album pages — only when capabilities allow ---
+  if (canSatisfyDataNeed("PHOTO", caps) && targets.photoSlots > 0) {
+    const photoPlan = planPhotoPagesFromProfile(
+      {
+        ...profile,
+        photos: (profile.photos ?? [])
+          .filter((p) => p.useAuthorized && Boolean(p.storagePath?.trim()))
+          .slice(0, targets.photoSlots || (profile.photos?.length ?? 0)),
+      },
+      `${seed}:photo-pages`,
+    )
+    for (const page of photoPlan.pages) {
+      bag.push(intentFromPhotoPage(page, nextId))
+    }
   }
 
   // Memories feed personal games (sources), not dedicated pages
   void getPersonalGameSources(profile)
 
-  // --- Personal games ---
+  // --- Personal games — soft skip DEEP when not eligible; never surface rejection ---
   let personalLeft = targets.personalGameSlots
-  const allowQuizPersonal = quizPersonalAllowed(
-    profile.audience,
-    profile.personalFacts?.length ?? 0,
-  )
+  const allowQuizPersonal =
+    canSatisfyDataNeed("DEEP_PERSONAL", caps) &&
+    quizPersonalAllowed(profile.audience, profile.personalFacts?.length ?? 0)
+
   if (allowQuizPersonal && personalLeft > 0 && (profile.audience === "DUO" || profile.audience === "GROUP")) {
     bag.push({
       archetype: getArchetype("PERSONAL_QUIZ"),
@@ -308,6 +327,7 @@ function buildIntentBag(input: {
     })
     personalLeft--
   }
+
   while (personalLeft > 0) {
     if (profile.audience === "DUO" && personalLeft > 0) {
       bag.push({
@@ -327,18 +347,24 @@ function buildIntentBag(input: {
       personalLeft--
       if (personalLeft <= 0) break
     }
+    // LIGHT_PERSONAL reflection — works with name/traits alone
     bag.push({
       archetype: getArchetype("PERSONAL_REFLECTION"),
       tempId: nextId(),
-      sourceNeeds: ["memories"],
-      reason: "Page personnelle ludique / contemplative (non interrogatoire)",
+      sourceNeeds: caps.hasMemories ? ["memories"] : ["identity"],
+      reason: caps.hasMemories
+        ? "Page personnelle ludique / contemplative (non interrogatoire)"
+        : "Page légère personnalisée (identité / traits)",
     })
     personalLeft--
   }
 
   // Fill remaining personal block with reflection if photo+games < block
-  const personalUsed = photoPlan.pages.length + targets.personalGameSlots
-  let personalPad = Math.max(0, targets.personalBlock - personalUsed)
+  const photoUsed = bag.filter(
+    (b) =>
+      b.archetype.id === "PHOTO_COLLAGE_PAGE" || b.archetype.id === "PHOTO_TIMELINE_PAGE",
+  ).length
+  let personalPad = Math.max(0, targets.personalBlock - photoUsed - targets.personalGameSlots)
   while (personalPad > 0) {
     bag.push({
       archetype: getArchetype("PERSONAL_REFLECTION"),
@@ -348,7 +374,7 @@ function buildIntentBag(input: {
     personalPad--
   }
 
-  // --- Quick / light ---
+  // --- Quick / light — prefer NEUTRAL when depth is LIGHT ---
   let quick = targets.quickLight
   while (quick > 0) {
     if ((profile.audience === "GROUP" || profile.audience === "DUO") && quick > 0 && rng.next() > 0.4) {
@@ -360,7 +386,8 @@ function buildIntentBag(input: {
       quick--
       continue
     }
-    if (rng.next() > 0.45) {
+    const preferNeutral = caps.depth === "LIGHT" || rng.next() > 0.55
+    if (!preferNeutral && canSatisfyDataNeed("LIGHT_PERSONAL", caps)) {
       bag.push({
         archetype: getArchetype("PERSONAL_QUICK_GAME"),
         tempId: nextId(),
@@ -370,7 +397,7 @@ function buildIntentBag(input: {
       bag.push({
         archetype: getArchetype("LIGHT_ACTIVITY"),
         tempId: nextId(),
-        reason: "Activité légère manquante",
+        reason: "Activité légère / neutre",
       })
     }
     quick--
@@ -725,6 +752,18 @@ function computeStats(pages: BlueprintPageSlot[]): BlueprintStats {
       (p.sourceMemoryIds?.length ?? 0) > 0,
   ).length
 
+  const byDataNeed: Record<PageDataNeed, number> = {
+    NEUTRAL: 0,
+    THEME: 0,
+    LIGHT_PERSONAL: 0,
+    DEEP_PERSONAL: 0,
+    PHOTO: 0,
+  }
+  for (const p of pages) {
+    const need = getArchetype(p.archetypeId).dataNeed ?? inferDataNeed(p)
+    byDataNeed[need]++
+  }
+
   return {
     interiorPageCount: pages.length,
     byFamily,
@@ -745,5 +784,13 @@ function computeStats(pages: BlueprintPageSlot[]): BlueprintStats {
     correctionPages: byFamily.CORRECTION,
     readyThemeGamePages,
     missingMechanicPages,
+    byDataNeed,
   }
+}
+
+function inferDataNeed(p: BlueprintPageSlot): PageDataNeed {
+  if (p.family === "PHOTO") return "PHOTO"
+  if (p.family === "THEME_GAME") return "THEME"
+  if (p.personalizationType === "PERSONAL") return "LIGHT_PERSONAL"
+  return "NEUTRAL"
 }

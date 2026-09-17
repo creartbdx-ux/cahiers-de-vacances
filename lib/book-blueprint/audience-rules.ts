@@ -1,4 +1,10 @@
 import type { BookProfileV1, RichnessLevel } from "@/lib/questionnaire/types"
+import {
+  computePersonalizationCapabilities,
+  normalizePersonalizationDepth,
+  type PersonalizationCapabilities,
+  type PersonalizationDepth,
+} from "@/lib/questionnaire/capabilities"
 import { planPhotoPagesFromProfile } from "@/lib/photo-pages"
 import type { CompositionTargets } from "./types"
 
@@ -16,8 +22,25 @@ function countMemories(profile: BookProfileV1): number {
   return (profile.memories ?? []).filter((m) => m.text?.trim()).length
 }
 
+function resolveDepth(
+  richnessLevel: RichnessLevel,
+  caps: PersonalizationCapabilities,
+): PersonalizationDepth {
+  // Prefer capability-derived depth; fall back to normalized stored level
+  const fromLevel = normalizePersonalizationDepth(richnessLevel)
+  // If stored level is richer legacy ENOUGH but caps say LIGHT, trust caps when profile is present
+  if (caps.depth === "RICH" || fromLevel === "RICH") {
+    return caps.depth === "RICH" ? "RICH" : fromLevel === "RICH" ? "RICH" : caps.depth
+  }
+  if (caps.depth === "PERSONALIZED" || fromLevel === "PERSONALIZED") {
+    return "PERSONALIZED"
+  }
+  return "LIGHT"
+}
+
 /**
  * Soft composition targets for ~50 interior pages.
+ * LIGHT profiles still get a full book (NEUTRAL + THEME + LIGHT_PERSONAL).
  * Photos → album pages. Memories → personal game sources (not pages).
  */
 export function resolveCompositionTargets(input: {
@@ -28,6 +51,8 @@ export function resolveCompositionTargets(input: {
   seed?: string
 }): CompositionTargets {
   const { profile, richnessLevel, targetInteriorPages: N } = input
+  const caps = computePersonalizationCapabilities(profile)
+  const depth = resolveDepth(richnessLevel, caps)
   const scale = N / 50
   const audience = profile.audience
   const photos = countUsablePhotos(profile)
@@ -56,36 +81,44 @@ export function resolveCompositionTargets(input: {
     quickLight = Math.round(6 * scale)
   }
 
-  if (richnessLevel === "RICH") {
+  if (depth === "RICH") {
     personalBlock += Math.round(2 * scale)
     mainGames -= Math.round(1 * scale)
-  } else if (richnessLevel === "INSUFFICIENT") {
-    personalBlock = Math.max(2, personalBlock - Math.round(4 * scale))
+  } else if (depth === "LIGHT") {
+    // More theme/neutral, fewer deep-personal slots — still a full book
+    personalBlock = Math.max(Math.round(4 * scale), personalBlock - Math.round(3 * scale))
     mainGames += Math.round(2 * scale)
+  } else {
+    // PERSONALIZED — modest boost for light-personal
+    personalBlock += Math.round(1 * scale)
   }
 
   // Photo budget = usable album photos (planner packs into pages)
   let photoSlots = 0
-  if (photos === 0) photoSlots = 0
+  if (photos === 0 || !caps.hasPhotos) photoSlots = 0
   else if (photos <= 3) photoSlots = clamp(photos, 1, Math.round(4 * scale))
   else photoSlots = clamp(Math.min(photos, Math.round(8 * scale)), 2, Math.round(10 * scale))
 
   // Memories remain available for games — slot count for budgeting / hints only
   let memorySlots = 0
-  if (memories === 0) memorySlots = 0
+  if (memories === 0 || !caps.hasMemories) memorySlots = 0
   else if (memories <= 2) memorySlots = memories
   else memorySlots = clamp(Math.min(memories, Math.round(5 * scale)), 2, Math.round(6 * scale))
 
-  if (richnessLevel === "RICH" && memories > 0) {
+  if (depth === "RICH" && memories > 0) {
     memorySlots = clamp(memorySlots + 1, 0, Math.round(7 * scale))
   }
 
   let personalGameSlots = 0
   if (audience === "ME" || audience === "OTHER_PERSON") {
-    // Memories enrich personal games when available
-    const base =
-      richnessLevel === "RICH" ? Math.round(2 * scale) : Math.round(1 * scale)
-    personalGameSlots = memories >= 2 ? Math.max(base, Math.round(2 * scale)) : base
+    if (depth === "RICH" && memories >= 2) {
+      personalGameSlots = Math.round(2 * scale)
+    } else if (depth === "PERSONALIZED" || caps.hasClosePeople || caps.hasTraits) {
+      personalGameSlots = Math.round(2 * scale)
+    } else {
+      // LIGHT: still some light-personal pages (name/traits/age touches)
+      personalGameSlots = Math.round(2 * scale)
+    }
   } else if (audience === "DUO") {
     personalGameSlots = Math.round(4 * scale)
   } else {
@@ -160,6 +193,10 @@ export function resolveCompositionTargets(input: {
   }
 }
 
+/**
+ * Deep personal quiz only when enough personal facts — soft skip otherwise.
+ * Never surfaces as customer-facing rejection.
+ */
 export function quizPersonalAllowed(
   audience: BookProfileV1["audience"],
   personalFactCount: number,
@@ -175,3 +212,5 @@ export function countUsablePhotosExport(profile: BookProfileV1): number {
 export function countMemoriesExport(profile: BookProfileV1): number {
   return countMemories(profile)
 }
+
+export { resolveDepth }

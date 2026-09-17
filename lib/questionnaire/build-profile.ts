@@ -69,6 +69,10 @@ export function buildBookProfile(questionnaire: QuestionnaireV1): BookProfileV1 
       id: p.id,
       firstName: p.firstName.trim(),
       ...(p.ageBracket ? { ageBracket: p.ageBracket } : {}),
+      ...(p.birthDate?.trim() ? { birthDate: p.birthDate.trim() } : {}),
+      ...(typeof p.approximateAge === "number" && p.approximateAge > 0
+        ? { approximateAge: p.approximateAge }
+        : {}),
       ...(p.nickname?.trim() ? { nickname: p.nickname.trim() } : {}),
       ...(p.relationship?.trim() ? { relationship: p.relationship.trim() } : {}),
       ...(p.personalTrait?.trim() ? { personalTrait: p.personalTrait.trim() } : {}),
@@ -146,6 +150,36 @@ export function buildBookProfile(questionnaire: QuestionnaireV1): BookProfileV1 
 
   if (questionnaire.duoType) profile.duoType = questionnaire.duoType
   if (questionnaire.groupName?.trim()) profile.groupName = questionnaire.groupName.trim()
+
+  const closePeople = (questionnaire.closePeople ?? [])
+    .filter((c) => c.firstName.trim())
+    .map((c) => ({
+      id: c.id,
+      firstName: c.firstName.trim(),
+      ...(c.relationship?.trim() ? { relationship: c.relationship.trim() } : {}),
+    }))
+  if (closePeople.length) profile.closePeople = closePeople
+
+  if (questionnaire.lifeContext) {
+    const lc = questionnaire.lifeContext
+    const cleaned: NonNullable<BookProfileV1["lifeContext"]> = {}
+    if (lc.hasChildren === true || lc.hasChildren === false) cleaned.hasChildren = lc.hasChildren
+    if (typeof lc.childrenCount === "number") cleaned.childrenCount = lc.childrenCount
+    if (lc.childrenNames?.some((n) => n.trim())) {
+      cleaned.childrenNames = lc.childrenNames.map((n) => n.trim()).filter(Boolean)
+    }
+    if (lc.inCouple === true || lc.inCouple === false) cleaned.inCouple = lc.inCouple
+    if (lc.hasFamilyNearby === true || lc.hasFamilyNearby === false) {
+      cleaned.hasFamilyNearby = lc.hasFamilyNearby
+    }
+    if (lc.hasPet === true || lc.hasPet === false) cleaned.hasPet = lc.hasPet
+    if (lc.petNames?.some((n) => n.trim())) {
+      cleaned.petNames = lc.petNames.map((n) => n.trim()).filter(Boolean)
+    }
+    if (lc.livingSituation) cleaned.livingSituation = lc.livingSituation
+    if (lc.notes?.trim()) cleaned.notes = lc.notes.trim()
+    if (Object.keys(cleaned).length) profile.lifeContext = cleaned
+  }
 
   return profile
 }

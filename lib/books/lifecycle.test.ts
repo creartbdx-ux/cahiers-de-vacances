@@ -79,11 +79,19 @@ test("Editorial Lab uniquement COMPLETED + profil valide", () => {
       richnessLevel: "ENOUGH",
     }),
   )
+  // Legacy INSUFFICIENT no longer blocks lab — depth is not quality
   assert.ok(
-    !canUseInEditorialLab({
+    canUseInEditorialLab({
       status: BOOK_STATUS.QUESTIONNAIRE_COMPLETED,
       profile,
       richnessLevel: "INSUFFICIENT",
+    }),
+  )
+  assert.ok(
+    canUseInEditorialLab({
+      status: BOOK_STATUS.QUESTIONNAIRE_COMPLETED,
+      profile,
+      richnessLevel: "LIGHT",
     }),
   )
 })

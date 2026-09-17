@@ -5,7 +5,6 @@ import {
   MAX_TRAITS_SOLO,
   MIN_GROUP_SIZE,
   MIN_INTERESTS,
-  MIN_PERSONAL_FACTS,
   MIN_TRAITS_SOLO,
   type QuestionnaireV1,
 } from "./types"
@@ -15,6 +14,18 @@ import {
   needsCreatorParticipantChoice,
 } from "./creator"
 import { buildJourneySteps, type StepId } from "./journey"
+
+/** CORE steps that must pass for book creation. Deep steps are never required. */
+const CORE_STEPS: StepId[] = [
+  "audience",
+  "participants",
+  "personality",
+  "interests",
+  "game",
+  "forbidden",
+  "color",
+  "style",
+]
 
 export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
   const errors: string[] = []
@@ -41,7 +52,7 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
         else {
           const p = q.participants[0]
           if (!p.firstName.trim()) errors.push("Le prénom est obligatoire.")
-          if (!p.ageBracket) errors.push("L'âge ou la tranche d'âge est obligatoire.")
+          // Age / birth preferred but optional — never block CORE
           if (q.audience === "OTHER_PERSON" && !p.relationship?.trim()) {
             errors.push("Indiquez votre lien avec cette personne.")
           }
@@ -50,7 +61,6 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
         if (q.participants.length !== 2) errors.push("Deux participants sont requis.")
         q.participants.forEach((p, i) => {
           if (!p.firstName.trim()) errors.push(`Prénom obligatoire pour la personne ${i + 1}.`)
-          if (!p.ageBracket) errors.push(`Âge obligatoire pour la personne ${i + 1}.`)
         })
         if (!q.duoType) errors.push("Choisissez le type de duo.")
       } else if (q.audience === "GROUP") {
@@ -82,7 +92,7 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
         const id = q.participants[0]?.id
         const traits = id ? q.personality.traitsByParticipantId[id] ?? [] : []
         if (traits.length < MIN_TRAITS_SOLO) {
-          errors.push(`Choisissez au moins ${MIN_TRAITS_SOLO} traits de personnalité.`)
+          errors.push(`Choisissez au moins ${MIN_TRAITS_SOLO} trait de personnalité.`)
         }
         if (traits.length > MAX_TRAITS_SOLO) {
           errors.push(`Maximum ${MAX_TRAITS_SOLO} traits.`)
@@ -104,15 +114,18 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
     }
     case "interests": {
       if (q.interestUniverseIds.length < MIN_INTERESTS) {
-        errors.push(`Sélectionnez au moins ${MIN_INTERESTS} centres d'intérêt.`)
+        errors.push("Sélectionnez au moins un centre d'intérêt.")
       }
       break
     }
+    case "deepIntro":
+    case "closePeople":
+    case "lifeContext":
+      // Optional light personalization — never blocking
+      break
     case "personalFacts": {
       const facts = q.personalFacts.filter((f) => f.value.trim())
-      if (facts.length < MIN_PERSONAL_FACTS) {
-        errors.push(`Ajoutez au moins ${MIN_PERSONAL_FACTS} petits détails.`)
-      }
+      // Deep personalization — 0 is valid
       if (facts.length > MAX_PERSONAL_FACTS) {
         errors.push(`Maximum ${MAX_PERSONAL_FACTS} détails.`)
       }
@@ -142,7 +155,6 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
           )
           break
         }
-        // "uploading" is not a validation error — UI shows a neutral banner and blocks Next.
         if (!photo.useAuthorized) {
           errors.push("Chaque photo doit être autorisée pour usage dans le cahier.")
           break
@@ -174,12 +186,24 @@ export function validateStep(step: StepId, q: QuestionnaireV1): string[] {
   return errors
 }
 
+/**
+ * Final validation — CORE only.
+ * Deep fields (facts, memories, jokes, photos, close people) never required.
+ */
 export function validateQuestionnaireComplete(q: QuestionnaireV1): string[] {
   if (!q.audience) return ["Audience manquante."]
-  const steps = buildJourneySteps(q.audience, q.creatorIsParticipant).filter((s) => s !== "recap")
+  const journey = buildJourneySteps(q.audience, q.creatorIsParticipant)
+  const stepsToCheck = CORE_STEPS.filter((s) => journey.includes(s))
   const errors: string[] = []
-  for (const step of steps) {
+  for (const step of stepsToCheck) {
     errors.push(...validateStep(step, q))
+  }
+  // Soft caps on optional deep content still enforced
+  if (journey.includes("personalFacts")) {
+    errors.push(...validateStep("personalFacts", q))
+  }
+  if (journey.includes("photos")) {
+    errors.push(...validateStep("photos", q))
   }
   if (q.audience === "GROUP" && q.participants.length > MAX_GROUP_SIZE) {
     errors.push(`GROUP > ${MAX_GROUP_SIZE} refusé.`)
@@ -200,4 +224,17 @@ export function withDerivedAudienceFields(q: QuestionnaireV1): QuestionnaireV1 {
     ...q,
     creatorIsParticipant: deriveCreatorIsParticipant(q.audience, q.creatorIsParticipant),
   }
+}
+
+/** True when CORE fields alone are enough to create the book. */
+export function isCoreComplete(q: QuestionnaireV1): boolean {
+  if (!q.audience) return false
+  for (const step of CORE_STEPS) {
+    if (step === "audience") {
+      if (validateStep("audience", q).length > 0) return false
+      continue
+    }
+    if (validateStep(step, q).length > 0) return false
+  }
+  return true
 }

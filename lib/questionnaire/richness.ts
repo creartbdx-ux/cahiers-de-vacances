@@ -1,12 +1,15 @@
 import {
   MIN_INTERESTS,
-  MIN_PERSONAL_FACTS,
   MIN_TRAITS_SOLO,
   type BookProfileV1,
   type QuestionnaireV1,
   type RichnessResult,
 } from "./types"
 import { deriveCreatorIsParticipant } from "./audience"
+import {
+  computePersonalizationCapabilities,
+  computeQuestionnaireCapabilities,
+} from "./capabilities"
 
 function soloTraitsCount(q: QuestionnaireV1): number {
   const id = q.participants[0]?.id
@@ -25,16 +28,22 @@ function personalityOk(q: QuestionnaireV1): boolean {
   return (q.personality.groupTraits?.length ?? 0) >= 3
 }
 
+function participantHasAgeSignal(p: QuestionnaireV1["participants"][number]): boolean {
+  if (p.birthDate?.trim()) return true
+  if (typeof p.approximateAge === "number" && p.approximateAge > 0) return true
+  return Boolean(p.ageBracket)
+}
+
 function participantsOk(q: QuestionnaireV1): boolean {
   if (!q.audience) return false
   if (q.audience === "ME" || q.audience === "OTHER_PERSON") {
     const p = q.participants[0]
-    return Boolean(p?.firstName.trim() && p.ageBracket)
+    return Boolean(p?.firstName.trim())
   }
   if (q.audience === "DUO") {
     return (
       q.participants.length === 2 &&
-      q.participants.every((p) => p.firstName.trim() && p.ageBracket) &&
+      q.participants.every((p) => p.firstName.trim()) &&
       Boolean(q.duoType)
     )
   }
@@ -46,8 +55,9 @@ function participantsOk(q: QuestionnaireV1): boolean {
 }
 
 /**
- * Deterministic richness score. Does not block with fake percentages —
- * returns ENOUGH / RICH (or INSUFFICIENT with missing list).
+ * Personalization depth from questionnaire matter.
+ * LIGHT / PERSONALIZED / RICH — never client-facing "insufficient quality".
+ * Incomplete CORE → canCreate false + missing list; depth stays LIGHT.
  */
 export function calculateProfileRichness(
   questionnaire: QuestionnaireV1,
@@ -71,10 +81,7 @@ export function calculateProfileRichness(
   if (!participantsOk(questionnaire)) missing.push("participants")
   if (!personalityOk(questionnaire)) missing.push("personnalité")
   if (questionnaire.interestUniverseIds.length < MIN_INTERESTS) {
-    missing.push(`centres d'intérêt (min ${MIN_INTERESTS})`)
-  }
-  if (questionnaire.personalFacts.filter((f) => f.value.trim()).length < MIN_PERSONAL_FACTS) {
-    missing.push(`informations personnelles (min ${MIN_PERSONAL_FACTS})`)
+    missing.push("centres d'intérêt")
   }
   if (!questionnaire.gamePreferences.likedTypes?.length) missing.push("préférences de jeux")
   const d = questionnaire.gamePreferences.difficulty
@@ -84,52 +91,66 @@ export function calculateProfileRichness(
     missing.push("style / palette")
   }
 
-  const memories = (profile?.memories ?? questionnaire.memories).filter((m) => m.text.trim())
-  const jokes = (profile?.insideJokes ?? questionnaire.insideJokes).filter((j) => j.text.trim())
-  const photos = (profile?.photos ?? questionnaire.photos).filter((p) => {
-    if ("uploadStatus" in p && (p as { uploadStatus?: string }).uploadStatus === "error") {
-      return false
-    }
-    return true
-  })
+  const caps = profile
+    ? computePersonalizationCapabilities(profile)
+    : computeQuestionnaireCapabilities(questionnaire)
 
-  if (memories.length > 0) bonuses.push("souvenirs")
-  if (jokes.length > 0) bonuses.push("private jokes")
-  if (photos.length > 0) bonuses.push("photos")
-  if (questionnaire.personalFacts.filter((f) => f.value.trim()).length >= 5) {
-    bonuses.push("détails personnels enrichis")
+  if (questionnaire.participants.some(participantHasAgeSignal)) {
+    bonuses.push("âge / date de naissance")
   }
+  if (caps.hasClosePeople) bonuses.push("proches")
+  if (caps.hasFamilyContext) bonuses.push("contexte de vie")
+  if (caps.hasPersonalFacts) bonuses.push("petits détails")
+  if (caps.hasMemories) bonuses.push("souvenirs")
+  if (caps.hasInsideJokes) bonuses.push("private jokes")
+  if (caps.hasPhotos) bonuses.push("photos")
 
-  if (missing.length > 0) {
+  const canCreate = missing.length === 0
+  const depth = canCreate ? caps.depth : "LIGHT"
+
+  if (!canCreate) {
     return {
-      level: "INSUFFICIENT",
+      level: "LIGHT",
+      depth: "LIGHT",
+      canCreate: false,
       missing,
       bonuses,
-      message: "Il manque encore quelques informations essentielles pour personnaliser le cahier.",
+      message:
+        "Il manque encore quelques informations de base pour créer le cahier. Les souvenirs et photos restent facultatifs.",
     }
   }
 
-  const rich =
-    memories.length >= 1 ||
-    jokes.length >= 1 ||
-    photos.length >= 1 ||
-    questionnaire.personalFacts.filter((f) => f.value.trim()).length >= 5
-
-  if (rich) {
+  if (depth === "RICH") {
     return {
       level: "RICH",
+      depth: "RICH",
+      canCreate: true,
       missing: [],
       bonuses,
       message:
-        "Votre cahier contient déjà assez d'informations pour être personnalisé. Les souvenirs, détails et photos le rendront encore plus unique.",
+        "Nous avons tout ce qu'il faut pour créer le cahier — avec une personnalisation très riche.",
+    }
+  }
+
+  if (depth === "PERSONALIZED") {
+    return {
+      level: "PERSONALIZED",
+      depth: "PERSONALIZED",
+      canCreate: true,
+      missing: [],
+      bonuses,
+      message:
+        "Nous avons déjà assez d'informations pour créer le cahier. Les touches personnelles le rendront encore plus unique.",
     }
   }
 
   return {
-    level: "ENOUGH",
+    level: "LIGHT",
+    depth: "LIGHT",
+    canCreate: true,
     missing: [],
     bonuses,
     message:
-      "Votre cahier contient déjà assez d'informations pour être personnalisé. Ajoutez encore quelques souvenirs ou détails si vous souhaitez le rendre encore plus unique.",
+      "Nous avons déjà assez d'informations pour créer le cahier. Vous pouvez ajouter des touches personnelles si vous le souhaitez.",
   }
 }

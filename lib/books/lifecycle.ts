@@ -73,9 +73,12 @@ export function questionnaireProgressPercent(q: QuestionnaireV1 | null): number 
         (q.personality.groupTraits?.length ?? 0) > 0)
     ) {
       done += 1
-    } else if (step === "interests" && q.interestUniverseIds.length >= 3) done += 1
-    else if (step === "personalFacts" && q.personalFacts.filter((f) => f.value.trim()).length >= 3) {
-      done += 1
+    } else if (step === "interests" && q.interestUniverseIds.length >= 1) done += 1
+    else if (step === "deepIntro") done += 0.5
+    else if (step === "closePeople") done += 0.25
+    else if (step === "lifeContext") done += 0.25
+    else if (step === "personalFacts" && q.personalFacts.filter((f) => f.value.trim()).length >= 1) {
+      done += 0.5
     } else if (step === "game" && q.gamePreferences.likedTypes?.length && q.gamePreferences.difficulty) {
       done += 1
     } else if (step === "forbidden" && q.forbiddenTopics?.answered) done += 1
@@ -115,7 +118,7 @@ export function canUseInEditorialLab(input: {
 }): boolean {
   if (!isQuestionnaireCompleted(input.status)) return false
   if (!input.profile) return false
-  if (input.richnessLevel === "INSUFFICIENT") return false
+  // Legacy INSUFFICIENT no longer blocks — CORE-complete profiles are lab-ready
   return true
 }
 
